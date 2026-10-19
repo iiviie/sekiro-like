@@ -12,6 +12,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
+local Assets = require(ReplicatedStorage.Shared.Assets)
 local CombatHUD = require(script.Parent.CombatHUD)
 local Round = require(ReplicatedStorage.Shared.Round)
 local Types = require(ReplicatedStorage.Shared.Types)
@@ -21,7 +22,6 @@ local state = Round.state()
 
 local FONT = Enum.Font.Garamond
 local PARCHMENT = Color3.fromRGB(232, 222, 200)
-local BRONZE = Color3.fromRGB(150, 122, 82)
 local GOLD = Color3.fromRGB(240, 200, 110)
 local CRIMSON = Color3.fromRGB(200, 40, 34)
 local FEED_LIFETIME = 6
@@ -65,30 +65,28 @@ local function buildScreen()
 	screen.ResetOnSpawn = false
 	screen.IgnoreGuiInset = true
 
-	-- Phase banner: a title flanked by thin rules, with a quieter line beneath.
+	-- Phase banner: spaced small caps over the gold ornament, a quieter line beneath.
 	local banner = Instance.new("Frame")
 	banner.BackgroundTransparency = 1
 	banner.AnchorPoint = Vector2.new(0.5, 0)
-	banner.Position = UDim2.new(0.5, 0, 0, 18)
-	banner.Size = UDim2.fromOffset(420, 52)
+	banner.Position = UDim2.new(0.5, 0, 0, 16)
+	banner.Size = UDim2.fromOffset(460, 64)
 	banner.Parent = screen
 
-	phaseLabel = label(banner, 24, PARCHMENT)
-	phaseLabel.Size = UDim2.new(1, 0, 0, 26)
-	for _, side in { -1, 1 } do
-		local rule = Instance.new("Frame")
-		rule.AnchorPoint = Vector2.new(0.5, 0.5)
-		rule.Position = UDim2.new(0.5, side * 150, 0, 13)
-		rule.Size = UDim2.fromOffset(90, 1)
-		rule.BackgroundColor3 = BRONZE
-		rule.BackgroundTransparency = 0.3
-		rule.BorderSizePixel = 0
-		rule.Parent = banner
-	end
-	subLabel = label(banner, 17, PARCHMENT)
-	subLabel.TextTransparency = 0.25
-	subLabel.Position = UDim2.fromOffset(0, 28)
-	subLabel.Size = UDim2.new(1, 0, 0, 20)
+	phaseLabel = label(banner, 21, PARCHMENT)
+	phaseLabel.Size = UDim2.new(1, 0, 0, 24)
+	local divider = Instance.new("ImageLabel")
+	divider.BackgroundTransparency = 1
+	divider.Image = Assets.UI.PostureOrnament
+	divider.ImageTransparency = 0.15
+	divider.AnchorPoint = Vector2.new(0.5, 0.5)
+	divider.Position = UDim2.new(0.5, 0, 0, 33)
+	divider.Size = UDim2.fromOffset(200, 22)
+	divider.Parent = banner
+	subLabel = label(banner, 16, PARCHMENT)
+	subLabel.TextTransparency = 0.3
+	subLabel.Position = UDim2.fromOffset(0, 44)
+	subLabel.Size = UDim2.new(1, 0, 0, 18)
 
 	-- Kill feed, top-right.
 	feed = Instance.new("Frame")
@@ -263,15 +261,20 @@ end
 
 ---------------------------------------------------------------------------------------
 
+-- "Intermission" -> "I N T E R M I S S I O N", the way Souls games set their titles.
+local function spaced(text: string): string
+	return (string.upper(text):gsub("(.)", "%1 ")):sub(1, -2)
+end
+
 local function refreshBanner()
 	local phase = Round.phase()
 	local remaining = Round.endsAt() - now()
 	if phase == "Intermission" then
-		phaseLabel.Text = "Intermission"
+		phaseLabel.Text = spaced("Intermission")
 		subLabel.Text = `The royale begins in {clock(remaining)}`
 	elseif phase == "Match" then
 		local alive = state:GetAttribute("Alive") or 0
-		phaseLabel.Text = `{alive} Remain`
+		phaseLabel.Text = spaced(`{alive} Remain`)
 		local shrinkStart = state:GetAttribute("ZoneShrinkStart") or 0
 		if now() < shrinkStart then
 			subLabel.Text = `The mist closes in {clock(shrinkStart - now())}`
@@ -279,14 +282,14 @@ local function refreshBanner()
 			subLabel.Text = `Time left  {clock(remaining)}`
 		end
 	else
-		phaseLabel.Text = "The duel is decided"
+		phaseLabel.Text = spaced("Decided")
 		subLabel.Text = `Next round in {clock(remaining)}`
 	end
 end
 
 local function onRoundEvent(kind: string, data: { [string]: any })
 	if kind == "MatchStart" then
-		CombatHUD.splash("決闘", `{data.fighters} fighters enter. One leaves.`, PARCHMENT, 1.4)
+		CombatHUD.splash(Assets.UI.KanjiDuel, `{data.fighters} fighters enter. One leaves.`, CRIMSON, 1.6)
 	elseif kind == "Eliminated" then
 		local text = if data.killer and data.deathblow
 			then `{data.killer} executed {data.victim}`
@@ -295,9 +298,9 @@ local function onRoundEvent(kind: string, data: { [string]: any })
 		pushFeed(text, if data.deathblow then CRIMSON else PARCHMENT)
 	elseif kind == "Victory" then
 		if data.winner and data.winner == player.Character then
-			CombatHUD.splash("勝", "VICTORY ACHIEVED", GOLD, 3.5)
+			CombatHUD.splash(Assets.UI.KanjiVictory, "Victory Achieved", GOLD, 3.5)
 		elseif data.name then
-			CombatHUD.splash("終", `{data.name} prevails`, PARCHMENT, 3)
+			CombatHUD.splash(Assets.UI.KanjiEnd, `{data.name} prevails`, PARCHMENT, 3)
 		end
 	end
 end

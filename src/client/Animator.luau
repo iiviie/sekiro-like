@@ -242,6 +242,8 @@ function Animator.play(model: Model, clipName: string, windup: number?)
 		return
 	end
 
+	-- The strike is the first timed segment after the last windup segment; impact lands
+	-- partway through it, so the windup ends that much before hitAt.
 	local strikeLead = 0
 	for i, segment in clip.segments do
 		if segment.duration == "windup" then
@@ -250,13 +252,14 @@ function Animator.play(model: Model, clipName: string, windup: number?)
 			strikeLead = strike * ClipLibrary.ImpactFraction
 		end
 	end
+	local windupTime = math.max((windup or 0.3) - strikeLead, 0.04)
 
 	local keys: { Key } = {}
 	local at = 0
 	for _, segment in clip.segments do
 		local duration = segment.duration
 		if duration == "windup" then
-			duration = math.max((windup or 0.3) - strikeLead, 0.04)
+			duration = math.max(windupTime * (segment.share or 1), 0.02)
 		end
 		at += duration :: number
 		table.insert(keys, {

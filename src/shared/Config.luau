@@ -21,8 +21,8 @@ export type AttackSpec = {
 
 local attacks: { [AttackKind]: AttackSpec } = {
 	Light1 = {
-		windup = 0.32,
-		recovery = 0.22,
+		windup = 0.42,
+		recovery = 0.25,
 		cooldown = 0,
 		damage = 9,
 		postureDamage = 18,
@@ -32,8 +32,8 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		unblockable = false,
 	},
 	Light2 = {
-		windup = 0.3,
-		recovery = 0.22,
+		windup = 0.40,
+		recovery = 0.25,
 		cooldown = 0,
 		damage = 9,
 		postureDamage = 18,
@@ -43,8 +43,8 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		unblockable = false,
 	},
 	Light3 = {
-		windup = 0.42,
-		recovery = 0.4,
+		windup = 0.55,
+		recovery = 0.45,
 		cooldown = 0,
 		damage = 14,
 		postureDamage = 28,
@@ -54,7 +54,7 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		unblockable = false,
 	},
 	Perilous = {
-		windup = 0.7,
+		windup = 0.95,
 		recovery = 0.55,
 		cooldown = 3,
 		damage = 28,
@@ -66,7 +66,7 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		thrust = true,
 	},
 	Sweep = {
-		windup = 0.75,
+		windup = 0.95,
 		recovery = 0.6,
 		cooldown = 3,
 		damage = 24,
@@ -94,6 +94,22 @@ local Config = {
 		Window = 0.5, -- after recovery ends, the next slash continues the combo for this long
 		Buffer = 0.3, -- an attack pressed this close to the end of recovery fires as soon as it can
 		RecoveryCancel = 0.06, -- after impact resolves, block can cancel the rest of recovery
+	},
+
+	Stamina = {
+		Max = 100,
+		RegenPerSecond = 30,
+		RegenDelay = 0.7, -- after spending any
+		GuardRegenMultiplier = 0.5, -- slower while holding guard
+		-- Deflecting is free, as in Sekiro: stamina limits aggression and evasion only.
+		Costs = {
+			Light1 = 12,
+			Light2 = 12,
+			Light3 = 16,
+			Perilous = 22,
+			Sweep = 22,
+			Dodge = 18,
+		} :: { [string]: number },
 	},
 
 	Gourd = {
@@ -149,8 +165,8 @@ local Config = {
 	},
 
 	Deflect = {
-		Window = 0.25, -- press block within this long before impact to deflect
-		PerfectWindow = 0.1,
+		Window = 0.22, -- press block within this long before impact to deflect
+		PerfectWindow = 0.08, -- about five frames at 60 fps
 		LateTolerance = 0.03, -- clock-sync slack for presses stamped just after impact
 		SpamLockout = 0.35, -- presses closer together than this don't re-arm the deflect
 		AttackerPosture = 18,
@@ -176,7 +192,7 @@ local Config = {
 
 	Net = {
 		CompensationCap = 0.25, -- how far in the past a client stamp may claim to be
-		ResolveGrace = 0.15, -- wait this long past impact for late defender packets
+		ResolveGrace = 0.12, -- wait this long past impact for late defender packets
 		MaxActionsPerSecond = 20,
 	},
 

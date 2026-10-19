@@ -15,6 +15,7 @@ local RunService = game:GetService("RunService")
 
 local CombatVisuals = require(script.Parent.CombatVisuals)
 local Config = require(ReplicatedStorage.Shared.Config)
+local LocalCombat = require(script.Parent.LocalCombat)
 local LockOn = require(script.Parent.LockOn)
 local Types = require(ReplicatedStorage.Shared.Types)
 
@@ -91,6 +92,12 @@ local function updateFacing(dt: number)
 	root.CFrame = root.CFrame:Lerp(target, alpha)
 end
 
+local function canAfford(character: Model, action: string): boolean
+	local cost = Config.Stamina.Costs[action]
+	local stamina = character:GetAttribute("Stamina")
+	return not cost or typeof(stamina) ~= "number" or stamina >= cost
+end
+
 -- If we're free to swing right now, start the animation without waiting for the server.
 local function predictSlash()
 	local character = player.Character
@@ -104,6 +111,10 @@ local function predictSlash()
 	end
 	comboIndex += 1
 	local kind = sequence[comboIndex]
+	if not canAfford(character, kind) then
+		comboIndex -= 1
+		return
+	end
 	local spec = Config.Attacks[kind]
 	comboUntil = t + spec.windup + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
 	CombatVisuals.predictAttack(character, kind)
@@ -116,6 +127,13 @@ local function setBlockHeld(held: boolean)
 	blockHeld = held
 	if held then
 		softFace()
+		-- Mirror the press locally so incoming deflects can be shown the instant they land.
+		local state = player.Character and player.Character:GetAttribute("CombatState")
+		if state == "Idle" or state == "Recovery" or state == "Windup" then
+			LocalCombat.pressBlock(workspace:GetServerTimeNow())
+		end
+	else
+		LocalCombat.releaseBlock()
 	end
 	send(if held then "BlockDown" else "BlockUp")
 end
@@ -127,7 +145,7 @@ local function dash()
 	end
 	-- Mirror the server's checks so the dash movement and the i-frames line up.
 	local state = character:GetAttribute("CombatState")
-	if (state ~= "Idle" and state ~= "Recovery") or os.clock() < nextDashAt then
+	if (state ~= "Idle" and state ~= "Recovery") or os.clock() < nextDashAt or not canAfford(character, "Dodge") then
 		return
 	end
 	local attachment = root:FindFirstChild("RootAttachment") :: Attachment?

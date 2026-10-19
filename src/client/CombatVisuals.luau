@@ -13,6 +13,8 @@ local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
 local Animator = require(script.Parent.Animator)
+local CombatHUD = require(script.Parent.CombatHUD)
+local LocalCombat = require(script.Parent.LocalCombat)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Types = require(ReplicatedStorage.Shared.Types)
@@ -58,35 +60,51 @@ local function playSound(id: string, parent: Instance?, volume: number?, pitch: 
 	Debris:AddItem(sound, 4)
 end
 
-local function floatingText(model: Model, text: string, color: Color3, scale: number?)
+-- A brush-kanji mark floating over a fighter's head (the perilous warning).
+local function kanjiMark(model: Model, imageId: string, color: Color3, duration: number)
 	local head = model:FindFirstChild("Head")
 	if not head or not head:IsA("BasePart") then
 		return
 	end
-	local size = scale or 1
-
 	local gui = Instance.new("BillboardGui")
 	gui.Adornee = head
 	gui.AlwaysOnTop = true
-	gui.Size = UDim2.fromOffset(220 * size, 50 * size)
-	gui.StudsOffset = Vector3.new(0, 3, 0)
-	gui.MaxDistance = 120
+	gui.LightInfluence = 0
+	gui.Size = UDim2.fromOffset(150, 150)
+	gui.StudsOffset = Vector3.new(0, 3.6, 0)
+	gui.MaxDistance = 140
 
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.Garamond
-	label.Text = text
-	label.TextColor3 = color
-	label.TextScaled = true
-	label.TextStrokeTransparency = 0.45
-	label.Parent = gui
+	local halo = Instance.new("ImageLabel")
+	halo.BackgroundTransparency = 1
+	halo.Image = Assets.UI.Glow
+	halo.ImageColor3 = color
+	halo.ImageTransparency = 0.35
+	halo.AnchorPoint = Vector2.new(0.5, 0.5)
+	halo.Position = UDim2.fromScale(0.5, 0.5)
+	halo.Size = UDim2.fromScale(1.1, 1.1)
+	halo.Parent = gui
+
+	local glyph = Instance.new("ImageLabel")
+	glyph.BackgroundTransparency = 1
+	glyph.Image = imageId
+	glyph.ImageColor3 = color
+	glyph.ScaleType = Enum.ScaleType.Fit
+	glyph.AnchorPoint = Vector2.new(0.5, 0.5)
+	glyph.Position = UDim2.fromScale(0.5, 0.5)
+	glyph.Size = UDim2.fromScale(1.35, 1.35)
+	glyph.Parent = gui
 	gui.Parent = player:WaitForChild("PlayerGui")
 
-	local info = TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	TweenService:Create(gui, info, { StudsOffset = Vector3.new(0, 4.5, 0) }):Play()
-	TweenService:Create(label, info, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
-	Debris:AddItem(gui, 0.8)
+	-- Slam in large, settle, then fade as the strike lands.
+	TweenService:Create(glyph, TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Size = UDim2.fromScale(0.8, 0.8),
+	}):Play()
+	task.delay(math.max(duration - 0.15, 0.2), function()
+		local fade = TweenInfo.new(0.3)
+		TweenService:Create(glyph, fade, { ImageTransparency = 1 }):Play()
+		TweenService:Create(halo, fade, { ImageTransparency = 1 }):Play()
+	end)
+	Debris:AddItem(gui, duration + 0.4)
 end
 
 local function anchorAt(position: Vector3): Part
@@ -101,6 +119,29 @@ local function anchorAt(position: Vector3): Part
 	anchor.Parent = workspace
 	Debris:AddItem(anchor, 1.5)
 	return anchor
+end
+
+-- A bright bloom at a point in the world, for perfect deflects and Mikiri.
+local function flare(position: Vector3, color: Color3, size: number)
+	local anchor = anchorAt(position)
+	local gui = Instance.new("BillboardGui")
+	gui.Adornee = anchor
+	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
+	gui.Size = UDim2.fromScale(size, size)
+	local glow = Instance.new("ImageLabel")
+	glow.BackgroundTransparency = 1
+	glow.Image = Assets.UI.Glow
+	glow.ImageColor3 = color
+	glow.Size = UDim2.fromScale(0.3, 0.3)
+	glow.AnchorPoint = Vector2.new(0.5, 0.5)
+	glow.Position = UDim2.fromScale(0.5, 0.5)
+	glow.Parent = gui
+	gui.Parent = anchor
+	TweenService:Create(glow, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = UDim2.fromScale(1, 1),
+		ImageTransparency = 1,
+	}):Play()
 end
 
 -- Sparks plus a light flash and an expanding glow ball.
@@ -260,16 +301,105 @@ end
 local function telegraphPerilous(model: Model, duration: number)
 	local highlight = Instance.new("Highlight")
 	highlight.FillColor = Config.Visual.PerilousColor
-	highlight.FillTransparency = 0.65
+	highlight.FillTransparency = 0.9 -- a hint of red; the kanji and outline do the warning
 	highlight.OutlineColor = Config.Visual.PerilousColor
-	highlight.OutlineTransparency = 0
+	highlight.OutlineTransparency = 0.15
 	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
 	highlight.Adornee = model
 	highlight.Parent = model
 	Debris:AddItem(highlight, duration + 0.1)
 
-	floatingText(model, "危", Config.Visual.PerilousColor, 1.6)
-	playSound(SOUNDS.PerfectDeflect, rootOf(model), 0.5, 1.6)
+	kanjiMark(model, Assets.UI.KanjiPeril, Config.Visual.PerilousColor, duration)
+	playSound(SOUNDS.PerfectDeflect, rootOf(model), 0.75, 1.7)
+
+	-- If it's coming for you, the screen edges flash red too.
+	local mine, theirs = rootOf(player.Character), rootOf(model)
+	if mine and theirs and not isLocal(model) and (mine.Position - theirs.Position).Magnitude < 24 then
+		CombatHUD.flashPeril()
+	end
+end
+
+local alreadyShown: (attacker: Model, defender: Model) -> boolean
+
+local function deflectEffects(attacker: Model, defender: Model, perfect: boolean)
+	Animator.play(defender, "GuardImpact")
+	Animator.play(attacker, "Recoil")
+	hitstop(if perfect then Config.Visual.PerfectHitstop else Config.Visual.Hitstop, attacker, defender)
+
+	local point = contactPoint(attacker, defender)
+	local soundAt = rootOf(defender)
+	playSound(if math.random() < 0.5 then SOUNDS.Deflect else SOUNDS.DeflectAlt, soundAt, 0.85)
+	if perfect then
+		-- A perfect deflect has to feel unmistakable: white-gold bloom, a ringing
+		-- second layer of steel, and a heavier freeze and camera kick.
+		if point then
+			burst(point, GOLD, 70, 44, 7)
+			flare(point, Color3.fromRGB(255, 244, 214), 16)
+		end
+		playSound(SOUNDS.PerfectDeflect, soundAt, 0.9, 1.1)
+	elseif point then
+		burst(point, SPARK, 30, 28, 3.5)
+	end
+	if isLocal(attacker) or isLocal(defender) then
+		shake(if perfect then 0.7 else 0.3, if perfect then 0.2 else 0.15)
+	end
+end
+
+local function guardEffects(attacker: Model, defender: Model)
+	Animator.play(defender, "GuardImpact")
+	hitstop(Config.Visual.Hitstop * 0.6, attacker, defender)
+	local point = contactPoint(attacker, defender)
+	if point then
+		burst(point, STEEL, 10, 14, 1.8)
+	end
+	playSound(SOUNDS.Guard, rootOf(defender), 0.55)
+end
+
+-- Your own deflects are shown the instant the blow lands, predicted from your last block
+-- press; the server's verdict follows later and shouldn't replay the same effects.
+local PREDICTED_DEFENCE_WINDOW = 0.6
+local predictedDefences: { [Model]: number } = {}
+
+function alreadyShown(attacker: Model, defender: Model): boolean
+	if not isLocal(defender) then
+		return false
+	end
+	local at = predictedDefences[attacker]
+	predictedDefences[attacker] = nil
+	return at ~= nil and os.clock() - at < PREDICTED_DEFENCE_WINDOW
+end
+
+local function predictIncoming(attacker: Model, kind: Config.AttackKind, hitAt: number)
+	local spec = Config.Attacks[kind]
+	local mine, theirs = rootOf(player.Character), rootOf(attacker)
+	if spec.unblockable or not mine or not theirs then
+		return
+	end
+	local offset = theirs.Position - mine.Position
+	local flat = Vector3.new(offset.X, 0, offset.Z)
+	if flat.Magnitude > spec.range + 2 then
+		return
+	end
+	task.delay(math.max(hitAt - now(), 0), function()
+		local character = player.Character
+		local root = rootOf(character)
+		if not root or character:GetAttribute("CombatState") == "Dead" or not attacker.Parent then
+			return
+		end
+		local toAttacker = theirs.Position - root.Position
+		local facing = root.CFrame.LookVector:Dot(Vector3.new(toAttacker.X, 0, toAttacker.Z).Unit)
+		if facing < Config.Deflect.FacingDot then
+			return
+		end
+		local defence = LocalCombat.predictDefence(hitAt)
+		if defence == "Perfect" or defence == "Deflect" then
+			predictedDefences[attacker] = os.clock()
+			deflectEffects(attacker, character :: Model, defence == "Perfect")
+		elseif defence == "Guard" then
+			predictedDefences[attacker] = os.clock()
+			guardEffects(attacker, character :: Model)
+		end
+	end)
 end
 
 local function refreshBase(model: Model)
@@ -306,6 +436,8 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		local heavy = kind == "Light3" or perilous
 		if perilous then
 			telegraphPerilous(model, remaining)
+		elseif not isLocal(model) then
+			predictIncoming(model, kind, data.hitAt)
 		end
 		task.delay(math.max(remaining - 0.05, 0), function()
 			if not model.Parent then
@@ -320,41 +452,16 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Deflect = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
-		local perfect: boolean = data.perfect
-		Animator.play(defender, "GuardImpact")
-		Animator.play(attacker, "Recoil")
-		hitstop(if perfect then Config.Visual.PerfectHitstop else Config.Visual.Hitstop, attacker, defender)
-
-		local point = contactPoint(attacker, defender)
-		if point then
-			burst(
-				point,
-				if perfect then GOLD else SPARK,
-				if perfect then 60 else 30,
-				if perfect then 40 else 28,
-				if perfect then 6 else 3.5
-			)
-		end
-		local soundAt = rootOf(defender)
-		playSound(if math.random() < 0.5 then SOUNDS.Deflect else SOUNDS.DeflectAlt, soundAt, 0.8)
-		if perfect then
-			playSound(SOUNDS.PerfectDeflect, soundAt, 0.7, 1.15)
-			floatingText(defender, "PERFECT", GOLD, 0.9)
-		end
-		if isLocal(attacker) or isLocal(defender) then
-			shake(if perfect then 0.55 else 0.3, 0.15)
+		if not alreadyShown(attacker, defender) then
+			deflectEffects(attacker, defender, data.perfect)
 		end
 	end,
 
 	Guard = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
-		Animator.play(defender, "GuardImpact")
-		hitstop(Config.Visual.Hitstop * 0.6, attacker, defender)
-		local point = contactPoint(attacker, defender)
-		if point then
-			burst(point, STEEL, 10, 14, 1.8)
+		if not alreadyShown(attacker, defender) then
+			guardEffects(attacker, defender)
 		end
-		playSound(SOUNDS.Guard, rootOf(defender), 0.55)
 	end,
 
 	Hit = function(data)
@@ -374,7 +481,6 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	PostureBroken = function(data)
 		local model: Model = data.model
 		Animator.stop(model)
-		floatingText(model, "BREAK", GOLD, 1.3)
 		local root = rootOf(model)
 		if root then
 			burst(root.Position + Vector3.new(0, 1.5, 0), GOLD, 40, 24, 5)
@@ -387,7 +493,6 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		Animator.play(attacker, "Deathblow")
 		Animator.play(defender, "Executed")
 		hitstop(Config.Visual.DeathblowHitstop, attacker, defender)
-		floatingText(defender, "忍殺", BLOOD, 2)
 		local root = rootOf(defender)
 		if root then
 			burst(root.Position, BLOOD, 80, 30, 7)
@@ -413,11 +518,19 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	end,
 
 	Dodged = function(data)
-		floatingText(data.defender, "EVADE", STEEL, 0.8)
+		-- A clean evade: a soft puff of dust where the blow passed, no text.
+		local root = rootOf(data.defender)
+		if root then
+			burst(root.Position - Vector3.new(0, 2.4, 0), Color3.fromRGB(180, 168, 150), 10, 8, 1.5)
+		end
 	end,
 
 	Jumped = function(data)
-		floatingText(data.defender, "EVADE", STEEL, 0.8)
+		-- A clean evade: a soft puff of dust where the blow passed, no text.
+		local root = rootOf(data.defender)
+		if root then
+			burst(root.Position - Vector3.new(0, 2.4, 0), Color3.fromRGB(180, 168, 150), 10, 8, 1.5)
+		end
 	end,
 
 	Mikiri = function(data)
@@ -429,7 +542,10 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if root then
 			burst(root.Position + root.CFrame.LookVector * 2 - Vector3.new(0, 2, 0), GOLD, 50, 26, 5)
 		end
-		floatingText(defender, "MIKIRI", GOLD, 1.1)
+		local point = contactPoint(attacker, defender)
+		if point then
+			flare(point, Color3.fromRGB(255, 236, 200), 18)
+		end
 		playSound(SOUNDS.PerfectDeflect, root, 0.8, 0.9)
 		playSound(SOUNDS.PostureBreak, root, 0.6, 1.2)
 		if isLocal(attacker) or isLocal(defender) then
@@ -472,7 +588,6 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Feint = function(data)
 		Animator.stop(data.model)
-		floatingText(data.model, "FEINT", STEEL, 0.8)
 	end,
 
 	Interrupted = function(data)

@@ -13,3 +13,6 @@ DevPackages/
 # OS / editor
 .DS_Store
 roblox.yml
+
+# Art tooling
+art/**/__pycache__/

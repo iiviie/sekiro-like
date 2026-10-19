@@ -1,7 +1,8 @@
 --!strict
 -- Timelines for the procedural animator, built from the poses in Poses.luau.
 -- A segment's duration may be "windup": the animator stretches it so the strike lands on
--- the server's hitAt, however late the Windup event arrived. Segments marked `trail`
+-- the server's hitAt, however late the Windup event arrived. Several windup segments
+-- split the time by `share`, which is how perilous attacks coil, hold, then snap. Segments marked `trail`
 -- light up the sword trail.
 
 export type Ease = "linear" | "in" | "out" | "inOut"
@@ -9,6 +10,7 @@ export type Ease = "linear" | "in" | "out" | "inOut"
 export type Segment = {
 	pose: string,
 	duration: number | "windup",
+	share: number?, -- for "windup" segments: this segment's fraction of the windup time
 	ease: Ease?,
 	trail: boolean?,
 }
@@ -43,7 +45,8 @@ local Clips: { [string]: Clip } = {
 	},
 	Light3 = {
 		segments = {
-			{ pose = "Slash3Windup", duration = "windup", ease = "out" },
+			{ pose = "Slash3Windup", duration = "windup", share = 0.6, ease = "out" },
+			{ pose = "Slash3Hold", duration = "windup", share = 0.4, ease = "inOut" }, -- the delayed beat
 			{ pose = "Slash3Strike", duration = 0.1, ease = "in", trail = true },
 			{ pose = "Slash3Follow", duration = 0.16, ease = "out", trail = true },
 		},
@@ -52,7 +55,8 @@ local Clips: { [string]: Clip } = {
 	},
 	Perilous = {
 		segments = {
-			{ pose = "ThrustWindup", duration = "windup", ease = "out" },
+			{ pose = "ThrustWindup", duration = "windup", share = 0.5, ease = "out" },
+			{ pose = "ThrustHold", duration = "windup", share = 0.5, ease = "inOut" },
 			{ pose = "ThrustStrike", duration = 0.1, ease = "in", trail = true },
 		},
 		hold = 0.25,
@@ -60,7 +64,8 @@ local Clips: { [string]: Clip } = {
 	},
 	Sweep = {
 		segments = {
-			{ pose = "SweepWindup", duration = "windup", ease = "out" },
+			{ pose = "SweepWindup", duration = "windup", share = 0.5, ease = "out" },
+			{ pose = "SweepHold", duration = "windup", share = 0.5, ease = "inOut" },
 			{ pose = "SweepStrike", duration = 0.1, ease = "in", trail = true },
 		},
 		hold = 0.25,

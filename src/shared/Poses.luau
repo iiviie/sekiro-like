@@ -244,6 +244,48 @@ local specs: { [string]: PoseSpec } = {
 		Root = { -14, 0, 0, 0, -0.45, 0 },
 	},
 
+	-- Hold beats: a deeper coil at the end of a windup, so the strike visibly loads
+	-- before it fires (the delayed timing Sekiro uses to bait early deflects).
+	Slash3Hold = {
+		RightArm = {
+			upper = v(0.2, 0.98, 0.05),
+			fore = v(-0.05, 0.4, 0.92),
+			blade = v(-0.05, 0.05, 1),
+			edge = v(0, 1, 0),
+		},
+		LeftArm = { upper = v(-0.2, 0.98, 0.05), fore = v(0.3, 0.4, 0.86) },
+		Waist = { 20, 0, 0 },
+		Neck = { -14, 0, 0 },
+		Root = { 9, 0, 0, 0, 0.05, 0 },
+	},
+	ThrustHold = {
+		RightArm = { upper = v(0.35, -0.45, 0.85), fore = v(0, 0.05, -1), blade = v(-0.05, 0.05, -1), edge = DOWN },
+		LeftArm = { upper = v(-0.1, 0.05, -1), fore = v(0, 0.12, -1) },
+		Waist = { 6, -48, 0 },
+		Neck = { 0, 40, 0 },
+		Root = { 6, 0, 0, 0, -0.4, 0 },
+		RightHip = { 30, 0, 0 },
+		RightKnee = { -45, 0, 0 },
+		LeftHip = { -15, 0, 0 },
+		LeftKnee = { -20, 0, 0 },
+	},
+	SweepHold = {
+		RightArm = {
+			upper = v(0.55, -0.55, 0.65),
+			fore = v(0.35, -0.3, 0.9),
+			blade = v(0.45, -0.35, 0.82),
+			edge = v(-0.5, 0, -0.8),
+		},
+		LeftArm = { upper = v(-0.25, -0.35, -0.9), fore = v(0, -0.15, -1) },
+		Waist = { 6, -44, 0 },
+		Neck = { -8, 36, 0 },
+		Root = { -12, 0, 0, 0, -1.05, 0 },
+		RightHip = { 58, 0, 0 },
+		RightKnee = { -92, 0, 0 },
+		LeftHip = { 24, 0, 0 },
+		LeftKnee = { -68, 0, 0 },
+	},
+
 	-- Perilous sweep: crouched low with the blade drawn back, then a flat cut at the ankles.
 	SweepWindup = {
 		RightArm = {

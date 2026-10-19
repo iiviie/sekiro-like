@@ -1,40 +1,49 @@
 --!strict
--- Sekiro / Dark Souls style HUD: a thin crimson vitality bar bottom-left with a pale
--- trail showing recent damage, a posture bar bottom-centre that grows from the middle
--- and hides when empty, enemy bars only for whoever you're fighting, a red deathblow
--- marker on broken enemies, and the 死 / 忍殺 splashes.
+-- Sekiro-style HUD built on the art in Shared/Assets.UI:
+--   bottom-left   healing gourd, vitality (crimson, with a pale trail of recent damage)
+--                 and stamina (muted gold) in soft lacquered frames
+--   bottom-centre posture: grows from the ornament outwards, heats from amber to red
+--                 with a bloom underneath, and fades away while empty
+--   enemies       posture and vitality over the head of whoever you're fighting, and the
+--                 red deathblow dot when they break
+--   splashes      brush kanji on an ink band (死, 忍殺, round banners)
+--   screen        a light cinematic vignette and a red edge flash for perilous attacks
 --
--- Performance: nothing runs per frame. Bars update from attribute and health change
--- signals and animate with tweens; enemy bars exist only while relevant.
+-- Nothing runs per frame: bars update from attribute and health signals and animate with
+-- tweens, and enemy bars exist only while relevant.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local Assets = require(ReplicatedStorage.Shared.Assets)
 local LockOn = require(script.Parent.LockOn)
 local Types = require(ReplicatedStorage.Shared.Types)
 
 local combatEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent
 local player = Players.LocalPlayer
+local UI = Assets.UI
 
 local FONT = Enum.Font.Garamond
-local INK = Color3.fromRGB(12, 10, 9)
-local BRONZE = Color3.fromRGB(150, 122, 82)
 local PARCHMENT = Color3.fromRGB(232, 222, 200)
-local CRIMSON_TOP = Color3.fromRGB(196, 38, 32)
-local CRIMSON_BOTTOM = Color3.fromRGB(112, 12, 14)
-local TRAIL = Color3.fromRGB(226, 208, 170)
-local POSTURE_LOW = Color3.fromRGB(255, 196, 92)
-local POSTURE_HIGH = Color3.fromRGB(232, 72, 30)
-local DEATHBLOW_RED = Color3.fromRGB(255, 40, 40)
+local CRIMSON = Color3.fromRGB(176, 22, 20)
+local TRAIL = Color3.fromRGB(226, 206, 170)
+local STAMINA = Color3.fromRGB(196, 168, 102)
+local STAMINA_LOW = Color3.fromRGB(150, 110, 70)
+local POSTURE_LOW = Color3.fromRGB(255, 204, 96)
+local POSTURE_MID = Color3.fromRGB(246, 128, 40)
+local POSTURE_HIGH = Color3.fromRGB(214, 44, 22)
+local BROKEN_FLASH = Color3.fromRGB(255, 246, 222)
+local DEATH_RED = Color3.fromRGB(190, 18, 18)
 
-local ENEMY_BAR_LINGER = 4 -- seconds an enemy's bars stay up after you last traded blows
+local FRAME_INSET = 10 -- transparent shadow margin baked into the frame art
+local ENEMY_BAR_LINGER = 4
 local CONTROLS_HINT_TIME = 14
 
 local CombatHUD = {}
 
-type Bar = { root: Frame, fill: Frame, trail: Frame?, centered: boolean }
+type Bar = { root: ImageLabel, fill: ImageLabel, trail: ImageLabel? }
 type EnemyEntry = {
 	gui: BillboardGui,
 	posture: Bar,
@@ -46,11 +55,16 @@ type EnemyEntry = {
 
 local screen: ScreenGui
 local vitality: Bar
+local stamina: Bar
 local posture: Bar
+local postureGlow: ImageLabel
 local postureGroup: CanvasGroup
 local ownGroup: CanvasGroup
+local staminaGroup: CanvasGroup
+local gourdIcon: ImageLabel
+local gourdCount: TextLabel
+local perilFlash: ImageLabel
 local controlsHint: TextLabel
-local gourdLabel: TextLabel
 local enemies: { [Model]: EnemyEntry } = {}
 
 local function tween(instance: Instance, time: number, goal: { [string]: any }, style: Enum.EasingStyle?)
@@ -60,56 +74,58 @@ local function tween(instance: Instance, time: number, goal: { [string]: any }, 
 	return t
 end
 
-local function stroke(parent: GuiObject, color: Color3, thickness: number, transparency: number)
-	local s = Instance.new("UIStroke")
-	s.Color = color
-	s.Thickness = thickness
-	s.Transparency = transparency
-	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	s.Parent = parent
+local function image(parent: Instance, id: string, props: { [string]: any }?): ImageLabel
+	local i = Instance.new("ImageLabel")
+	i.BackgroundTransparency = 1
+	i.Image = id
+	if props then
+		for key, value in props do
+			(i :: any)[key] = value
+		end
+	end
+	i.Parent = parent
+	return i
 end
 
--- A thin framed bar. Centred bars (posture) grow from the middle outwards.
+-- A framed bar. `size` is the visible track; the frame art adds its shadow margin around
+-- it. Centred bars (posture) grow from the middle outwards.
 local function makeBar(
 	parent: Instance,
-	size: UDim2,
+	size: Vector2,
 	position: UDim2,
 	anchor: Vector2,
 	centered: boolean,
-	withTrail: boolean
+	withTrail: boolean,
+	tint: Color3
 ): Bar
-	local root = Instance.new("Frame")
-	root.BackgroundColor3 = INK
-	root.BackgroundTransparency = 0.35
-	root.BorderSizePixel = 0
-	root.Size = size
-	root.Position = position
-	root.AnchorPoint = anchor
-	stroke(root, BRONZE, 1, 0.45)
-	root.Parent = parent
+	local root = image(parent, UI.BarFrame, {
+		ScaleType = Enum.ScaleType.Slice,
+		SliceCenter = Rect.new(14, 14, 242, 26),
+		Size = UDim2.fromOffset(size.X + FRAME_INSET * 2, size.Y + FRAME_INSET * 2),
+		Position = position,
+		AnchorPoint = anchor,
+	})
 
-	local function inner(color: Color3, z: number): Frame
-		local f = Instance.new("Frame")
-		f.BorderSizePixel = 0
-		f.BackgroundColor3 = color
-		f.AnchorPoint = if centered then Vector2.new(0.5, 0) else Vector2.zero
-		f.Position = if centered then UDim2.fromScale(0.5, 0) else UDim2.fromScale(0, 0)
-		f.Size = UDim2.fromScale(if centered then 0 else 1, 1)
-		f.ZIndex = z
-		f.Parent = root
-		return f
+	local track = Instance.new("Frame")
+	track.BackgroundTransparency = 1
+	track.ClipsDescendants = true
+	track.Position = UDim2.fromOffset(FRAME_INSET + 1, FRAME_INSET + 1)
+	track.Size = UDim2.new(1, -(FRAME_INSET + 1) * 2, 1, -(FRAME_INSET + 1) * 2)
+	track.Parent = root
+
+	local function inner(color: Color3, z: number): ImageLabel
+		return image(track, UI.BarFill, {
+			ImageColor3 = color,
+			ScaleType = Enum.ScaleType.Stretch,
+			AnchorPoint = if centered then Vector2.new(0.5, 0) else Vector2.zero,
+			Position = if centered then UDim2.fromScale(0.5, 0) else UDim2.fromScale(0, 0),
+			Size = UDim2.fromScale(if centered then 0 else 1, 1),
+			ZIndex = z,
+		})
 	end
 
 	local trail = if withTrail then inner(TRAIL, 1) else nil
-	local fill = inner(Color3.new(1, 1, 1), 2)
-	return { root = root, fill = fill, trail = trail, centered = centered }
-end
-
-local function gradient(frame: Frame, top: Color3, bottom: Color3)
-	local g = Instance.new("UIGradient")
-	g.Color = ColorSequence.new(top, bottom)
-	g.Rotation = 90
-	g.Parent = frame
+	return { root = root, fill = inner(tint, 2), trail = trail }
 end
 
 -- Sets a bar to `ratio`; a damage trail lingers, then drains to catch up.
@@ -129,9 +145,9 @@ local function setBar(bar: Bar, ratio: number, instant: boolean?)
 		if ratio >= trail.Size.X.Scale then
 			trail.Size = goal
 		else
-			task.delay(0.45, function()
+			task.delay(0.5, function()
 				if bar.fill.Size.X.Scale <= ratio + 1e-3 then
-					tween(trail, 0.5, { Size = bar.fill.Size }, Enum.EasingStyle.Sine)
+					tween(trail, 0.55, { Size = bar.fill.Size }, Enum.EasingStyle.Sine)
 				end
 			end)
 		end
@@ -139,21 +155,18 @@ local function setBar(bar: Bar, ratio: number, instant: boolean?)
 end
 
 local function postureColor(ratio: number): Color3
-	return POSTURE_LOW:Lerp(POSTURE_HIGH, ratio)
+	if ratio < 0.5 then
+		return POSTURE_LOW:Lerp(POSTURE_MID, ratio * 2)
+	end
+	return POSTURE_MID:Lerp(POSTURE_HIGH, (ratio - 0.5) * 2)
 end
 
-local function diamond(parent: Instance, size: number, position: UDim2, color: Color3): Frame
-	local d = Instance.new("Frame")
-	d.AnchorPoint = Vector2.new(0.5, 0.5)
-	d.Position = position
-	d.Size = UDim2.fromOffset(size, size)
-	d.Rotation = 45
-	d.BackgroundColor3 = color
-	d.BorderSizePixel = 0
-	d.ZIndex = 3
-	stroke(d, BRONZE, 1, 0.2)
-	d.Parent = parent
-	return d
+local function ratioOf(model: Model, value: string, max: string): number?
+	local v, m = model:GetAttribute(value), model:GetAttribute(max)
+	if typeof(v) == "number" and typeof(m) == "number" and m > 0 then
+		return v / m
+	end
+	return nil
 end
 
 ---------------------------------------------------------------------------------------
@@ -162,18 +175,31 @@ end
 local characterConnections: { RBXScriptConnection } = {}
 
 local function refreshPosture(model: Model)
-	local max = model:GetAttribute("PostureMax")
-	local value = model:GetAttribute("Posture")
-	if typeof(max) ~= "number" or typeof(value) ~= "number" or max <= 0 then
+	local ratio = ratioOf(model, "Posture", "PostureMax")
+	if not ratio then
 		return
 	end
-	local ratio = value / max
 	local broken = model:GetAttribute("CombatState") == "Broken"
 	setBar(posture, ratio)
-	posture.fill.BackgroundColor3 = if broken then PARCHMENT else postureColor(ratio)
-	-- Like Sekiro, the posture bar only shows while it has something to say.
+	local color = if broken then BROKEN_FLASH else postureColor(ratio)
+	posture.fill.ImageColor3 = color
+	postureGlow.ImageColor3 = color
+	-- The bloom only shows as posture runs hot.
+	local bloom = if broken then 0.1 else 1 - math.clamp((ratio - 0.4) * 1.4, 0, 0.75)
+	tween(postureGlow, 0.2, { ImageTransparency = bloom })
 	local visible = ratio > 0.01 or broken
-	tween(postureGroup, 0.25, { GroupTransparency = if visible then 0 else 1 })
+	tween(postureGroup, 0.3, { GroupTransparency = if visible then 0 else 1 })
+end
+
+local function refreshStamina(model: Model)
+	local ratio = ratioOf(model, "Stamina", "StaminaMax")
+	if not ratio then
+		return
+	end
+	setBar(stamina, ratio)
+	stamina.fill.ImageColor3 = if ratio < 0.2 then STAMINA_LOW else STAMINA
+	-- Quiet while full, brighter while it's being spent and recovering.
+	tween(staminaGroup, 0.3, { GroupTransparency = if ratio >= 0.999 then 0.45 else 0 })
 end
 
 local function trackCharacter(character: Model)
@@ -190,102 +216,104 @@ local function trackCharacter(character: Model)
 		setBar(vitality, humanoid.Health / math.max(humanoid.MaxHealth, 1))
 	end
 	setBar(vitality, 1, true)
+	setBar(stamina, 1, true)
 	setBar(posture, 0, true)
 	postureGroup.GroupTransparency = 1
+	ownGroup.GroupTransparency = 0
+	staminaGroup.GroupTransparency = 0.45
 	onHealth()
 	table.insert(characterConnections, humanoid.HealthChanged:Connect(onHealth))
-	-- Your own bars fade out once you fall, and return with the next body.
-	ownGroup.GroupTransparency = 0
 	table.insert(
 		characterConnections,
 		humanoid.Died:Connect(function()
 			tween(ownGroup, 0.6, { GroupTransparency = 1 })
+			tween(staminaGroup, 0.6, { GroupTransparency = 1 })
 			tween(postureGroup, 0.6, { GroupTransparency = 1 })
 		end)
 	)
-	for _, attribute in { "Posture", "CombatState" } do
-		table.insert(
-			characterConnections,
-			character:GetAttributeChangedSignal(attribute):Connect(function()
-				refreshPosture(character)
-			end)
-		)
+
+	local function bind(attribute: string, handler: () -> ())
+		table.insert(characterConnections, character:GetAttributeChangedSignal(attribute):Connect(handler))
 	end
-	refreshPosture(character)
-	local function refreshGourds()
+	local function onPosture()
+		refreshPosture(character)
+	end
+	local function onStamina()
+		refreshStamina(character)
+	end
+	local function onGourds()
 		local count = character:GetAttribute("Gourds")
-		gourdLabel.Text = `瓢 {if typeof(count) == "number" then count else 0}`
-		gourdLabel.TextTransparency = if count == 0 then 0.6 else 0
+		gourdCount.Text = tostring(if typeof(count) == "number" then count else 0)
+		gourdIcon.ImageTransparency = if count == 0 then 0.6 else 0
 	end
-	table.insert(characterConnections, character:GetAttributeChangedSignal("Gourds"):Connect(refreshGourds))
-	refreshGourds()
+	bind("Posture", onPosture)
+	bind("CombatState", onPosture)
+	bind("Stamina", onStamina)
+	bind("Gourds", onGourds)
+	onPosture()
+	onStamina()
+	onGourds()
 end
 
 ---------------------------------------------------------------------------------------
--- Splashes
+-- Splashes and screen effects
 
--- A centred kanji banner with a subtitle, framed by a dark band (used for death,
--- executions, and round banners).
-function CombatHUD.splash(kanji: string, subtitle: string, color: Color3, hold: number)
-	local frame = Instance.new("CanvasGroup")
-	frame.Size = UDim2.fromScale(1, 1)
-	frame.BackgroundColor3 = Color3.new(0, 0, 0)
-	frame.BackgroundTransparency = 1
-	frame.GroupTransparency = 1
-	frame.ZIndex = 50
-	frame.Parent = screen
+-- A brush-kanji banner on an ink band, with a small spaced-caps subtitle.
+function CombatHUD.splash(kanjiImage: string, subtitle: string, color: Color3, hold: number)
+	local group = Instance.new("CanvasGroup")
+	group.AnchorPoint = Vector2.new(0.5, 0.5)
+	group.Position = UDim2.fromScale(0.5, 0.46)
+	group.Size = UDim2.fromOffset(1000, 380)
+	group.BackgroundTransparency = 1
+	group.GroupTransparency = 1
+	group.ZIndex = 50
+	group.Parent = screen
 
-	-- A dark band across the middle of the screen, the way Souls games frame their banners.
-	local band = Instance.new("Frame")
-	band.AnchorPoint = Vector2.new(0.5, 0.5)
-	band.Position = UDim2.fromScale(0.5, 0.5)
-	band.Size = UDim2.new(1, 0, 0, 220)
-	band.BackgroundColor3 = Color3.new(0, 0, 0)
-	band.BackgroundTransparency = 0.25
-	band.BorderSizePixel = 0
-	local fade = Instance.new("UIGradient")
-	fade.Rotation = 90
-	fade.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 1),
-		NumberSequenceKeypoint.new(0.3, 0),
-		NumberSequenceKeypoint.new(0.7, 0),
-		NumberSequenceKeypoint.new(1, 1),
+	image(group, UI.InkBand, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(980, 250),
+		ImageTransparency = 0.12,
 	})
-	fade.Parent = band
-	band.Parent = frame
-
-	local glyph = Instance.new("TextLabel")
-	glyph.AnchorPoint = Vector2.new(0.5, 0.5)
-	glyph.Position = UDim2.fromScale(0.5, 0.47)
-	glyph.Size = UDim2.fromOffset(600, 170)
-	glyph.BackgroundTransparency = 1
-	glyph.Font = FONT
-	glyph.Text = kanji
-	glyph.TextScaled = true
-	glyph.TextColor3 = color
-	glyph.TextStrokeColor3 = Color3.new(0, 0, 0)
-	glyph.TextStrokeTransparency = 0.4
-	glyph.Parent = frame
-
+	local glyph = image(group, kanjiImage, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.45),
+		Size = UDim2.fromScale(1.02, 0.7),
+		ScaleType = Enum.ScaleType.Fit,
+		ImageColor3 = color,
+	})
 	local caption = Instance.new("TextLabel")
 	caption.AnchorPoint = Vector2.new(0.5, 0)
-	caption.Position = UDim2.new(0.5, 0, 0.47, 92)
-	caption.Size = UDim2.fromOffset(600, 26)
+	caption.Position = UDim2.fromScale(0.5, 0.76)
+	caption.Size = UDim2.fromOffset(700, 26)
 	caption.BackgroundTransparency = 1
 	caption.Font = FONT
-	caption.Text = subtitle
-	caption.TextSize = 24
+	caption.Text = (string.upper(subtitle):gsub("(.)", "%1 ")):sub(1, -2)
+	caption.TextSize = 20
 	caption.TextColor3 = PARCHMENT
-	caption.TextTransparency = 0.15
-	caption.Parent = frame
+	caption.TextTransparency = 0.1
+	caption.Parent = group
 
-	glyph.Size = UDim2.fromOffset(660, 190)
-	tween(frame, 0.35, { GroupTransparency = 0 })
-	tween(glyph, 1.2, { Size = UDim2.fromOffset(600, 170) }, Enum.EasingStyle.Sine)
+	tween(group, 0.4, { GroupTransparency = 0 })
+	tween(glyph, 1.4, { Size = UDim2.fromScale(0.9, 0.62) }, Enum.EasingStyle.Sine)
 	task.delay(hold, function()
-		tween(frame, 0.8, { GroupTransparency = 1 })
-		task.wait(0.85)
-		frame:Destroy()
+		tween(group, 0.9, { GroupTransparency = 1 })
+		task.wait(0.95)
+		group:Destroy()
+	end)
+end
+
+-- Red flash at the screen's edges: a perilous attack is coming at you.
+function CombatHUD.flashPeril()
+	perilFlash.ImageTransparency = 0.1
+	tween(perilFlash, 0.9, { ImageTransparency = 1 }, Enum.EasingStyle.Sine)
+end
+
+-- Shows the controls reminder for a while, then fades it (called once you enter).
+function CombatHUD.showControls()
+	controlsHint.TextTransparency = 0.25
+	task.delay(CONTROLS_HINT_TIME, function()
+		tween(controlsHint, 2, { TextTransparency = 1 })
 	end)
 end
 
@@ -306,12 +334,11 @@ local function removeEnemy(model: Model)
 end
 
 local function refreshEnemy(model: Model, entry: EnemyEntry)
-	local max = model:GetAttribute("PostureMax")
-	local value = model:GetAttribute("Posture")
+	local ratio = ratioOf(model, "Posture", "PostureMax")
 	local broken = model:GetAttribute("CombatState") == "Broken"
-	if typeof(max) == "number" and typeof(value) == "number" and max > 0 then
-		setBar(entry.posture, value / max)
-		entry.posture.fill.BackgroundColor3 = if broken then PARCHMENT else postureColor(value / max)
+	if ratio then
+		setBar(entry.posture, ratio)
+		entry.posture.fill.ImageColor3 = if broken then BROKEN_FLASH else postureColor(ratio)
 	end
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
@@ -326,40 +353,19 @@ local function makeMarker(model: Model): BillboardGui
 	marker.Name = "DeathblowMarker"
 	marker.Adornee = torso :: BasePart?
 	marker.AlwaysOnTop = true
-	marker.Size = UDim2.fromOffset(46, 46)
 	marker.LightInfluence = 0
+	marker.Size = UDim2.fromOffset(64, 64)
 	marker.Enabled = false
-
-	-- Sekiro's red deathblow dot: a bright core inside a soft pulsing halo.
-	local halo = Instance.new("Frame")
-	halo.AnchorPoint = Vector2.new(0.5, 0.5)
-	halo.Position = UDim2.fromScale(0.5, 0.5)
-	halo.Size = UDim2.fromScale(1, 1)
-	halo.BackgroundColor3 = DEATHBLOW_RED
-	halo.BackgroundTransparency = 0.65
-	local haloCorner = Instance.new("UICorner")
-	haloCorner.CornerRadius = UDim.new(0.5, 0)
-	haloCorner.Parent = halo
-	halo.Parent = marker
-
-	local core = Instance.new("Frame")
-	core.AnchorPoint = Vector2.new(0.5, 0.5)
-	core.Position = UDim2.fromScale(0.5, 0.5)
-	core.Size = UDim2.fromScale(0.36, 0.36)
-	core.BackgroundColor3 = Color3.fromRGB(255, 120, 110)
-	local coreCorner = Instance.new("UICorner")
-	coreCorner.CornerRadius = UDim.new(0.5, 0)
-	coreCorner.Parent = core
-	stroke(core, DEATHBLOW_RED, 2, 0)
-	core.Parent = marker
-
-	local pulse = TweenService:Create(
-		halo,
-		TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ Size = UDim2.fromScale(0.6, 0.6), BackgroundTransparency = 0.35 }
-	)
-	pulse:Play()
-
+	local dot = image(marker, UI.DeathblowDot, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.8, 0.8),
+	})
+	TweenService:Create(
+		dot,
+		TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Size = UDim2.fromScale(1, 1) }
+	):Play()
 	marker.Parent = player:WaitForChild("PlayerGui")
 	return marker
 end
@@ -379,19 +385,23 @@ local function showEnemy(model: Model, linger: number?)
 		gui.Adornee = head
 		gui.AlwaysOnTop = true
 		gui.LightInfluence = 0
-		gui.Size = UDim2.fromOffset(150, 20)
-		gui.StudsOffset = Vector3.new(0, 2.6, 0)
+		gui.Size = UDim2.fromOffset(200, 50)
+		gui.StudsOffset = Vector3.new(0, 2.9, 0)
 		gui.MaxDistance = 90
 
 		local postureBar =
-			makeBar(gui, UDim2.new(1, 0, 0, 6), UDim2.fromScale(0.5, 0), Vector2.new(0.5, 0), true, false)
+			makeBar(gui, Vector2.new(170, 6), UDim2.fromScale(0.5, 0), Vector2.new(0.5, 0), true, false, POSTURE_LOW)
+		image(gui, UI.PostureOrnament, {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromOffset(100, 13),
+			Size = UDim2.fromOffset(80, 24),
+			ZIndex = 3,
+		})
 		local vitalityBar =
-			makeBar(gui, UDim2.new(0.72, 0, 0, 4), UDim2.new(0.5, 0, 0, 11), Vector2.new(0.5, 0), false, true)
-		gradient(vitalityBar.fill, CRIMSON_TOP, CRIMSON_BOTTOM)
-		diamond(postureBar.root, 6, UDim2.fromScale(0.5, 0.5), INK)
+			makeBar(gui, Vector2.new(120, 4), UDim2.fromOffset(100, 22), Vector2.new(0.5, 0), false, true, CRIMSON)
 		gui.Parent = player:WaitForChild("PlayerGui")
 
-		entry = {
+		local created: EnemyEntry = {
 			gui = gui,
 			posture = postureBar,
 			vitality = vitalityBar,
@@ -399,7 +409,6 @@ local function showEnemy(model: Model, linger: number?)
 			hideToken = 0,
 			connections = {},
 		}
-		local created = entry :: EnemyEntry
 		enemies[model] = created
 		local function refresh()
 			refreshEnemy(model, created)
@@ -420,6 +429,7 @@ local function showEnemy(model: Model, linger: number?)
 			end)
 		)
 		refreshEnemy(model, created)
+		entry = created
 	end
 
 	local current = entry :: EnemyEntry
@@ -443,61 +453,102 @@ local function buildScreen()
 	screen.IgnoreGuiInset = true
 	screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
-	-- Vitality, bottom-left.
-	-- (CanvasGroups render to a texture, so this one is only as big as the bar.)
+	-- A light cinematic vignette over the whole frame, and a red one for perilous flashes.
+	image(screen, UI.Vignette, { Size = UDim2.fromScale(1, 1), ImageTransparency = 0.45, ZIndex = 0 })
+	perilFlash = image(screen, UI.Vignette, {
+		Size = UDim2.fromScale(1, 1),
+		ImageColor3 = Color3.fromRGB(150, 0, 0),
+		ImageTransparency = 1,
+		ZIndex = 0,
+	})
+
+	-- Bottom-left: gourd, vitality, stamina. (CanvasGroups render to textures, so each is
+	-- only as big as what it holds.)
 	ownGroup = Instance.new("CanvasGroup")
 	ownGroup.BackgroundTransparency = 1
 	ownGroup.AnchorPoint = Vector2.new(0, 1)
-	ownGroup.Position = UDim2.new(0, 40, 1, -48)
-	ownGroup.Size = UDim2.fromOffset(420, 24)
+	ownGroup.Position = UDim2.new(0, 36, 1, -60)
+	ownGroup.Size = UDim2.fromOffset(470, 52)
 	ownGroup.Parent = screen
-	vitality = makeBar(ownGroup, UDim2.fromOffset(300, 9), UDim2.new(0, 24, 0.5, 0), Vector2.new(0, 0.5), false, true)
-	gradient(vitality.fill, CRIMSON_TOP, CRIMSON_BOTTOM)
-	diamond(ownGroup, 14, UDim2.new(0, 12, 0.5, 0), CRIMSON_BOTTOM)
 
-	-- Healing gourd charges, right of the vitality bar.
-	gourdLabel = Instance.new("TextLabel")
-	gourdLabel.BackgroundTransparency = 1
-	gourdLabel.AnchorPoint = Vector2.new(0, 0.5)
-	gourdLabel.Position = UDim2.new(0, 334, 0.5, 0)
-	gourdLabel.Size = UDim2.fromOffset(80, 22)
-	gourdLabel.Font = FONT
-	gourdLabel.TextSize = 19
-	gourdLabel.TextXAlignment = Enum.TextXAlignment.Left
-	gourdLabel.TextColor3 = PARCHMENT
-	gourdLabel.TextStrokeTransparency = 0.6
-	gourdLabel.Text = "瓢 3"
-	gourdLabel.Parent = ownGroup
+	gourdIcon = image(ownGroup, UI.Gourd, {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.fromScale(0, 0.5),
+		Size = UDim2.fromOffset(42, 42),
+	})
+	gourdCount = Instance.new("TextLabel")
+	gourdCount.BackgroundTransparency = 1
+	gourdCount.AnchorPoint = Vector2.new(1, 1)
+	gourdCount.Position = UDim2.new(1, 6, 1, 4)
+	gourdCount.Size = UDim2.fromOffset(20, 20)
+	gourdCount.Font = FONT
+	gourdCount.TextSize = 20
+	gourdCount.TextColor3 = PARCHMENT
+	gourdCount.TextStrokeTransparency = 0.4
+	gourdCount.Text = "3"
+	gourdCount.Parent = gourdIcon
 
-	-- Posture, bottom-centre, hidden while empty.
+	vitality =
+		makeBar(ownGroup, Vector2.new(380, 8), UDim2.new(0, 48, 0.5, 0), Vector2.new(0, 0.5), false, true, CRIMSON)
+
+	staminaGroup = Instance.new("CanvasGroup")
+	staminaGroup.BackgroundTransparency = 1
+	staminaGroup.AnchorPoint = Vector2.new(0, 1)
+	staminaGroup.Position = UDim2.new(0, 84, 1, -42)
+	staminaGroup.Size = UDim2.fromOffset(330, 26)
+	staminaGroup.GroupTransparency = 0.45
+	staminaGroup.Parent = screen
+	stamina =
+		makeBar(staminaGroup, Vector2.new(300, 4), UDim2.fromScale(0, 0.5), Vector2.new(0, 0.5), false, false, STAMINA)
+
+	-- Posture, bottom-centre: bloom, framed bar, and the ornament over its middle.
 	postureGroup = Instance.new("CanvasGroup")
 	postureGroup.BackgroundTransparency = 1
 	postureGroup.AnchorPoint = Vector2.new(0.5, 1)
-	postureGroup.Position = UDim2.new(0.5, 0, 1, -96)
-	postureGroup.Size = UDim2.fromOffset(440, 18)
+	postureGroup.Position = UDim2.new(0.5, 0, 1, -100)
+	postureGroup.Size = UDim2.fromOffset(560, 80)
 	postureGroup.GroupTransparency = 1
 	postureGroup.Parent = screen
-	posture =
-		makeBar(postureGroup, UDim2.new(1, -20, 0, 7), UDim2.fromScale(0.5, 0.5), Vector2.new(0.5, 0.5), true, false)
-	diamond(postureGroup, 10, UDim2.fromScale(0.5, 0.5), INK)
+	postureGlow = image(postureGroup, UI.BarGlow, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(560, 80),
+		ImageTransparency = 1,
+	})
+	posture = makeBar(
+		postureGroup,
+		Vector2.new(440, 8),
+		UDim2.fromScale(0.5, 0.5),
+		Vector2.new(0.5, 0.5),
+		true,
+		false,
+		POSTURE_LOW
+	)
+	image(postureGroup, UI.PostureOrnament, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(140, 42),
+		ZIndex = 3,
+	})
 
 	-- A quiet controls reminder that fades away.
-	local hint = Instance.new("TextLabel")
-	hint.AnchorPoint = Vector2.new(1, 1)
-	hint.Position = UDim2.new(1, -28, 1, -24)
-	hint.Size = UDim2.fromOffset(460, 96)
-	hint.BackgroundTransparency = 1
-	hint.Font = FONT
-	hint.TextSize = 17
-	hint.TextXAlignment = Enum.TextXAlignment.Right
-	hint.TextYAlignment = Enum.TextYAlignment.Bottom
-	hint.TextColor3 = PARCHMENT
-	hint.TextTransparency = 1 -- shown by showControls() once the player enters
-	hint.TextStrokeTransparency = 1
-	hint.Text = "Slash  —  Left Mouse\nDeflect · Guard  —  F\nDodge  —  Q   (dash into a thrust: Mikiri)\n"
-		.. "Perilous Thrust  —  E      Sweep  —  C\nHealing Gourd  —  G      Lock On  —  R"
-	hint.Parent = screen
-	controlsHint = hint
+	controlsHint = Instance.new("TextLabel")
+	controlsHint.AnchorPoint = Vector2.new(1, 1)
+	controlsHint.Position = UDim2.new(1, -30, 1, -26)
+	controlsHint.Size = UDim2.fromOffset(470, 110)
+	controlsHint.BackgroundTransparency = 1
+	controlsHint.Font = FONT
+	controlsHint.TextSize = 17
+	controlsHint.LineHeight = 1.15
+	controlsHint.TextXAlignment = Enum.TextXAlignment.Right
+	controlsHint.TextYAlignment = Enum.TextYAlignment.Bottom
+	controlsHint.TextColor3 = PARCHMENT
+	controlsHint.TextTransparency = 1
+	controlsHint.Text = "Slash   Left Mouse        Deflect · Guard   F\n"
+		.. "Dodge   Q   — dash into a thrust to Mikiri\n"
+		.. "Perilous Thrust   E        Sweep   C\n"
+		.. "Healing Gourd   G        Lock On   R"
+	controlsHint.Parent = screen
 
 	screen.Parent = player:WaitForChild("PlayerGui")
 end
@@ -510,10 +561,10 @@ local function onCombatEvent(kind: string, data: { [string]: any })
 	local attacker: Model? = data.attacker
 	local defender: Model? = data.defender
 	if kind == "Deathblow" and attacker == character and defender then
-		CombatHUD.splash("忍殺", "Shinobi Execution", DEATHBLOW_RED, 1.1)
+		CombatHUD.splash(UI.KanjiExecution, "Shinobi Execution", DEATH_RED, 1.1)
 		removeEnemy(defender)
 	elseif kind == "Died" and data.model == character then
-		CombatHUD.splash("死", "Death", DEATHBLOW_RED, 2.6)
+		CombatHUD.splash(UI.KanjiDeath, "Death", DEATH_RED, 2.6)
 	elseif kind == "Died" and data.model then
 		removeEnemy(data.model)
 	elseif attacker and defender then
@@ -527,15 +578,6 @@ local function onCombatEvent(kind: string, data: { [string]: any })
 	if kind == "PostureBroken" and data.model and data.model ~= character then
 		showEnemy(data.model, 2)
 	end
-end
-
--- Shows the controls reminder for a while, then fades it (called once you enter).
-function CombatHUD.showControls()
-	controlsHint.TextTransparency = 0.2
-	controlsHint.TextStrokeTransparency = 0.7
-	task.delay(CONTROLS_HINT_TIME, function()
-		tween(controlsHint, 2, { TextTransparency = 1, TextStrokeTransparency = 1 })
-	end)
 end
 
 function CombatHUD.start()
@@ -564,7 +606,6 @@ function CombatHUD.start()
 		end
 	end)
 
-	-- Enemies tagged later (respawns) just need cleanup on removal; bars are created on demand.
 	CollectionService:GetInstanceRemovedSignal(Types.Tag):Connect(function(instance)
 		if instance:IsA("Model") then
 			removeEnemy(instance)

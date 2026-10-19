@@ -55,6 +55,8 @@ export type Combatant = {
 
 	posture: number,
 	lastPostureDamageAt: number,
+	stamina: number,
+	lastStaminaSpendAt: number,
 
 	blocking: boolean,
 	deflectStamp: number, -- clamped stamp of the last press that armed a deflect
@@ -136,6 +138,27 @@ local function publishPosture(c: Combatant)
 	if c.model:GetAttribute("Posture") ~= shown then
 		c.model:SetAttribute("Posture", shown)
 	end
+end
+
+local function publishStamina(c: Combatant)
+	local shown = math.floor(c.stamina + 0.5)
+	if c.model:GetAttribute("Stamina") ~= shown then
+		c.model:SetAttribute("Stamina", shown)
+	end
+end
+
+-- Pays a stamina cost, or refuses the action if there isn't enough.
+local function spendStamina(c: Combatant, cost: number?): boolean
+	if not cost or cost <= 0 then
+		return true
+	end
+	if c.stamina < cost then
+		return false
+	end
+	c.stamina -= cost
+	c.lastStaminaSpendAt = now()
+	publishStamina(c)
+	return true
 end
 
 local function cancelAttack(c: Combatant)
@@ -293,6 +316,9 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 	if c.state ~= "Idle" or t < (c.nextAttackAt[kind] or 0) then
 		return false
 	end
+	if not spendStamina(c, Config.Stamina.Costs[kind]) then
+		return false
+	end
 
 	setBlocking(c, false)
 	cancelAttack(c)
@@ -395,6 +421,9 @@ local function dodge(c: Combatant, stamp: number, forward: boolean): boolean
 	local t = now()
 	cancelRecovery(c)
 	if c.state ~= "Idle" or t < c.nextDodgeAt then
+		return false
+	end
+	if not spendStamina(c, Config.Stamina.Costs.Dodge) then
 		return false
 	end
 	c.buffered = nil
@@ -508,6 +537,8 @@ function CombatService.reset(c: Combatant, protection: number)
 	c.humanoid.Health = c.humanoid.MaxHealth
 	c.gourds = Config.Gourd.Charges
 	c.model:SetAttribute("Gourds", c.gourds)
+	c.stamina = Config.Stamina.Max
+	publishStamina(c)
 	c.protectedUntil = now() + protection
 end
 
@@ -553,6 +584,8 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		bufferedAt = 0,
 		posture = 0,
 		lastPostureDamageAt = 0,
+		stamina = Config.Stamina.Max,
+		lastStaminaSpendAt = 0,
 		blocking = false,
 		deflectStamp = -math.huge,
 		lastBlockPressAt = -math.huge,
@@ -575,6 +608,8 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 	model:SetAttribute("Posture", 0)
 	model:SetAttribute("Blocking", false)
 	model:SetAttribute("Gourds", c.gourds)
+	model:SetAttribute("StaminaMax", Config.Stamina.Max)
+	model:SetAttribute("Stamina", Config.Stamina.Max)
 	setState(c, "Idle")
 	CollectionService:AddTag(model, Types.Tag)
 
@@ -662,6 +697,13 @@ local function step(dt: number)
 			c.posture = math.max(0, c.posture - Config.Posture.RegenPerSecond * multiplier * dt)
 		end
 		publishPosture(c)
+
+		local stamina = Config.Stamina
+		if c.stamina < stamina.Max and t - c.lastStaminaSpendAt >= stamina.RegenDelay then
+			local multiplier = if c.blocking then stamina.GuardRegenMultiplier else 1
+			c.stamina = math.min(stamina.Max, c.stamina + stamina.RegenPerSecond * multiplier * dt)
+			publishStamina(c)
+		end
 	end
 end
 

@@ -39,6 +39,27 @@ local Assets = {
 		Dodge = "rbxassetid://9120729005", -- PSE: whoosh
 	},
 
+	-- HUD art rendered by art/ui/generate.py and uploaded to Roblox. White or neutral
+	-- art is tinted in game with ImageColor3.
+	UI = {
+		BarFrame = "rbxassetid://102708528564230", -- 256x40, 9-slice, inset 10
+		BarFill = "rbxassetid://73139334508183",
+		BarGlow = "rbxassetid://129118109109326",
+		PostureOrnament = "rbxassetid://139926943451578",
+		Glow = "rbxassetid://113667814830714",
+		DeathblowDot = "rbxassetid://113601375102346",
+		Reticle = "rbxassetid://110858671573862",
+		Vignette = "rbxassetid://94405813487817",
+		InkBand = "rbxassetid://85181838043049",
+		Gourd = "rbxassetid://87760799953372",
+		KanjiPeril = "rbxassetid://138132976031959", -- 危
+		KanjiDeath = "rbxassetid://85340426609348", -- 死
+		KanjiExecution = "rbxassetid://139672111360350", -- 忍殺
+		KanjiVictory = "rbxassetid://125311348467034", -- 勝
+		KanjiEnd = "rbxassetid://101271872236368", -- 終
+		KanjiDuel = "rbxassetid://85475507363200", -- 決闘
+	},
+
 	Ambience = {
 		Bed = "rbxassetid://9112832288", -- PSE: distant mountain birds, heavy air (loop)
 		MatchMusic = "rbxassetid://1841476670", -- APM: "Drums of Combat"
