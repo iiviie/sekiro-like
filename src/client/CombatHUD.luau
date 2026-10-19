@@ -17,8 +17,8 @@ local POSTURE_BROKEN = Color3.fromRGB(255, 245, 200)
 local HEALTH = Color3.fromRGB(200, 40, 40)
 local TRACK = Color3.fromRGB(20, 18, 16)
 
-local CONTROLS =
-	"LMB / R1  slash      F / L1  deflect (tap) · guard (hold)      E / Y  perilous thrust      Q / B  dodge"
+local CONTROLS = "LMB / R1  slash (x3 combo)     F / L1  deflect (tap) · guard (hold)     "
+	.. "E / Y  perilous thrust     Q / B  dodge     R / MMB  lock on"
 
 type Bars = { posture: Frame, health: Frame }
 
@@ -78,7 +78,7 @@ local function buildScreen(): Bars
 	controls.BackgroundTransparency = 1
 	controls.AnchorPoint = Vector2.new(0.5, 1)
 	controls.Position = UDim2.new(0.5, 0, 1, -16)
-	controls.Size = UDim2.fromOffset(760, 20)
+	controls.Size = UDim2.fromOffset(900, 20)
 	controls.Font = Enum.Font.GothamMedium
 	controls.Text = CONTROLS
 	controls.TextColor3 = Color3.fromRGB(235, 225, 210)

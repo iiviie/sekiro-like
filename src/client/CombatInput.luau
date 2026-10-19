@@ -1,24 +1,35 @@
 --!strict
--- Keyboard, gamepad and touch bindings. The client only sends intents stamped with
--- the synced server clock; CombatService decides what actually happens.
+-- Keyboard, gamepad and touch bindings, plus facing. The client only sends intents
+-- stamped with the synced server clock; CombatService decides what happens. Attacks
+-- pressed early are buffered by the server, so mashing in rhythm chains the combo.
+--
+-- Facing: while locked on, the character turns smoothly to keep facing the target.
+-- Without a lock, any attack or block briefly turns you toward the nearest enemy in
+-- front of the camera (a soft lock), instead of snapping.
 
-local CollectionService = game:GetService("CollectionService")
 local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local CombatVisuals = require(script.Parent.CombatVisuals)
 local Config = require(ReplicatedStorage.Shared.Config)
+local LockOn = require(script.Parent.LockOn)
 local Types = require(ReplicatedStorage.Shared.Types)
 
 local combatAction = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatAction") :: RemoteEvent
 local player = Players.LocalPlayer
 
+local SOFT_FACE_TIME = 0.35
+
 local CombatInput = {}
 
 local blockHeld = false
 local nextDashAt = 0
+local softTarget: Model? = nil
+local softDirection: Vector3? = nil
+local softFaceUntil = 0
 
 local function getCharacter(): (Model?, BasePart?, Humanoid?)
 	local character = player.Character
@@ -33,42 +44,47 @@ local function send(action: Types.Action)
 	combatAction:FireServer(action, workspace:GetServerTimeNow())
 end
 
--- Soft lock: turn toward the nearby enemy closest to where the camera is looking,
--- or along the camera if nobody is in range.
-local function faceTarget()
-	local character, root = getCharacter()
-	if not character or not root then
+local function cameraFlatLook(): Vector3
+	local look = workspace.CurrentCamera.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	return if flat.Magnitude > 1e-3 then flat.Unit else Vector3.new(0, 0, -1)
+end
+
+-- Turn toward the soft target (or along the camera) for a short moment.
+local function softFace()
+	softTarget = LockOn.findBest(Config.SoftLockRange)
+	softDirection = if softTarget then nil else cameraFlatLook()
+	softFaceUntil = os.clock() + SOFT_FACE_TIME
+end
+
+local function facingGoal(root: BasePart): Vector3?
+	local locked = LockOn.target()
+	local focus = locked or (if os.clock() < softFaceUntil or blockHeld then softTarget else nil)
+	local focusRoot = focus and focus:FindFirstChild("HumanoidRootPart")
+	if focusRoot and focusRoot:IsA("BasePart") then
+		local offset = focusRoot.Position - root.Position
+		return Vector3.new(offset.X, 0, offset.Z)
+	end
+	if os.clock() < softFaceUntil then
+		return softDirection
+	end
+	return nil
+end
+
+local function updateFacing(dt: number)
+	local _, root, humanoid = getCharacter()
+	if not root or not humanoid or humanoid.Health <= 0 then
 		return
 	end
-
-	local look = workspace.CurrentCamera.CFrame.LookVector
-	local facing = Vector3.new(look.X, 0, look.Z)
-	if facing.Magnitude < 1e-3 then
-		facing = root.CFrame.LookVector
+	local goal = facingGoal(root)
+	if not goal or goal.Magnitude < 0.1 then
+		humanoid.AutoRotate = true
+		return
 	end
-	facing = facing.Unit
-
-	local best: Vector3? = nil
-	local bestScore = -math.huge
-	for _, model in CollectionService:GetTagged(Types.Tag) do
-		if model ~= character and model:IsA("Model") and model:GetAttribute("CombatState") ~= "Dead" then
-			local other = model:FindFirstChild("HumanoidRootPart") :: BasePart?
-			if other then
-				local offset = other.Position - root.Position
-				local flat = Vector3.new(offset.X, 0, offset.Z)
-				local distance = flat.Magnitude
-				if distance > 0.1 and distance <= Config.SoftLockRange then
-					local score = flat.Unit:Dot(facing) - (distance / Config.SoftLockRange) * 0.5
-					if score > bestScore then
-						best, bestScore = flat, score
-					end
-				end
-			end
-		end
-	end
-
-	local direction = best or facing
-	root.CFrame = CFrame.lookAt(root.Position, root.Position + direction)
+	humanoid.AutoRotate = false
+	local target = CFrame.lookAt(root.Position, root.Position + goal)
+	local alpha = 1 - math.exp(-dt * Config.LockOn.TurnRate)
+	root.CFrame = root.CFrame:Lerp(target, alpha)
 end
 
 local function setBlockHeld(held: boolean)
@@ -76,13 +92,8 @@ local function setBlockHeld(held: boolean)
 		return
 	end
 	blockHeld = held
-	local _, _, humanoid = getCharacter()
-	if humanoid then
-		-- Keep facing the target while guarding instead of turning toward movement.
-		humanoid.AutoRotate = not held
-	end
 	if held then
-		faceTarget()
+		softFace()
 	end
 	send(if held then "BlockDown" else "BlockUp")
 end
@@ -93,7 +104,8 @@ local function dash()
 		return
 	end
 	-- Mirror the server's checks so the dash movement and the i-frames line up.
-	if character:GetAttribute("CombatState") ~= "Idle" or os.clock() < nextDashAt then
+	local state = character:GetAttribute("CombatState")
+	if (state ~= "Idle" and state ~= "Recovery") or os.clock() < nextDashAt then
 		return
 	end
 	local attachment = root:FindFirstChild("RootAttachment") :: Attachment?
@@ -119,6 +131,7 @@ local function dash()
 	velocity.Parent = root
 	Debris:AddItem(velocity, Config.Dodge.DashDuration)
 
+	CombatVisuals.dash(character)
 	send("Dodge")
 end
 
@@ -136,8 +149,10 @@ local function bind(name: string, title: string, position: UDim2, onBegin: () ->
 end
 
 function CombatInput.start()
+	LockOn.start()
+
 	bind("Attack", "Slash", UDim2.new(1, -150, 1, -160), function()
-		faceTarget()
+		softFace()
 		send("Attack")
 	end, nil, Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR1)
 
@@ -148,20 +163,28 @@ function CombatInput.start()
 	end, Enum.KeyCode.F, Enum.KeyCode.ButtonL1)
 
 	bind("Perilous", "Thrust", UDim2.new(1, -150, 1, -240), function()
-		faceTarget()
+		softFace()
 		send("Perilous")
 	end, nil, Enum.KeyCode.E, Enum.KeyCode.ButtonY)
 
 	bind("Dodge", "Dodge", UDim2.new(1, -230, 1, -190), dash, nil, Enum.KeyCode.Q, Enum.KeyCode.ButtonB)
 
-	RunService.RenderStepped:Connect(function()
-		if blockHeld then
-			faceTarget()
-		end
-	end)
+	bind(
+		"LockOn",
+		"Lock",
+		UDim2.new(1, -310, 1, -150),
+		LockOn.toggle,
+		nil,
+		Enum.KeyCode.R,
+		Enum.UserInputType.MouseButton3,
+		Enum.KeyCode.ButtonR3
+	)
+
+	RunService.RenderStepped:Connect(updateFacing)
 
 	player.CharacterAdded:Connect(function()
 		blockHeld = false
+		softFaceUntil = 0
 	end)
 end
 

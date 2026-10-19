@@ -1,71 +1,56 @@
 --!strict
--- Local-only feedback: sword poses, telegraphs, sparks, floating text and camera shake.
--- Everything here is cosmetic; outcomes come from the server's CombatEvent broadcasts.
+-- Local-only feedback: body animation, sounds, sparks, telegraphs, hitstop and camera
+-- shake, all driven by the server's CombatEvent broadcasts and replicated attributes.
+-- Nothing here affects outcomes.
 
 local CollectionService = game:GetService("CollectionService")
+local ContentProvider = game:GetService("ContentProvider")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
+local Animator = require(script.Parent.Animator)
+local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
-local SwordPoses = require(ReplicatedStorage.Shared.SwordPoses)
 local Types = require(ReplicatedStorage.Shared.Types)
 
 local combatEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent
 local player = Players.LocalPlayer
 
+local SOUNDS = Assets.Sounds
 local GOLD = Color3.fromRGB(255, 214, 110)
-local SPARK = Color3.fromRGB(255, 190, 90)
-local BLOOD = Color3.fromRGB(190, 20, 30)
-local STEEL = Color3.fromRGB(190, 195, 205)
+local SPARK = Color3.fromRGB(255, 185, 90)
+local BLOOD = Color3.fromRGB(170, 10, 20)
+local STEEL = Color3.fromRGB(200, 205, 215)
 
 local CombatVisuals = {}
-
--- Bumped whenever a model's pose changes so stale delayed tweens can bail out.
-local poseTokens: { [Model]: number } = {}
 
 local function now(): number
 	return workspace:GetServerTimeNow()
 end
 
-local function getSword(model: Model): (BasePart?, Weld?)
-	local sword = model:FindFirstChild("Sword")
-	if not sword or not sword:IsA("BasePart") then
-		return nil, nil
-	end
-	local weld = sword:FindFirstChild("SwordGrip")
-	return sword, if weld and weld:IsA("Weld") then weld else nil
+local function rootOf(model: Model?): BasePart?
+	local root = model and model:FindFirstChild("HumanoidRootPart")
+	return if root and root:IsA("BasePart") then root else nil
 end
 
-local function tweenPose(model: Model, pose: CFrame, duration: number): number
-	local token = (poseTokens[model] or 0) + 1
-	poseTokens[model] = token
-	local _, weld = getSword(model)
-	if weld then
-		local info = TweenInfo.new(math.max(duration, 0.01), Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-		TweenService:Create(weld, info, { C0 = pose }):Play()
-	end
-	return token
+local function isLocal(model: Model?): boolean
+	return model ~= nil and model == player.Character
 end
 
-local function restingPose(model: Model): CFrame
-	if model:GetAttribute("CombatState") == "Broken" then
-		return SwordPoses.Broken
-	elseif model:GetAttribute("Blocking") then
-		return SwordPoses.Guard
-	end
-	return SwordPoses.Rest
-end
-
-local function settle(model: Model)
-	tweenPose(model, restingPose(model), 0.15)
-	local sword = getSword(model)
-	if sword then
-		sword.Color = Config.Visual.SwordColor
-		sword.Material = Enum.Material.Metal
-	end
+local function playSound(id: string, parent: Instance?, volume: number?, pitch: number?)
+	local sound = Instance.new("Sound")
+	sound.SoundId = id
+	sound.Volume = volume or 0.6
+	sound.PlaybackSpeed = (pitch or 1) * (0.94 + math.random() * 0.12)
+	sound.RollOffMaxDistance = 140
+	sound.RollOffMinDistance = 12
+	sound.Parent = parent or SoundService
+	sound:Play()
+	Debris:AddItem(sound, 4)
 end
 
 local function floatingText(model: Model, text: string, color: Color3, scale: number?)
@@ -99,7 +84,7 @@ local function floatingText(model: Model, text: string, color: Color3, scale: nu
 	Debris:AddItem(gui, 0.8)
 end
 
-local function burst(position: Vector3, color: Color3, count: number, speed: number)
+local function anchorAt(position: Vector3): Part
 	local anchor = Instance.new("Part")
 	anchor.Anchored = true
 	anchor.CanCollide = false
@@ -108,37 +93,67 @@ local function burst(position: Vector3, color: Color3, count: number, speed: num
 	anchor.Transparency = 1
 	anchor.Size = Vector3.one * 0.2
 	anchor.CFrame = CFrame.new(position)
+	anchor.Parent = workspace
+	Debris:AddItem(anchor, 1.5)
+	return anchor
+end
 
-	local emitter = Instance.new("ParticleEmitter")
-	emitter.Color = ColorSequence.new(color)
-	emitter.LightEmission = 1
-	emitter.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 0) })
-	emitter.Speed = NumberRange.new(speed * 0.5, speed)
-	emitter.SpreadAngle = Vector2.new(180, 180)
-	emitter.Lifetime = NumberRange.new(0.15, 0.35)
-	emitter.Drag = 6
-	emitter.Rate = 0
-	emitter.Parent = anchor
+-- Sparks plus a light flash and an expanding glow ball.
+local function burst(position: Vector3, color: Color3, count: number, speed: number, flashSize: number)
+	local anchor = anchorAt(position)
+
+	local sparks = Instance.new("ParticleEmitter")
+	sparks.Color = ColorSequence.new(Color3.new(1, 1, 1), color)
+	sparks.LightEmission = 1
+	sparks.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.18), NumberSequenceKeypoint.new(1, 0) })
+	sparks.Speed = NumberRange.new(speed * 0.5, speed)
+	sparks.SpreadAngle = Vector2.new(180, 180)
+	sparks.Lifetime = NumberRange.new(0.12, 0.3)
+	sparks.Acceleration = Vector3.new(0, -40, 0)
+	sparks.Drag = 4
+	sparks.Rate = 0
+	sparks.Orientation = Enum.ParticleOrientation.VelocityParallel
+	sparks.Squash = NumberSequence.new(2)
+	sparks.Parent = anchor
+	sparks:Emit(count)
 
 	local light = Instance.new("PointLight")
 	light.Color = color
-	light.Brightness = 4
-	light.Range = 10
+	light.Brightness = 6
+	light.Range = 12
 	light.Parent = anchor
-
-	anchor.Parent = workspace
-	emitter:Emit(count)
 	TweenService:Create(light, TweenInfo.new(0.25), { Brightness = 0 }):Play()
-	Debris:AddItem(anchor, 1)
+
+	local flash = Instance.new("Part")
+	flash.Shape = Enum.PartType.Ball
+	flash.Anchored = true
+	flash.CanCollide = false
+	flash.CanQuery = false
+	flash.CanTouch = false
+	flash.Material = Enum.Material.Neon
+	flash.Color = color
+	flash.Size = Vector3.one * 0.3
+	flash.CFrame = CFrame.new(position)
+	flash.Transparency = 0.1
+	flash.Parent = workspace
+	TweenService:Create(flash, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.one * flashSize,
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(flash, 0.2)
 end
 
-local function contactPoint(a: Model, b: Model): Vector3?
-	local rootA = a:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local rootB = b:FindFirstChild("HumanoidRootPart") :: BasePart?
-	if not rootA or not rootB then
+-- Where two blades meet: along the defender's sword if they have one.
+local function contactPoint(attacker: Model, defender: Model): Vector3?
+	local sword = defender:FindFirstChild("Sword")
+	if sword and sword:IsA("BasePart") then
+		return (sword.CFrame * CFrame.new(0, 0, 0.6)).Position
+	end
+	local a, b = rootOf(attacker), rootOf(defender)
+	if not a or not b then
 		return nil
 	end
-	return (rootA.Position + rootB.Position) / 2 + Vector3.new(0, 1, 0)
+	return (a.Position + b.Position) / 2 + Vector3.new(0, 1, 0)
 end
 
 local function shake(intensity: number, duration: number)
@@ -161,104 +176,231 @@ local function shake(intensity: number, duration: number)
 	end)
 end
 
-local function involvesLocal(...: Model?): boolean
-	local character = player.Character
-	for i = 1, select("#", ...) do
-		if select(i, ...) == character then
-			return true
-		end
+-- Pushes the local character forward during its own strike (players own their physics).
+local function lunge(speed: number)
+	local root = rootOf(player.Character)
+	local attachment = root and root:FindFirstChild("RootAttachment")
+	if not root or not attachment or not attachment:IsA("Attachment") or speed <= 0 then
+		return
 	end
-	return false
+	local look = root.CFrame.LookVector
+	local velocity = Instance.new("LinearVelocity")
+	velocity.Attachment0 = attachment
+	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
+	velocity.PrimaryTangentAxis = Vector3.xAxis
+	velocity.SecondaryTangentAxis = Vector3.zAxis
+	velocity.PlaneVelocity = Vector2.new(look.X, look.Z).Unit * speed
+	velocity.MaxForce = 4e4
+	velocity.Parent = root
+	Debris:AddItem(velocity, 0.12)
 end
 
-local function playSwing(model: Model, kind: Config.AttackKind, hitAt: number)
-	local perilous = kind == "Perilous"
-	local windupPose = if perilous then SwordPoses.ThrustWindup else SwordPoses.Windup
-	local strikePose = if perilous then SwordPoses.Thrust else SwordPoses.Strike
-
-	-- Land the strike frame on hitAt even though this event arrived late.
-	local remaining = math.max(hitAt - now(), 0)
-	local strikeTime = math.min(Config.Visual.StrikeTime, remaining)
-	local token = tweenPose(model, windupPose, remaining - strikeTime)
-
-	local sword = getSword(model)
-	if sword then
-		sword.Material = Enum.Material.Neon
-		sword.Color = if perilous then Config.Visual.PerilousColor else Config.Visual.WindupColor
-	end
-	if perilous then
-		floatingText(model, "危", Config.Visual.PerilousColor, 1.6)
-	end
-
-	task.delay(remaining - strikeTime, function()
-		if poseTokens[model] ~= token then
-			return
+local function hitstop(duration: number, ...: Model?)
+	for i = 1, select("#", ...) do
+		local model = select(i, ...)
+		if model then
+			Animator.hitstop(model, duration)
 		end
-		local strikeToken = tweenPose(model, strikePose, strikeTime)
-		task.delay(strikeTime + Config.Visual.StrikeHold, function()
-			if poseTokens[model] == strikeToken then
-				settle(model)
+	end
+end
+
+-- A fading ghost copy of the body, left behind during a dash.
+local function afterimage(model: Model)
+	local ghost = Instance.new("Model")
+	ghost.Name = "Afterimage"
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Transparency < 1 then
+			local copy = part:Clone()
+			copy:ClearAllChildren()
+			copy.Anchored = true
+			copy.CanCollide = false
+			copy.CanQuery = false
+			copy.CanTouch = false
+			copy.CastShadow = false
+			copy.Material = Enum.Material.Neon
+			copy.Color = Color3.fromRGB(150, 175, 255)
+			copy.Transparency = 0.35
+			if copy:IsA("MeshPart") then
+				copy.TextureID = ""
+			end
+			copy.Parent = ghost
+			TweenService:Create(copy, TweenInfo.new(0.35, Enum.EasingStyle.Quad), { Transparency = 1 }):Play()
+		end
+	end
+	ghost.Parent = workspace
+	Debris:AddItem(ghost, 0.35)
+end
+
+-- Dash pose, afterimages and whoosh. Called straight from input for your own character
+-- so the dodge feels instant, and from the Dodge broadcast for everyone else.
+function CombatVisuals.dash(model: Model)
+	Animator.play(model, "Dash")
+	playSound(SOUNDS.Dodge, rootOf(model), 0.45)
+	for i = 0, 2 do
+		task.delay(i * 0.045, function()
+			if model.Parent then
+				afterimage(model)
 			end
 		end)
-	end)
+	end
+end
+
+local function telegraphPerilous(model: Model, duration: number)
+	local highlight = Instance.new("Highlight")
+	highlight.FillColor = Config.Visual.PerilousColor
+	highlight.FillTransparency = 0.65
+	highlight.OutlineColor = Config.Visual.PerilousColor
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+	highlight.Adornee = model
+	highlight.Parent = model
+	Debris:AddItem(highlight, duration + 0.1)
+
+	floatingText(model, "危", Config.Visual.PerilousColor, 1.6)
+	playSound(SOUNDS.PerfectDeflect, rootOf(model), 0.5, 1.6)
+end
+
+local function refreshBase(model: Model)
+	local state = model:GetAttribute("CombatState")
+	if state == "Dead" then
+		Animator.setBase(model, nil)
+	elseif state == "Broken" then
+		Animator.setBase(model, "Broken")
+	elseif model:GetAttribute("Blocking") then
+		Animator.setBase(model, "Guard")
+	else
+		Animator.setBase(model, "Ready")
+	end
 end
 
 local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	Windup = function(data)
-		playSwing(data.attacker, data.kind, data.hitAt)
+		local model: Model = data.attacker
+		local kind: Config.AttackKind = data.kind
+		local remaining = math.max(data.hitAt - now(), 0)
+		Animator.play(model, kind, remaining)
+
+		local heavy = kind == "Light3" or kind == "Perilous"
+		if kind == "Perilous" then
+			telegraphPerilous(model, remaining)
+		end
+		task.delay(math.max(remaining - 0.05, 0), function()
+			if not model.Parent then
+				return
+			end
+			playSound(if heavy then SOUNDS.HeavySwing else SOUNDS.Swing, rootOf(model), if heavy then 0.7 else 0.55)
+			if isLocal(model) then
+				lunge(Config.Attacks[kind].lunge)
+			end
+		end)
 	end,
+
 	Deflect = function(data)
-		local point = contactPoint(data.attacker, data.defender)
+		local attacker: Model, defender: Model = data.attacker, data.defender
+		local perfect: boolean = data.perfect
+		Animator.play(defender, "GuardImpact")
+		Animator.play(attacker, "Recoil")
+		hitstop(if perfect then Config.Visual.PerfectHitstop else Config.Visual.Hitstop, attacker, defender)
+
+		local point = contactPoint(attacker, defender)
 		if point then
-			burst(point, if data.perfect then GOLD else SPARK, if data.perfect then 45 else 25, 28)
+			burst(
+				point,
+				if perfect then GOLD else SPARK,
+				if perfect then 60 else 30,
+				if perfect then 40 else 28,
+				if perfect then 6 else 3.5
+			)
 		end
-		floatingText(data.defender, if data.perfect then "PERFECT" else "DEFLECT", if data.perfect then GOLD else SPARK)
-		if involvesLocal(data.attacker, data.defender) then
-			shake(if data.perfect then 0.6 else 0.35, 0.15)
+		local soundAt = rootOf(defender)
+		playSound(if math.random() < 0.5 then SOUNDS.Deflect else SOUNDS.DeflectAlt, soundAt, 0.8)
+		if perfect then
+			playSound(SOUNDS.PerfectDeflect, soundAt, 0.7, 1.15)
+			floatingText(defender, "PERFECT", GOLD, 0.9)
+		end
+		if isLocal(attacker) or isLocal(defender) then
+			shake(if perfect then 0.55 else 0.3, 0.15)
 		end
 	end,
+
 	Guard = function(data)
-		local point = contactPoint(data.attacker, data.defender)
+		local attacker: Model, defender: Model = data.attacker, data.defender
+		Animator.play(defender, "GuardImpact")
+		hitstop(Config.Visual.Hitstop * 0.6, attacker, defender)
+		local point = contactPoint(attacker, defender)
 		if point then
-			burst(point, STEEL, 8, 12)
+			burst(point, STEEL, 10, 14, 1.8)
 		end
+		playSound(SOUNDS.Guard, rootOf(defender), 0.55)
 	end,
+
 	Hit = function(data)
-		local root = data.defender:FindFirstChild("HumanoidRootPart")
+		local attacker: Model, defender: Model = data.attacker, data.defender
+		Animator.play(defender, "HitReact")
+		hitstop(Config.Visual.Hitstop, attacker, defender)
+		local root = rootOf(defender)
 		if root then
-			burst(root.Position, BLOOD, 18, 16)
+			burst(root.Position + Vector3.new(0, 0.8, 0), BLOOD, 22, 18, 2)
 		end
-		if involvesLocal(data.defender) then
+		playSound(if math.random() < 0.5 then SOUNDS.Hit else SOUNDS.HitAlt, root, 0.7)
+		if isLocal(defender) then
 			shake(0.5, 0.2)
 		end
 	end,
+
 	PostureBroken = function(data)
-		settle(data.model)
-		floatingText(data.model, "BREAK", GOLD, 1.3)
-		local root = data.model:FindFirstChild("HumanoidRootPart")
+		local model: Model = data.model
+		Animator.stop(model)
+		floatingText(model, "BREAK", GOLD, 1.3)
+		local root = rootOf(model)
 		if root then
-			burst(root.Position + Vector3.new(0, 1.5, 0), GOLD, 30, 20)
+			burst(root.Position + Vector3.new(0, 1.5, 0), GOLD, 40, 24, 5)
 		end
+		playSound(SOUNDS.PostureBreak, root, 0.8)
 	end,
+
 	Deathblow = function(data)
-		floatingText(data.defender, "忍殺", BLOOD, 2)
-		local root = data.defender:FindFirstChild("HumanoidRootPart")
+		local attacker: Model, defender: Model = data.attacker, data.defender
+		Animator.play(attacker, "Deathblow")
+		Animator.play(defender, "Executed")
+		hitstop(Config.Visual.DeathblowHitstop, attacker, defender)
+		floatingText(defender, "忍殺", BLOOD, 2)
+		local root = rootOf(defender)
 		if root then
-			burst(root.Position, BLOOD, 70, 30)
+			burst(root.Position, BLOOD, 80, 30, 7)
 		end
-		if involvesLocal(data.attacker, data.defender) then
+		playSound(SOUNDS.PostureBreak, root, 0.9, 0.8)
+		playSound(SOUNDS.HitAlt, root, 0.9, 0.85)
+		if isLocal(attacker) or isLocal(defender) then
 			shake(0.9, 0.35)
 		end
 	end,
+
+	Died = function(data)
+		local model: Model = data.model
+		if Animator.current(model) ~= "Executed" then
+			Animator.play(model, "Executed")
+		end
+	end,
+
+	Dodge = function(data)
+		if not isLocal(data.model) then
+			CombatVisuals.dash(data.model)
+		end
+	end,
+
 	Dodged = function(data)
 		floatingText(data.defender, "EVADE", STEEL, 0.8)
 	end,
+
 	Feint = function(data)
-		settle(data.model)
+		Animator.stop(data.model)
 		floatingText(data.model, "FEINT", STEEL, 0.8)
 	end,
+
 	Interrupted = function(data)
-		settle(data.model)
+		Animator.stop(data.model)
 	end,
 }
 
@@ -267,21 +409,19 @@ local function watch(instance: Instance)
 		return
 	end
 	local model = instance
-	local function onChanged()
-		local state = model:GetAttribute("CombatState")
-		-- Swings drive their own poses; everything else snaps to the resting pose.
-		if state ~= "Windup" and state ~= "Recovery" then
-			settle(model)
-		end
-	end
-	model:GetAttributeChangedSignal("Blocking"):Connect(onChanged)
-	model:GetAttributeChangedSignal("CombatState"):Connect(onChanged)
-	model.Destroying:Once(function()
-		poseTokens[model] = nil
+	Animator.attach(model)
+	refreshBase(model)
+	model:GetAttributeChangedSignal("Blocking"):Connect(function()
+		refreshBase(model)
+	end)
+	model:GetAttributeChangedSignal("CombatState"):Connect(function()
+		refreshBase(model)
 	end)
 end
 
 function CombatVisuals.start()
+	Animator.start()
+
 	combatEvent.OnClientEvent:Connect(function(kind: string, data: { [string]: any })
 		local handler = handlers[kind]
 		if handler then
@@ -293,6 +433,16 @@ function CombatVisuals.start()
 	for _, instance in CollectionService:GetTagged(Types.Tag) do
 		watch(instance)
 	end
+
+	task.spawn(function()
+		local preload = {}
+		for _, id in SOUNDS do
+			local sound = Instance.new("Sound")
+			sound.SoundId = id
+			table.insert(preload, sound)
+		end
+		ContentProvider:PreloadAsync(preload)
+	end)
 end
 
 return CombatVisuals

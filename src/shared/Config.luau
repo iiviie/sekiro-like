@@ -2,7 +2,8 @@
 -- Every combat number lives here so feel can be tuned without touching logic.
 -- Times are seconds on the shared server clock (workspace:GetServerTimeNow()).
 
-export type AttackKind = "Light" | "Perilous"
+-- Light1-3 are the slash combo; the client picks the matching clip from the kind name.
+export type AttackKind = "Light1" | "Light2" | "Light3" | "Perilous"
 
 export type AttackSpec = {
 	windup: number, -- telegraph before impact; keep >= 0.3 so 200 ms ping players can still read it
@@ -12,18 +13,42 @@ export type AttackSpec = {
 	postureDamage: number,
 	range: number, -- studs in front of the attacker
 	width: number,
+	lunge: number, -- forward speed (studs/s) added at the strike
 	unblockable: boolean, -- perilous attacks ignore deflect and guard; dodge them instead
 }
 
 local attacks: { [AttackKind]: AttackSpec } = {
-	Light = {
-		windup = 0.35,
-		recovery = 0.25,
-		cooldown = 0.45,
-		damage = 10,
-		postureDamage = 20,
+	Light1 = {
+		windup = 0.32,
+		recovery = 0.22,
+		cooldown = 0,
+		damage = 9,
+		postureDamage = 18,
 		range = 7,
 		width = 6,
+		lunge = 18,
+		unblockable = false,
+	},
+	Light2 = {
+		windup = 0.3,
+		recovery = 0.22,
+		cooldown = 0,
+		damage = 9,
+		postureDamage = 18,
+		range = 7,
+		width = 6,
+		lunge = 18,
+		unblockable = false,
+	},
+	Light3 = {
+		windup = 0.42,
+		recovery = 0.4,
+		cooldown = 0,
+		damage = 14,
+		postureDamage = 28,
+		range = 7.5,
+		width = 5,
+		lunge = 26,
 		unblockable = false,
 	},
 	Perilous = {
@@ -34,12 +59,23 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		postureDamage = 35,
 		range = 9,
 		width = 4,
+		lunge = 40,
 		unblockable = true,
 	},
 }
 
 local Config = {
 	Attacks = attacks,
+
+	Combo = {
+		Sequence = { "Light1", "Light2", "Light3" } :: { AttackKind },
+		Window = 0.5, -- after recovery ends, the next slash continues the combo for this long
+		Buffer = 0.3, -- an attack pressed this close to the end of recovery fires as soon as it can
+		RecoveryCancel = 0.06, -- after impact resolves, block can cancel the rest of recovery
+	},
+
+	-- Spawn protection: you can't be hit and bots ignore you for this long.
+	SpawnProtection = 2,
 
 	Posture = {
 		Max = 100,
@@ -60,6 +96,8 @@ local Config = {
 		DefenderPosture = 6,
 		GuardPostureMultiplier = 1,
 		FacingDot = 0.15, -- defender must roughly face the attacker to deflect or guard
+		AttackerRecoil = 0.22, -- a deflected attacker is staggered this long...
+		PerfectAttackerRecoil = 0.42, -- ...and longer after a perfect deflect, opening a punish
 	},
 
 	Feint = {
@@ -90,12 +128,21 @@ local Config = {
 	BrokenWalkSpeed = 4,
 	SoftLockRange = 16,
 
+	LockOn = {
+		Range = 45, -- max distance to acquire a target
+		BreakRange = 60, -- lock drops beyond this
+		TurnRate = 16, -- how quickly the character turns to face its target
+		CameraDistance = 11,
+		CameraHeight = 3.2,
+		CameraShoulder = 2,
+		CameraSmoothing = 10,
+	},
+
 	Visual = {
-		StrikeTime = 0.08,
-		StrikeHold = 0.12,
-		SwordColor = Color3.fromRGB(200, 205, 212),
-		WindupColor = Color3.fromRGB(255, 170, 60),
 		PerilousColor = Color3.fromRGB(255, 40, 40),
+		Hitstop = 0.07,
+		PerfectHitstop = 0.11,
+		DeathblowHitstop = 0.16,
 	},
 
 	Bots = {
@@ -104,10 +151,18 @@ local Config = {
 		RespawnDelay = 4,
 		AggroRange = 90,
 		PlayerBias = 0.6, -- players look this much closer, so bots prefer them over each other
-		EngageDistance = 5.5,
+		ArenaRadius = 105, -- bots won't chase past this distance from the centre
 		ThinkInterval = 0.1,
-		AttackInterval = { 0.7, 1.8 },
+		TurnResponsiveness = 18,
+		-- Spacing: circle at StrafeDistance while waiting, step in to AttackDistance to swing.
+		AttackDistance = 5,
+		StrafeDistance = 8,
+		SeparationRadius = 4, -- push away from other fighters closer than this
+		RetreatPosture = 0.7, -- back off to recover when own posture passes this fraction
+		AttackInterval = { 0.6, 1.6 },
+		ComboContinueChance = 0.6, -- chance to chain each next slash
 		PerilousChance = 0.15,
+		PunishChance = 0.7, -- chance to counter-attack right after a perfect deflect
 		-- Defense rolls, cumulative: perfect, then normal deflect, then hold guard, else eat the hit.
 		PerfectChance = 0.15,
 		DeflectChance = 0.45,

@@ -51,11 +51,14 @@ function ArenaBuilder.build()
 	spawn.Name = "PlayerSpawn"
 	spawn.Anchored = true
 	spawn.Neutral = true
-	spawn.Size = Vector3.new(10, 1, 10)
-	spawn.CFrame = CFrame.new(0, 1, 55)
-	spawn.Transparency = 0.6
-	spawn.Material = Enum.Material.Neon
-	spawn.Color = Color3.fromRGB(230, 200, 140)
+	spawn.Size = Vector3.new(10, 0.2, 10)
+	spawn.CFrame = CFrame.new(0, 0.6, 38) -- a flat stone plate just above the floor
+	spawn.Material = Enum.Material.Slate
+	spawn.Color = Color3.fromRGB(64, 58, 52)
+	local decal = spawn:FindFirstChildOfClass("Decal")
+	if decal then
+		decal:Destroy()
+	end
 	spawn.Parent = arena
 
 	arena.Parent = workspace

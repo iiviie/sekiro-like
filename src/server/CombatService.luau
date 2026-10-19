@@ -9,6 +9,12 @@
 --   before resolving, so a deflect pressed on time on the defender's screen still counts
 --   while its packet is in flight. Clients only ever send intents; the server owns
 --   posture, health and every outcome.
+--
+-- Flow
+--   Slashes chain Light1 -> Light2 -> Light3 while pressed inside Combo.Window. Attacks
+--   pressed slightly early are buffered and fire the moment the fighter is free, and a
+--   block press shortly after impact cancels the rest of recovery, so inputs never feel
+--   eaten. A deflected attacker recoils; after a perfect deflect, long enough to punish.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -18,6 +24,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Types = require(Shared.Types)
+local Locomotion = require(script.Parent.Locomotion)
 local SwordRig = require(script.Parent.SwordRig)
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -39,7 +46,12 @@ export type Combatant = {
 	stateEndsAt: number,
 	attackToken: number, -- bumped to invalidate a pending windup
 	windupHitAt: number,
+	cancelableAt: number, -- block may cut recovery short from this time
 	nextAttackAt: { [AttackKind]: number },
+	comboIndex: number,
+	comboUntil: number,
+	buffered: Action?,
+	bufferedAt: number,
 
 	posture: number,
 	lastPostureDamageAt: number,
@@ -50,14 +62,17 @@ export type Combatant = {
 
 	dodgeStamp: number,
 	nextDodgeAt: number,
+	protectedUntil: number,
 }
 
 type WindupListener = (attacker: Combatant, kind: AttackKind, hitAt: number) -> ()
+type DeflectListener = (attacker: Combatant, defender: Combatant, perfect: boolean) -> ()
 
 local CombatService = {}
 
 local combatants: { [Model]: Combatant } = {}
 local windupListeners: { WindupListener } = {}
+local deflectListeners: { DeflectListener } = {}
 local actionBudgets: { [Player]: { windowStart: number, count: number } } = {}
 
 local validActions: { [string]: boolean } = {}
@@ -125,13 +140,14 @@ local function addPosture(c: Combatant, amount: number)
 	if c.posture >= Config.Posture.Max then
 		cancelAttack(c)
 		setBlocking(c, false)
+		c.buffered = nil
 		setState(c, "Broken", Config.Posture.BrokenDuration)
 		broadcast("PostureBroken", { model = c.model })
 	end
 	publishPosture(c)
 end
 
-local function stagger(c: Combatant)
+local function stagger(c: Combatant, duration: number)
 	if c.state == "Broken" or c.state == "Dead" then
 		return
 	end
@@ -139,7 +155,9 @@ local function stagger(c: Combatant)
 		broadcast("Interrupted", { model = c.model })
 	end
 	cancelAttack(c)
-	setState(c, "Staggered", Config.HitStagger)
+	c.buffered = nil
+	c.comboIndex = 0
+	setState(c, "Staggered", duration)
 end
 
 local function isFacing(defender: Combatant, attacker: Combatant): boolean
@@ -173,6 +191,10 @@ local function findTargets(attacker: Combatant, spec: AttackSpec): { Combatant }
 end
 
 local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSpec, hitAt: number)
+	if hitAt < target.protectedUntil then
+		return
+	end
+
 	if target.state == "Broken" then
 		target.humanoid:TakeDamage(Config.DeathblowDamage)
 		broadcast("Deathblow", { attacker = attacker.model, defender = target.model })
@@ -188,20 +210,29 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 	local sinceDeflect = hitAt - target.deflectStamp
 	local deflectArmed = sinceDeflect >= -Config.Deflect.LateTolerance
 
-	if canDefend and deflectArmed and sinceDeflect <= Config.Deflect.PerfectWindow then
-		addPosture(attacker, Config.Deflect.PerfectAttackerPosture)
-		broadcast("Deflect", { attacker = attacker.model, defender = target.model, perfect = true })
-	elseif canDefend and deflectArmed and sinceDeflect <= Config.Deflect.Window then
-		addPosture(attacker, Config.Deflect.AttackerPosture)
-		addPosture(target, Config.Deflect.DefenderPosture)
-		broadcast("Deflect", { attacker = attacker.model, defender = target.model, perfect = false })
+	if canDefend and deflectArmed and sinceDeflect <= Config.Deflect.Window then
+		local perfect = sinceDeflect <= Config.Deflect.PerfectWindow
+		local recoil = if perfect then Config.Deflect.PerfectAttackerRecoil else Config.Deflect.AttackerRecoil
+		if perfect then
+			addPosture(attacker, Config.Deflect.PerfectAttackerPosture)
+		else
+			addPosture(attacker, Config.Deflect.AttackerPosture)
+			addPosture(target, Config.Deflect.DefenderPosture)
+		end
+		if attacker.state ~= "Broken" then
+			stagger(attacker, recoil)
+		end
+		broadcast("Deflect", { attacker = attacker.model, defender = target.model, perfect = perfect })
+		for _, listener in deflectListeners do
+			task.spawn(listener, attacker, target, perfect)
+		end
 	elseif canDefend and target.blocking then
 		addPosture(target, spec.postureDamage * Config.Deflect.GuardPostureMultiplier)
 		broadcast("Guard", { attacker = attacker.model, defender = target.model })
 	else
 		target.humanoid:TakeDamage(spec.damage)
 		addPosture(target, spec.postureDamage * Config.HitPostureMultiplier)
-		stagger(target)
+		stagger(target, Config.HitStagger)
 		broadcast("Hit", { attacker = attacker.model, defender = target.model, damage = spec.damage })
 	end
 end
@@ -217,6 +248,15 @@ local function resolveAttack(attacker: Combatant, spec: AttackSpec, hitAt: numbe
 	end
 end
 
+local function nextComboKind(c: Combatant, t: number): AttackKind
+	local sequence = Config.Combo.Sequence
+	if t > c.comboUntil or c.comboIndex >= #sequence then
+		c.comboIndex = 0
+	end
+	c.comboIndex += 1
+	return sequence[c.comboIndex]
+end
+
 local function startAttack(c: Combatant, kind: AttackKind): boolean
 	local spec = Config.Attacks[kind]
 	local t = now()
@@ -226,10 +266,13 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 
 	setBlocking(c, false)
 	cancelAttack(c)
+	c.protectedUntil = 0 -- attacking ends spawn protection
 	local token = c.attackToken
 	local hitAt = t + spec.windup
 	c.windupHitAt = hitAt
+	c.cancelableAt = hitAt + Config.Net.ResolveGrace + Config.Combo.RecoveryCancel
 	c.nextAttackAt[kind] = t + spec.cooldown
+	c.comboUntil = hitAt + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
 	setState(c, "Windup")
 
 	broadcast("Windup", { attacker = c.model, kind = kind, hitAt = hitAt })
@@ -243,6 +286,11 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 		end
 		-- The swing has landed visually; from here it is committed and can't be interrupted.
 		setState(c, "Recovery", Config.Net.ResolveGrace + spec.recovery)
+		if not c.player then
+			-- Bots are simulated here; players lunge on their own client.
+			local look = c.root.CFrame.LookVector
+			c.root.AssemblyLinearVelocity += Vector3.new(look.X, 0, look.Z).Unit * spec.lunge
+		end
 		task.delay(Config.Net.ResolveGrace, function()
 			if isAlive(c) then
 				resolveAttack(c, spec, hitAt)
@@ -250,6 +298,32 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 		end)
 	end)
 	return true
+end
+
+local function bufferAction(c: Combatant, action: Action)
+	c.buffered = action
+	c.bufferedAt = now()
+end
+
+local function attack(c: Combatant, action: Action): boolean
+	if c.state ~= "Idle" then
+		bufferAction(c, action)
+		return false
+	end
+	local t = now()
+	local kind: AttackKind = if action == "Perilous" then "Perilous" else nextComboKind(c, t)
+	return startAttack(c, kind)
+end
+
+-- Recovery after impact can be cut short by defending, so a swing never locks you out
+-- of answering the counter-attack.
+local function cancelRecovery(c: Combatant): boolean
+	if c.state == "Recovery" and now() >= c.cancelableAt then
+		c.buffered = nil
+		setState(c, "Idle")
+		return true
+	end
+	return false
 end
 
 local function pressBlock(c: Combatant, stamp: number): boolean
@@ -260,6 +334,7 @@ local function pressBlock(c: Combatant, stamp: number): boolean
 			return false
 		end
 		cancelAttack(c)
+		c.comboIndex = 0
 		addPosture(c, Config.Feint.PostureCost)
 		if c.state == "Broken" then
 			return false
@@ -267,10 +342,13 @@ local function pressBlock(c: Combatant, stamp: number): boolean
 		setState(c, "Idle")
 		broadcast("Feint", { model = c.model })
 	end
+	cancelRecovery(c)
 	if c.state ~= "Idle" then
 		return false
 	end
 
+	c.buffered = nil
+	c.protectedUntil = 0
 	setBlocking(c, true)
 	-- Mashing keeps resetting the lockout, so spam never re-arms the deflect.
 	if t - c.lastBlockPressAt >= Config.Deflect.SpamLockout then
@@ -282,9 +360,11 @@ end
 
 local function dodge(c: Combatant, stamp: number): boolean
 	local t = now()
+	cancelRecovery(c)
 	if c.state ~= "Idle" or t < c.nextDodgeAt then
 		return false
 	end
+	c.buffered = nil
 	setBlocking(c, false)
 	c.dodgeStamp = stamp
 	c.nextDodgeAt = t + Config.Dodge.Cooldown
@@ -312,16 +392,15 @@ local function withinBudget(player: Player): boolean
 end
 
 -- Single entry point for players (via the remote) and bots. Returns whether the
--- action was accepted. `stamp` must already be a trusted or clamped server-clock time.
+-- action took effect immediately. `stamp` must already be a trusted or clamped
+-- server-clock time.
 function CombatService.perform(c: Combatant, action: Action, stamp: number?): boolean
 	if not isAlive(c) then
 		return false
 	end
 	local at = stamp or now()
-	if action == "Attack" then
-		return startAttack(c, "Light")
-	elseif action == "Perilous" then
-		return startAttack(c, "Perilous")
+	if action == "Attack" or action == "Perilous" then
+		return attack(c, action)
 	elseif action == "BlockDown" then
 		return pressBlock(c, at)
 	elseif action == "BlockUp" then
@@ -342,8 +421,16 @@ function CombatService.all(): { [Model]: Combatant }
 	return combatants
 end
 
+function CombatService.isProtected(c: Combatant): boolean
+	return now() < c.protectedUntil
+end
+
 function CombatService.onWindup(listener: WindupListener)
 	table.insert(windupListeners, listener)
+end
+
+function CombatService.onDeflect(listener: DeflectListener)
+	table.insert(deflectListeners, listener)
 end
 
 function CombatService.register(model: Model, player: Player?): Combatant?
@@ -368,7 +455,12 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		stateEndsAt = math.huge,
 		attackToken = 0,
 		windupHitAt = 0,
+		cancelableAt = 0,
 		nextAttackAt = {},
+		comboIndex = 0,
+		comboUntil = 0,
+		buffered = nil,
+		bufferedAt = 0,
 		posture = 0,
 		lastPostureDamageAt = 0,
 		blocking = false,
@@ -376,9 +468,12 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		lastBlockPressAt = -math.huge,
 		dodgeStamp = -math.huge,
 		nextDodgeAt = 0,
+		protectedUntil = now() + Config.SpawnProtection,
 	}
 	combatants[model] = c
 
+	-- Keep the body together on death so the client can play the collapse.
+	humanoid.BreakJointsOnDeath = false
 	SwordRig.attach(model)
 	model:SetAttribute("PostureMax", Config.Posture.Max)
 	model:SetAttribute("Posture", 0)
@@ -408,20 +503,29 @@ local function onCharacterAdded(player: Player, character: Model)
 		return
 	end
 	character:WaitForChild("RightHand", 5)
-	if player.Character == character then
-		CombatService.register(character, player)
+	if player.Character ~= character then
+		return
+	end
+	CombatService.register(character, player)
+
+	-- Once the avatar has fully loaded and is in the world, swap in the Ninja animation
+	-- pack, then re-grip the sword, since avatar loading can replace body parts.
+	local deadline = os.clock() + 15
+	while not (player:HasAppearanceLoaded() and character:IsDescendantOf(workspace)) do
+		if os.clock() > deadline or player.Character ~= character then
+			return
+		end
+		task.wait(0.1)
+	end
+	Locomotion.applyToPlayer(character)
+	if combatants[character] then
+		SwordRig.attach(character)
 	end
 end
 
 local function onPlayerAdded(player: Player)
 	player.CharacterAdded:Connect(function(character)
 		onCharacterAdded(player, character)
-	end)
-	-- Avatar loading can swap body parts after spawn; re-grip the sword when it finishes.
-	player.CharacterAppearanceLoaded:Connect(function(character)
-		if combatants[character] then
-			SwordRig.attach(character)
-		end
 	end)
 	if player.Character then
 		task.spawn(onCharacterAdded, player, player.Character)
@@ -438,6 +542,15 @@ local function step(dt: number)
 				c.lastPostureDamageAt = t
 			end
 			setState(c, "Idle")
+		end
+
+		-- Fire a buffered attack the moment the fighter is free.
+		if c.state == "Idle" and c.buffered then
+			local action = c.buffered :: Action
+			c.buffered = nil
+			if t - c.bufferedAt <= Config.Combo.Buffer then
+				attack(c, action)
+			end
 		end
 
 		if c.posture > 0 and c.state ~= "Broken" and t - c.lastPostureDamageAt >= Config.Posture.RegenDelay then

@@ -1,0 +1,43 @@
+--!strict
+-- Every external asset id in one place. All of these were checked to load in Studio.
+--   Katana mesh: Creator Store "Katana" (asset 105044896803684), built from code with a SpecialMesh.
+--   Locomotion: Roblox's own Ninja Animation Package, usable in any experience.
+--   Sounds: mostly the ProSoundEffects library Roblox licenses for the Creator Store.
+
+local Assets = {
+	Katana = {
+		MeshId = "rbxassetid://114165484128397",
+		TextureId = "rbxassetid://85720589438351",
+		Scale = 0.6,
+		Size = Vector3.new(0.29, 0.38, 3.9), -- the mesh's bounds at Scale; blade along +Z, edge toward -Y
+		GripZ = -1.5, -- handle centre, where the fist closes
+		GuardZ = -0.95, -- tsuba; the swing trail starts here
+		TipZ = 1.9,
+	},
+
+	-- Roblox Ninja Animation Package.
+	Locomotion = {
+		Idle = "rbxassetid://656117400",
+		IdleAlt = "rbxassetid://656118341",
+		Walk = "rbxassetid://656121766",
+		Run = "rbxassetid://656118852",
+		Jump = "rbxassetid://656117878",
+		Fall = "rbxassetid://656115606",
+		Climb = "rbxassetid://656114359",
+	},
+
+	Sounds = {
+		Swing = "rbxassetid://5789211405", -- fast blade whoosh
+		HeavySwing = "rbxassetid://9119691738", -- PSE: airy sharp sword swish
+		Deflect = "rbxassetid://5763723309", -- sword parry / clash
+		DeflectAlt = "rbxassetid://9113449672", -- PSE: blade hits metal
+		PerfectDeflect = "rbxassetid://9125669419", -- PSE: metal hit with ring-off
+		Guard = "rbxassetid://9116673944", -- PSE: heavy clunk
+		Hit = "rbxassetid://6881026094", -- quick cut
+		HitAlt = "rbxassetid://130345020654442", -- sword slash
+		PostureBreak = "rbxassetid://9116673678", -- PSE: heavy metal impact
+		Dodge = "rbxassetid://9120729005", -- PSE: whoosh
+	},
+}
+
+return Assets
