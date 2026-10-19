@@ -13,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local CombatService = require(script.Parent.CombatService)
 local Locomotion = require(script.Parent.Locomotion)
+local Round = require(ReplicatedStorage.Shared.Round)
 
 type Combatant = CombatService.Combatant
 type AttackKind = Config.AttackKind
@@ -30,12 +31,15 @@ type Brain = {
 
 local BOT_CLOTH = Color3.fromRGB(70, 22, 26)
 local BOT_SKIN = Color3.fromRGB(234, 184, 146)
-local TARGET_SHARE_PENALTY = 15 -- studs added per other bot already on a target
+local TARGET_SHARE_PENALTY = 30 -- studs added per other bot already on a target
 
 local BotService = {}
 
 local brains: { [Combatant]: Brain } = {}
 local botFolder: Folder
+local slots: { [number]: Model } = {} -- bot index -> its current body
+local desiredCount = 0
+local respawnEnabled = true
 
 local function now(): number
 	return workspace:GetServerTimeNow()
@@ -105,7 +109,8 @@ end
 local function startCombo(brain: Brain, t: number)
 	local c = brain.c
 	local perilous = math.random() < Config.Bots.PerilousChance
-	if CombatService.perform(c, if perilous then "Perilous" else "Attack", t) then
+	local action = if not perilous then "Attack" elseif math.random() < 0.5 then "Perilous" else "Sweep"
+	if CombatService.perform(c, action, t) then
 		brain.comboLeft = 0
 		if not perilous then
 			while brain.comboLeft < 2 and math.random() < Config.Bots.ComboContinueChance do
@@ -155,9 +160,16 @@ local function think(brain: Brain)
 
 	local move = Vector3.zero
 	local postureRatio = c.posture / Config.Posture.Max
-	if c.state == "Broken" or c.state == "Staggered" then
+	local hurt = humanoid.Health / humanoid.MaxHealth < Config.Bots.HealBelow and c.gourds > 0
+	if c.state == "Broken" or c.state == "Staggered" or c.state == "Drinking" then
 		move = Vector3.zero
-	elseif postureRatio > Config.Bots.RetreatPosture then
+	elseif hurt and distance > Config.Bots.StrafeDistance then
+		-- Out of reach and hurting: back off and drink.
+		move = -forward
+		if c.state == "Idle" then
+			CombatService.perform(c, "Heal", t)
+		end
+	elseif postureRatio > Config.Bots.RetreatPosture or hurt then
 		move = -forward + right * brain.strafeSign * 0.6
 	elseif t >= brain.nextAttackAt then
 		if distance > Config.Bots.AttackDistance then
@@ -180,9 +192,12 @@ local function think(brain: Brain)
 			end
 		end
 	end
-	local fromCentre = flat(root.Position)
-	if fromCentre.Magnitude > Config.Bots.ArenaRadius then
-		move -= fromCentre.Unit
+	-- Stay inside the ring during a match, and inside the walls otherwise.
+	local zoneCenter, zoneRadius = Round.zone(t)
+	local fromCentre = flat(root.Position - zoneCenter)
+	local limit = math.min(zoneRadius - 6, Config.Bots.ArenaRadius)
+	if fromCentre.Magnitude > limit then
+		move -= fromCentre.Unit * (if fromCentre.Magnitude > zoneRadius then 3 else 1)
 	end
 
 	humanoid:Move(if move.Magnitude > 0.05 then move.Unit else Vector3.zero)
@@ -197,11 +212,31 @@ local function dodgeAway(bot: Combatant)
 	bot.root.AssemblyLinearVelocity = Vector3.new(sideways.X, 0, sideways.Z) * Config.Dodge.Speed
 end
 
+-- Dash straight into a thrust: a Mikiri Counter if it lands in the i-frames.
+local function dashInto(bot: Combatant, attacker: Combatant)
+	local toward = attacker.root.Position - bot.root.Position
+	toward = Vector3.new(toward.X, 0, toward.Z)
+	if toward.Magnitude < 0.1 or not CombatService.perform(bot, "Dodge", now(), true) then
+		return
+	end
+	bot.root.AssemblyLinearVelocity = toward.Unit * Config.Dodge.Speed * 0.5
+end
+
+local function jumpOver(bot: Combatant)
+	bot.humanoid.Jump = true
+	CombatService.perform(bot, "Jump", now())
+end
+
 local function tapBlock(bot: Combatant, pressAt: number, releaseAt: number)
 	at(pressAt, function()
-		if alive(bot) then
-			CombatService.perform(bot, "BlockDown", now())
+		if not alive(bot) then
+			return
 		end
+		-- Blocking out of a windup is a feint; only do that on purpose, now and then.
+		if bot.state == "Windup" and math.random() > Config.Bots.FeintChance then
+			return
+		end
+		CombatService.perform(bot, "BlockDown", now())
 	end)
 	at(releaseAt, function()
 		if alive(bot) then
@@ -211,19 +246,34 @@ local function tapBlock(bot: Combatant, pressAt: number, releaseAt: number)
 end
 
 -- Bots are omniscient about hitAt, so their skill comes purely from these dice rolls.
-local function react(bot: Combatant, spec: AttackSpec, hitAt: number)
+local function react(bot: Combatant, attacker: Combatant, spec: AttackSpec, hitAt: number)
 	local skill = Config.Bots
 	local roll = math.random()
 
 	if spec.unblockable then
-		if roll < skill.DodgePerilousChance then
-			local lead = randomRange({ 0.08, Config.Dodge.IFrames - 0.05 })
-			at(hitAt - lead, function()
+		if roll >= skill.DodgePerilousChance then
+			return -- reads it wrong and eats the perilous attack
+		end
+		if spec.low then
+			at(hitAt - randomRange({ 0.15, 0.4 }), function()
 				if alive(bot) then
-					dodgeAway(bot)
+					jumpOver(bot)
 				end
 			end)
+			return
 		end
+		local mikiri = spec.thrust and math.random() < skill.MikiriChance
+		local lead = randomRange({ 0.08, Config.Dodge.IFrames - 0.05 })
+		at(hitAt - lead, function()
+			if not alive(bot) then
+				return
+			end
+			if mikiri then
+				dashInto(bot, attacker)
+			else
+				dodgeAway(bot)
+			end
+		end)
 		return
 	end
 
@@ -244,7 +294,7 @@ local function onWindup(attacker: Combatant, kind: AttackKind, hitAt: number)
 		if bot ~= attacker and alive(bot) then
 			local distance = (bot.root.Position - attacker.root.Position).Magnitude
 			if distance <= spec.range + 3 then
-				react(bot, spec, hitAt)
+				react(bot, attacker, spec, hitAt)
 			end
 		end
 	end
@@ -288,10 +338,12 @@ local function spawnBot(index: number)
 	local model = buildRig(index)
 	model:PivotTo(spawnPoint())
 	model.Parent = botFolder
+	slots[index] = model
 
 	local c = CombatService.register(model, nil)
 	if not c then
 		model:Destroy()
+		slots[index] = nil
 		return
 	end
 	c.root:SetNetworkOwner(nil)
@@ -309,11 +361,16 @@ local function spawnBot(index: number)
 	brains[c] = brain
 
 	c.humanoid.Died:Once(function()
-		brains[c] = nil
 		brain.align.Enabled = false
 		task.delay(Config.Bots.RespawnDelay, function()
+			if slots[index] ~= model then
+				return -- already replaced or removed by setCount
+			end
 			model:Destroy()
-			spawnBot(index)
+			slots[index] = nil
+			if respawnEnabled and index <= desiredCount then
+				spawnBot(index)
+			end
 		end)
 	end)
 
@@ -322,7 +379,36 @@ local function spawnBot(index: number)
 			think(brain)
 			task.wait(Config.Bots.ThinkInterval)
 		end
+		brains[c] = nil
 	end)
+end
+
+-- Grows or shrinks the bot roster to `count`, replacing dead bodies. Yields while new
+-- bots are built, so callers can position them straight after.
+function BotService.setCount(count: number)
+	desiredCount = count
+	for index, model in slots do
+		if index > count then
+			slots[index] = nil
+			model:Destroy()
+		end
+	end
+	for index = 1, count do
+		local model = slots[index]
+		local living = model and CombatService.get(model)
+		if not living or living.state == "Dead" then
+			if model then
+				slots[index] = nil
+				model:Destroy()
+			end
+			spawnBot(index)
+		end
+	end
+end
+
+-- Whether dead bots come back on their own (off during a match).
+function BotService.setRespawn(enabled: boolean)
+	respawnEnabled = enabled
 end
 
 function BotService.start()
@@ -332,9 +418,6 @@ function BotService.start()
 
 	CombatService.onWindup(onWindup)
 	CombatService.onDeflect(onDeflect)
-	for index = 1, Config.Bots.Count do
-		task.spawn(spawnBot, index)
-	end
 end
 
 return BotService

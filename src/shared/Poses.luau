@@ -244,6 +244,61 @@ local specs: { [string]: PoseSpec } = {
 		Root = { -14, 0, 0, 0, -0.45, 0 },
 	},
 
+	-- Perilous sweep: crouched low with the blade drawn back, then a flat cut at the ankles.
+	SweepWindup = {
+		RightArm = {
+			upper = v(0.5, -0.6, 0.6),
+			fore = v(0.3, -0.3, 0.9),
+			blade = v(0.4, -0.35, 0.85),
+			edge = v(-0.5, 0, -0.8),
+		},
+		LeftArm = { upper = v(-0.2, -0.4, -0.9), fore = v(0, -0.2, -1) },
+		Waist = { 4, -35, 0 },
+		Neck = { -8, 28, 0 },
+		Root = { -10, 0, 0, 0, -0.9, 0 },
+		RightHip = { 50, 0, 0 },
+		RightKnee = { -80, 0, 0 },
+		LeftHip = { 20, 0, 0 },
+		LeftKnee = { -60, 0, 0 },
+	},
+	SweepStrike = {
+		RightArm = {
+			upper = v(-0.1, -0.5, -0.85),
+			fore = v(-0.5, -0.4, -0.75),
+			blade = v(-0.85, -0.3, -0.4),
+			edge = v(-0.4, -0.1, 0.9),
+		},
+		LeftArm = { upper = v(-0.4, -0.6, 0.6), fore = v(-0.3, -0.5, 0.5) },
+		Waist = { -10, 35, 0 },
+		Neck = { 6, -28, 0 },
+		Root = { -10, 0, 0, 0, -0.9, 0 },
+		RightHip = { 50, 0, 0 },
+		RightKnee = { -80, 0, 0 },
+		LeftHip = { 20, 0, 0 },
+		LeftKnee = { -60, 0, 0 },
+	},
+
+	-- A sip from the healing gourd: sword lowered, off hand raised to the mouth, head back.
+	Drink = {
+		RightArm = { upper = v(0.2, -0.95, 0.1), fore = v(0.1, -0.9, -0.3), blade = v(0.15, -0.7, -0.7), edge = DOWN },
+		LeftArm = { upper = v(-0.25, -0.2, -0.95), fore = v(0.45, 0.85, -0.2) },
+		Waist = { 6, 0, 0 },
+		Neck = { 22, 0, 0 },
+	},
+
+	-- Mikiri Counter: stamping the thrusting blade into the ground.
+	MikiriStomp = {
+		RightArm = { upper = v(0.3, -0.7, 0.6), fore = v(0.2, -0.6, 0.75), blade = v(0.2, -0.3, 1), edge = DOWN },
+		LeftArm = { upper = v(-0.7, -0.3, -0.6), fore = v(-0.5, 0, -0.85) },
+		Waist = { -15, 0, 0 },
+		Neck = { 12, 0, 0 },
+		Root = { -6, 0, 0, 0, -0.3, 0 },
+		RightHip = { 70, 0, 0 },
+		RightKnee = { -20, 0, 0 },
+		LeftHip = { -10, 0, 0 },
+		LeftKnee = { -25, 0, 0 },
+	},
+
 	-- Thrown back and open after being deflected.
 	Recoil = {
 		RightArm = { upper = v(0.6, 0.7, 0.4), fore = v(0.3, 0.8, 0.5), blade = v(0.4, 0.6, 0.7), edge = v(0, 1, 0) },

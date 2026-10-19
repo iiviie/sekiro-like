@@ -139,7 +139,9 @@ local function updateCamera(dt: number)
 		return
 	end
 	local mine, theirs = rootOf(player.Character), rootOf(target)
-	if not mine or not theirs then
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if not mine or not theirs or not humanoid or humanoid.Health <= 0 then
+		LockOn.set(nil) -- dead or gone: hand the camera back
 		return
 	end
 

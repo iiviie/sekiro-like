@@ -281,8 +281,9 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		local remaining = math.max(data.hitAt - now(), 0)
 		Animator.play(model, kind, remaining)
 
-		local heavy = kind == "Light3" or kind == "Perilous"
-		if kind == "Perilous" then
+		local perilous = kind == "Perilous" or kind == "Sweep"
+		local heavy = kind == "Light3" or perilous
+		if perilous then
 			telegraphPerilous(model, remaining)
 		end
 		task.delay(math.max(remaining - 0.05, 0), function()
@@ -392,6 +393,60 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Dodged = function(data)
 		floatingText(data.defender, "EVADE", STEEL, 0.8)
+	end,
+
+	Jumped = function(data)
+		floatingText(data.defender, "EVADE", STEEL, 0.8)
+	end,
+
+	Mikiri = function(data)
+		local attacker: Model, defender: Model = data.attacker, data.defender
+		Animator.play(defender, "Mikiri")
+		Animator.play(attacker, "Recoil")
+		hitstop(Config.Visual.PerfectHitstop, attacker, defender)
+		local root = rootOf(defender)
+		if root then
+			burst(root.Position + root.CFrame.LookVector * 2 - Vector3.new(0, 2, 0), GOLD, 50, 26, 5)
+		end
+		floatingText(defender, "MIKIRI", GOLD, 1.1)
+		playSound(SOUNDS.PerfectDeflect, root, 0.8, 0.9)
+		playSound(SOUNDS.PostureBreak, root, 0.6, 1.2)
+		if isLocal(attacker) or isLocal(defender) then
+			shake(0.6, 0.2)
+		end
+	end,
+
+	Drink = function(data)
+		local model: Model = data.model
+		Animator.play(model, "Drink")
+		-- A small gourd in the off hand for the length of the sip.
+		local hand = model:FindFirstChild("LeftHand")
+		if hand and hand:IsA("BasePart") then
+			local gourd = Instance.new("Part")
+			gourd.Shape = Enum.PartType.Ball
+			gourd.Size = Vector3.new(0.55, 0.55, 0.55)
+			gourd.Color = Color3.fromRGB(150, 96, 48)
+			gourd.Material = Enum.Material.Wood
+			gourd.CanCollide = false
+			gourd.CanQuery = false
+			gourd.CanTouch = false
+			gourd.Massless = true
+			gourd.CastShadow = false
+			local weld = Instance.new("Weld")
+			weld.Part0 = hand
+			weld.Part1 = gourd
+			weld.C0 = CFrame.new(0, -0.35, -0.1)
+			weld.Parent = gourd
+			gourd.Parent = model
+			Debris:AddItem(gourd, Config.Gourd.DrinkTime)
+		end
+	end,
+
+	Healed = function(data)
+		local root = rootOf(data.model)
+		if root then
+			burst(root.Position, Color3.fromRGB(255, 196, 120), 14, 6, 3)
+		end
 	end,
 
 	Feint = function(data)

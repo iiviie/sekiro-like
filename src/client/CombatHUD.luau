@@ -48,6 +48,8 @@ local screen: ScreenGui
 local vitality: Bar
 local posture: Bar
 local postureGroup: CanvasGroup
+local ownGroup: CanvasGroup
+local gourdLabel: TextLabel
 local enemies: { [Model]: EnemyEntry } = {}
 
 local function tween(instance: Instance, time: number, goal: { [string]: any }, style: Enum.EasingStyle?)
@@ -191,6 +193,15 @@ local function trackCharacter(character: Model)
 	postureGroup.GroupTransparency = 1
 	onHealth()
 	table.insert(characterConnections, humanoid.HealthChanged:Connect(onHealth))
+	-- Your own bars fade out once you fall, and return with the next body.
+	ownGroup.GroupTransparency = 0
+	table.insert(
+		characterConnections,
+		humanoid.Died:Connect(function()
+			tween(ownGroup, 0.6, { GroupTransparency = 1 })
+			tween(postureGroup, 0.6, { GroupTransparency = 1 })
+		end)
+	)
 	for _, attribute in { "Posture", "CombatState" } do
 		table.insert(
 			characterConnections,
@@ -200,12 +211,21 @@ local function trackCharacter(character: Model)
 		)
 	end
 	refreshPosture(character)
+	local function refreshGourds()
+		local count = character:GetAttribute("Gourds")
+		gourdLabel.Text = `瓢 {if typeof(count) == "number" then count else 0}`
+		gourdLabel.TextTransparency = if count == 0 then 0.6 else 0
+	end
+	table.insert(characterConnections, character:GetAttributeChangedSignal("Gourds"):Connect(refreshGourds))
+	refreshGourds()
 end
 
 ---------------------------------------------------------------------------------------
 -- Splashes
 
-local function splash(kanji: string, subtitle: string, color: Color3, hold: number)
+-- A centred kanji banner with a subtitle, framed by a dark band (used for death,
+-- executions, and round banners).
+function CombatHUD.splash(kanji: string, subtitle: string, color: Color3, hold: number)
 	local frame = Instance.new("CanvasGroup")
 	frame.Size = UDim2.fromScale(1, 1)
 	frame.BackgroundColor3 = Color3.new(0, 0, 0)
@@ -423,9 +443,30 @@ local function buildScreen()
 	screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 	-- Vitality, bottom-left.
-	vitality = makeBar(screen, UDim2.fromOffset(300, 9), UDim2.new(0, 64, 1, -58), Vector2.new(0, 1), false, true)
+	-- (CanvasGroups render to a texture, so this one is only as big as the bar.)
+	ownGroup = Instance.new("CanvasGroup")
+	ownGroup.BackgroundTransparency = 1
+	ownGroup.AnchorPoint = Vector2.new(0, 1)
+	ownGroup.Position = UDim2.new(0, 40, 1, -48)
+	ownGroup.Size = UDim2.fromOffset(420, 24)
+	ownGroup.Parent = screen
+	vitality = makeBar(ownGroup, UDim2.fromOffset(300, 9), UDim2.new(0, 24, 0.5, 0), Vector2.new(0, 0.5), false, true)
 	gradient(vitality.fill, CRIMSON_TOP, CRIMSON_BOTTOM)
-	diamond(screen, 14, UDim2.new(0, 52, 1, -62), CRIMSON_BOTTOM)
+	diamond(ownGroup, 14, UDim2.new(0, 12, 0.5, 0), CRIMSON_BOTTOM)
+
+	-- Healing gourd charges, right of the vitality bar.
+	gourdLabel = Instance.new("TextLabel")
+	gourdLabel.BackgroundTransparency = 1
+	gourdLabel.AnchorPoint = Vector2.new(0, 0.5)
+	gourdLabel.Position = UDim2.new(0, 334, 0.5, 0)
+	gourdLabel.Size = UDim2.fromOffset(80, 22)
+	gourdLabel.Font = FONT
+	gourdLabel.TextSize = 19
+	gourdLabel.TextXAlignment = Enum.TextXAlignment.Left
+	gourdLabel.TextColor3 = PARCHMENT
+	gourdLabel.TextStrokeTransparency = 0.6
+	gourdLabel.Text = "瓢 3"
+	gourdLabel.Parent = ownGroup
 
 	-- Posture, bottom-centre, hidden while empty.
 	postureGroup = Instance.new("CanvasGroup")
@@ -443,7 +484,7 @@ local function buildScreen()
 	local hint = Instance.new("TextLabel")
 	hint.AnchorPoint = Vector2.new(1, 1)
 	hint.Position = UDim2.new(1, -28, 1, -24)
-	hint.Size = UDim2.fromOffset(420, 92)
+	hint.Size = UDim2.fromOffset(460, 96)
 	hint.BackgroundTransparency = 1
 	hint.Font = FONT
 	hint.TextSize = 17
@@ -452,8 +493,8 @@ local function buildScreen()
 	hint.TextColor3 = PARCHMENT
 	hint.TextTransparency = 0.2
 	hint.TextStrokeTransparency = 0.7
-	hint.Text =
-		"Slash  —  Left Mouse\nDeflect · Guard  —  F\nPerilous Thrust  —  E\nDodge  —  Q\nLock On  —  R"
+	hint.Text = "Slash  —  Left Mouse\nDeflect · Guard  —  F\nDodge  —  Q   (dash into a thrust: Mikiri)\n"
+		.. "Perilous Thrust  —  E      Sweep  —  C\nHealing Gourd  —  G      Lock On  —  R"
 	hint.Parent = screen
 	task.delay(CONTROLS_HINT_TIME, function()
 		tween(hint, 2, { TextTransparency = 1, TextStrokeTransparency = 1 })
@@ -470,10 +511,10 @@ local function onCombatEvent(kind: string, data: { [string]: any })
 	local attacker: Model? = data.attacker
 	local defender: Model? = data.defender
 	if kind == "Deathblow" and attacker == character and defender then
-		splash("忍殺", "Shinobi Execution", DEATHBLOW_RED, 1.1)
+		CombatHUD.splash("忍殺", "Shinobi Execution", DEATHBLOW_RED, 1.1)
 		removeEnemy(defender)
 	elseif kind == "Died" and data.model == character then
-		splash("死", "Death", DEATHBLOW_RED, 2.6)
+		CombatHUD.splash("死", "Death", DEATHBLOW_RED, 2.6)
 	elseif kind == "Died" and data.model then
 		removeEnemy(data.model)
 	elseif attacker and defender then

@@ -61,18 +61,29 @@ export type Combatant = {
 	lastBlockPressAt: number,
 
 	dodgeStamp: number,
+	dodgeForward: boolean, -- dashed toward the attacker (for Mikiri)
 	nextDodgeAt: number,
+	jumpStamp: number,
+	gourds: number,
 	protectedUntil: number,
+
+	lastAttacker: Combatant?, -- for kill credit
+	lastAttackedAt: number,
+	executed: boolean, -- killed by a deathblow
 }
 
 type WindupListener = (attacker: Combatant, kind: AttackKind, hitAt: number) -> ()
 type DeflectListener = (attacker: Combatant, defender: Combatant, perfect: boolean) -> ()
+type DiedListener = (victim: Combatant, killer: Combatant?, deathblow: boolean) -> ()
 
 local CombatService = {}
 
 local combatants: { [Model]: Combatant } = {}
 local windupListeners: { WindupListener } = {}
 local deflectListeners: { DeflectListener } = {}
+local diedListeners: { DiedListener } = {}
+
+local KILL_CREDIT_WINDOW = 12 -- seconds a hit still counts toward a later death
 local actionBudgets: { [Player]: { windowStart: number, count: number } } = {}
 
 local validActions: { [string]: boolean } = {}
@@ -94,7 +105,7 @@ end
 
 local function refreshWalkSpeed(c: Combatant)
 	local speed = Config.WalkSpeed
-	if c.state == "Windup" or c.state == "Recovery" or c.state == "Staggered" then
+	if c.state == "Windup" or c.state == "Recovery" or c.state == "Staggered" or c.state == "Drinking" then
 		speed = Config.AttackWalkSpeed
 	elseif c.state == "Broken" then
 		speed = Config.BrokenWalkSpeed
@@ -196,13 +207,30 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 	end
 
 	if target.state == "Broken" then
+		target.lastAttacker = attacker
+		target.lastAttackedAt = now()
+		target.executed = true
 		target.humanoid:TakeDamage(Config.DeathblowDamage)
 		broadcast("Deathblow", { attacker = attacker.model, defender = target.model })
 		return
 	end
 
+	if spec.low and hitAt >= target.jumpStamp and hitAt <= target.jumpStamp + Config.Jump.EvadeWindow then
+		broadcast("Jumped", { attacker = attacker.model, defender = target.model })
+		return
+	end
+
 	if hitAt >= target.dodgeStamp and hitAt <= target.dodgeStamp + Config.Dodge.IFrames then
-		broadcast("Dodged", { attacker = attacker.model, defender = target.model })
+		if spec.thrust and target.dodgeForward and isFacing(target, attacker) then
+			-- Mikiri Counter: dashing into a thrust pins the blade underfoot.
+			addPosture(attacker, Config.Mikiri.AttackerPosture)
+			if attacker.state ~= "Broken" then
+				stagger(attacker, Config.Mikiri.AttackerStagger)
+			end
+			broadcast("Mikiri", { attacker = attacker.model, defender = target.model })
+		else
+			broadcast("Dodged", { attacker = attacker.model, defender = target.model })
+		end
 		return
 	end
 
@@ -230,6 +258,8 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		addPosture(target, spec.postureDamage * Config.Deflect.GuardPostureMultiplier)
 		broadcast("Guard", { attacker = attacker.model, defender = target.model })
 	else
+		target.lastAttacker = attacker
+		target.lastAttackedAt = now()
 		target.humanoid:TakeDamage(spec.damage)
 		addPosture(target, spec.postureDamage * Config.HitPostureMultiplier)
 		stagger(target, Config.HitStagger)
@@ -311,7 +341,10 @@ local function attack(c: Combatant, action: Action): boolean
 		return false
 	end
 	local t = now()
-	local kind: AttackKind = if action == "Perilous" then "Perilous" else nextComboKind(c, t)
+	local kind: AttackKind = if action == "Perilous"
+		then "Perilous"
+		elseif action == "Sweep" then "Sweep"
+		else nextComboKind(c, t)
 	return startAttack(c, kind)
 end
 
@@ -358,7 +391,7 @@ local function pressBlock(c: Combatant, stamp: number): boolean
 	return true
 end
 
-local function dodge(c: Combatant, stamp: number): boolean
+local function dodge(c: Combatant, stamp: number, forward: boolean): boolean
 	local t = now()
 	cancelRecovery(c)
 	if c.state ~= "Idle" or t < c.nextDodgeAt then
@@ -367,8 +400,32 @@ local function dodge(c: Combatant, stamp: number): boolean
 	c.buffered = nil
 	setBlocking(c, false)
 	c.dodgeStamp = stamp
+	c.dodgeForward = forward
 	c.nextDodgeAt = t + Config.Dodge.Cooldown
 	broadcast("Dodge", { model = c.model })
+	return true
+end
+
+-- A sip from the gourd: slow and committal. Getting hit mid-sip wastes it.
+local function heal(c: Combatant): boolean
+	cancelRecovery(c)
+	if c.state ~= "Idle" or c.gourds <= 0 then
+		return false
+	end
+	c.buffered = nil
+	setBlocking(c, false)
+	c.gourds -= 1
+	c.model:SetAttribute("Gourds", c.gourds)
+	cancelAttack(c)
+	local token = c.attackToken
+	setState(c, "Drinking", Config.Gourd.DrinkTime + 0.05)
+	broadcast("Drink", { model = c.model })
+	task.delay(Config.Gourd.DrinkTime, function()
+		if c.attackToken == token and c.state == "Drinking" and isAlive(c) then
+			c.humanoid.Health = math.min(c.humanoid.MaxHealth, c.humanoid.Health + Config.Gourd.Heal)
+			broadcast("Healed", { model = c.model })
+		end
+	end)
 	return true
 end
 
@@ -394,12 +451,12 @@ end
 -- Single entry point for players (via the remote) and bots. Returns whether the
 -- action took effect immediately. `stamp` must already be a trusted or clamped
 -- server-clock time.
-function CombatService.perform(c: Combatant, action: Action, stamp: number?): boolean
+function CombatService.perform(c: Combatant, action: Action, stamp: number?, flag: boolean?): boolean
 	if not isAlive(c) then
 		return false
 	end
 	local at = stamp or now()
-	if action == "Attack" or action == "Perilous" then
+	if action == "Attack" or action == "Perilous" or action == "Sweep" then
 		return attack(c, action)
 	elseif action == "BlockDown" then
 		return pressBlock(c, at)
@@ -407,7 +464,12 @@ function CombatService.perform(c: Combatant, action: Action, stamp: number?): bo
 		setBlocking(c, false)
 		return true
 	elseif action == "Dodge" then
-		return dodge(c, at)
+		return dodge(c, at, flag == true)
+	elseif action == "Jump" then
+		c.jumpStamp = at
+		return true
+	elseif action == "Heal" then
+		return heal(c)
 	end
 	return false
 end
@@ -419,6 +481,27 @@ end
 -- Read-only view of every live combatant, keyed by model.
 function CombatService.all(): { [Model]: Combatant }
 	return combatants
+end
+
+function CombatService.onDied(listener: DiedListener)
+	table.insert(diedListeners, listener)
+end
+
+-- Full health, empty posture, idle, and briefly protected: used when a round starts.
+function CombatService.reset(c: Combatant, protection: number)
+	cancelAttack(c)
+	c.buffered = nil
+	c.comboIndex = 0
+	c.posture = 0
+	c.lastAttacker = nil
+	c.executed = false
+	setBlocking(c, false)
+	setState(c, "Idle")
+	publishPosture(c)
+	c.humanoid.Health = c.humanoid.MaxHealth
+	c.gourds = Config.Gourd.Charges
+	c.model:SetAttribute("Gourds", c.gourds)
+	c.protectedUntil = now() + protection
 end
 
 function CombatService.isProtected(c: Combatant): boolean
@@ -467,8 +550,14 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		deflectStamp = -math.huge,
 		lastBlockPressAt = -math.huge,
 		dodgeStamp = -math.huge,
+		dodgeForward = false,
 		nextDodgeAt = 0,
+		jumpStamp = -math.huge,
+		gourds = Config.Gourd.Charges,
 		protectedUntil = now() + Config.SpawnProtection,
+		lastAttacker = nil,
+		lastAttackedAt = 0,
+		executed = false,
 	}
 	combatants[model] = c
 
@@ -478,6 +567,7 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 	model:SetAttribute("PostureMax", Config.Posture.Max)
 	model:SetAttribute("Posture", 0)
 	model:SetAttribute("Blocking", false)
+	model:SetAttribute("Gourds", c.gourds)
 	setState(c, "Idle")
 	CollectionService:AddTag(model, Types.Tag)
 
@@ -487,6 +577,13 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		setState(c, "Dead")
 		combatants[model] = nil
 		broadcast("Died", { model = model })
+		local killer = c.lastAttacker
+		if killer and now() - c.lastAttackedAt > KILL_CREDIT_WINDOW then
+			killer = nil
+		end
+		for _, listener in diedListeners do
+			task.spawn(listener, c, killer, c.executed)
+		end
 	end)
 	model.AncestryChanged:Connect(function()
 		if not model:IsDescendantOf(game) and combatants[model] == c then
@@ -562,7 +659,7 @@ local function step(dt: number)
 end
 
 function CombatService.start()
-	combatAction.OnServerEvent:Connect(function(player: Player, action: unknown, stamp: unknown)
+	combatAction.OnServerEvent:Connect(function(player: Player, action: unknown, stamp: unknown, flag: unknown)
 		if typeof(action) ~= "string" or not validActions[action :: string] then
 			return
 		end
@@ -572,7 +669,7 @@ function CombatService.start()
 		local character = player.Character
 		local c = character and combatants[character]
 		if c then
-			CombatService.perform(c, action :: Action, clampStamp(stamp))
+			CombatService.perform(c, action :: Action, clampStamp(stamp), flag == true)
 		end
 	end)
 

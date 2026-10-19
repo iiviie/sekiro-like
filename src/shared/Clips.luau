@@ -58,6 +58,24 @@ local Clips: { [string]: Clip } = {
 		hold = 0.25,
 		fadeOut = 0.3,
 	},
+	Sweep = {
+		segments = {
+			{ pose = "SweepWindup", duration = "windup", ease = "out" },
+			{ pose = "SweepStrike", duration = 0.1, ease = "in", trail = true },
+		},
+		hold = 0.25,
+		fadeOut = 0.3,
+	},
+	Drink = {
+		segments = { { pose = "Drink", duration = 0.15, ease = "out" } },
+		hold = 0.7,
+		fadeOut = 0.25,
+	},
+	Mikiri = {
+		segments = { { pose = "MikiriStomp", duration = 0.08, ease = "out" } },
+		hold = 0.45,
+		fadeOut = 0.3,
+	},
 	Recoil = {
 		segments = { { pose = "Recoil", duration = 0.08, ease = "out" } },
 		hold = 0.22,

@@ -3,7 +3,7 @@
 -- Times are seconds on the shared server clock (workspace:GetServerTimeNow()).
 
 -- Light1-3 are the slash combo; the client picks the matching clip from the kind name.
-export type AttackKind = "Light1" | "Light2" | "Light3" | "Perilous"
+export type AttackKind = "Light1" | "Light2" | "Light3" | "Perilous" | "Sweep"
 
 export type AttackSpec = {
 	windup: number, -- telegraph before impact; keep >= 0.3 so 200 ms ping players can still read it
@@ -15,6 +15,8 @@ export type AttackSpec = {
 	width: number,
 	lunge: number, -- forward speed (studs/s) added at the strike
 	unblockable: boolean, -- perilous attacks ignore deflect and guard; dodge them instead
+	thrust: boolean?, -- can be Mikiri-countered by dashing into it
+	low: boolean?, -- a sweep: jump over it
 }
 
 local attacks: { [AttackKind]: AttackSpec } = {
@@ -61,6 +63,19 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		width = 4,
 		lunge = 40,
 		unblockable = true,
+		thrust = true,
+	},
+	Sweep = {
+		windup = 0.75,
+		recovery = 0.6,
+		cooldown = 3,
+		damage = 24,
+		postureDamage = 30,
+		range = 8.5,
+		width = 10,
+		lunge = 12,
+		unblockable = true,
+		low = true,
 	},
 }
 
@@ -74,12 +89,47 @@ local Config = {
 		RecoveryCancel = 0.06, -- after impact resolves, block can cancel the rest of recovery
 	},
 
+	Gourd = {
+		Charges = 3, -- per life
+		Heal = 45,
+		DrinkTime = 0.9, -- slowed and open the whole time; a hit wastes the sip
+	},
+
+	Mikiri = {
+		AttackerPosture = 45,
+		AttackerStagger = 0.9,
+	},
+
+	Jump = {
+		EvadeWindow = 0.65, -- a sweep landing this soon after jumping misses
+	},
+
 	-- Spawn protection: you can't be hit and bots ignore you for this long.
 	SpawnProtection = 2,
 
 	Arena = {
 		WallHalfExtent = 78, -- castle walls form a square this far from the centre
 		FightRadius = 66, -- open ground inside the walls
+	},
+
+	Round = {
+		Intermission = 15,
+		MaxDuration = 180, -- a match ends here even if several fighters remain
+		Results = 7,
+		MinFighters = 6, -- bots fill the match up to this many
+		PracticeBots = 2, -- sparring partners during intermission
+		SpawnRadius = 48, -- fighters start evenly spaced on this circle
+		RespawnDelay = 3, -- outside a match
+	},
+
+	Zone = {
+		StartRadius = 74,
+		EndRadius = 10,
+		ShrinkDelay = 20, -- seconds after the match starts before the ring moves
+		ShrinkTime = 110,
+		CenterJitter = 18, -- the final circle lands somewhere near the middle
+		DamagePerSecond = 7,
+		TickInterval = 0.5,
 	},
 
 	Posture = {
@@ -151,11 +201,10 @@ local Config = {
 	},
 
 	Bots = {
-		Count = 3,
 		SpawnRadius = 35,
 		RespawnDelay = 4,
 		AggroRange = 90,
-		PlayerBias = 0.6, -- players look this much closer, so bots prefer them over each other
+		PlayerBias = 0.85, -- players look a little closer, so bots lean toward them without mobbing
 		ArenaRadius = 62, -- bots won't chase past this distance from the centre
 		ThinkInterval = 0.1,
 		TurnResponsiveness = 18,
@@ -173,6 +222,9 @@ local Config = {
 		DeflectChance = 0.45,
 		GuardChance = 0.25,
 		DodgePerilousChance = 0.5,
+		MikiriChance = 0.4, -- of the dodges against a thrust, how many dash in for a Mikiri
+		HealBelow = 0.4, -- sip the gourd when vitality drops under this fraction
+		FeintChance = 0.2, -- when a defence roll lands mid-windup, how often to feint instead of committing
 	},
 }
 

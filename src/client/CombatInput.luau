@@ -40,8 +40,8 @@ local function getCharacter(): (Model?, BasePart?, Humanoid?)
 	return character, root, character:FindFirstChildOfClass("Humanoid")
 end
 
-local function send(action: Types.Action)
-	combatAction:FireServer(action, workspace:GetServerTimeNow())
+local function send(action: Types.Action, flag: boolean?)
+	combatAction:FireServer(action, workspace:GetServerTimeNow(), flag)
 end
 
 local function cameraFlatLook(): Vector3
@@ -115,6 +115,8 @@ local function dash()
 	nextDashAt = os.clock() + Config.Dodge.Cooldown
 
 	local direction = humanoid.MoveDirection
+	-- Dashing toward the way you face is what turns a dodge into a Mikiri Counter.
+	local forward = direction.Magnitude > 0.1 and direction.Unit:Dot(root.CFrame.LookVector) > 0.6
 	if direction.Magnitude < 0.1 then
 		direction = -root.CFrame.LookVector -- backstep
 	end
@@ -132,7 +134,7 @@ local function dash()
 	Debris:AddItem(velocity, Config.Dodge.DashDuration)
 
 	CombatVisuals.dash(character)
-	send("Dodge")
+	send("Dodge", forward)
 end
 
 local function bind(name: string, title: string, position: UDim2, onBegin: () -> (), onEnd: (() -> ())?, ...: any)
@@ -169,6 +171,15 @@ function CombatInput.start()
 
 	bind("Dodge", "Dodge", UDim2.new(1, -230, 1, -190), dash, nil, Enum.KeyCode.Q, Enum.KeyCode.ButtonB)
 
+	bind("Sweep", "Sweep", UDim2.new(1, -70, 1, -200), function()
+		softFace()
+		send("Sweep")
+	end, nil, Enum.KeyCode.C, Enum.KeyCode.ButtonX)
+
+	bind("Heal", "Heal", UDim2.new(1, -310, 1, -70), function()
+		send("Heal")
+	end, nil, Enum.KeyCode.G, Enum.KeyCode.DPadUp)
+
 	bind(
 		"LockOn",
 		"Lock",
@@ -182,10 +193,25 @@ function CombatInput.start()
 
 	RunService.RenderStepped:Connect(updateFacing)
 
-	player.CharacterAdded:Connect(function()
+	-- Jumps are stamped so the server can tell whether you cleared a sweep.
+	local function watchJumps(character: Model)
+		local humanoid = character:WaitForChild("Humanoid", 10) :: Humanoid?
+		if humanoid then
+			humanoid.StateChanged:Connect(function(_, new)
+				if new == Enum.HumanoidStateType.Jumping then
+					send("Jump")
+				end
+			end)
+		end
+	end
+	player.CharacterAdded:Connect(function(character)
 		blockHeld = false
 		softFaceUntil = 0
+		watchJumps(character)
 	end)
+	if player.Character then
+		task.spawn(watchJumps, player.Character)
+	end
 end
 
 return CombatInput
