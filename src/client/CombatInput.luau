@@ -204,13 +204,24 @@ function CombatInput.start()
 			end)
 		end
 	end
+	-- Tell the server we're in control once each body is registered, which ends the
+	-- protection characters have while their player is still on the title screen.
+	local function announceReady(character: Model)
+		while character.Parent and character:GetAttribute("CombatState") == nil do
+			character:GetAttributeChangedSignal("CombatState"):Wait()
+		end
+		send("Ready")
+	end
+
 	player.CharacterAdded:Connect(function(character)
 		blockHeld = false
 		softFaceUntil = 0
-		watchJumps(character)
+		task.spawn(watchJumps, character)
+		task.spawn(announceReady, character)
 	end)
 	if player.Character then
 		task.spawn(watchJumps, player.Character)
+		task.spawn(announceReady, player.Character)
 	end
 end
 

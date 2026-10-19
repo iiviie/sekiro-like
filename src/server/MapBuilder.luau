@@ -175,8 +175,161 @@ local function walls(parent: Instance)
 	end
 end
 
+-- A shrine hall against the north wall: stone footing, a raised wooden deck with steps,
+-- timber pillars, paper screens and a tiled roof. About sixty parts.
+local function shrine(parent: Instance)
+	local model = Instance.new("Model")
+	model.Name = "ShrineHall"
+	local depth, width = 14, 44
+	local front = -ARENA.WallHalfExtent + WALL_THICKNESS / 2 + depth -- z of the deck's front edge
+	local center = CFrame.new(0, 0, front - depth / 2)
+	local deckTop = 3
+	local pillarHeight = 9
+	local VERMILION = Color3.fromRGB(128, 40, 30)
+	local DECK = Color3.fromRGB(96, 66, 46)
+
+	part({
+		Name = "Footing",
+		Size = Vector3.new(width + 2, deckTop - 0.6, depth + 2),
+		CFrame = center * CFrame.new(0, (deckTop - 0.6) / 2, 0),
+		Material = Enum.Material.Slate,
+		Color = STONE,
+	}, model)
+	part({
+		Name = "Deck",
+		Size = Vector3.new(width, 0.6, depth),
+		CFrame = center * CFrame.new(0, deckTop - 0.3, 0),
+		Material = Enum.Material.WoodPlanks,
+		Color = DECK,
+	}, model)
+	for i = 1, 3 do
+		local h = deckTop * (i / 3)
+		part({
+			Name = "Step",
+			Size = Vector3.new(12, h, 1.6),
+			CFrame = CFrame.new(0, h / 2, front + 1.6 * (3 - i) + 0.8),
+			Material = Enum.Material.WoodPlanks,
+			Color = DECK,
+		}, model)
+	end
+
+	-- Pillars along the front and back of the deck.
+	for _, z in { front - 0.8, front - depth + 0.8 } do
+		for x = -width / 2 + 1, width / 2 - 1, (width - 2) / 5 do
+			part({
+				Name = "Pillar",
+				Size = Vector3.new(1.1, pillarHeight, 1.1),
+				CFrame = CFrame.new(x, deckTop + pillarHeight / 2, z),
+				Material = Enum.Material.Wood,
+				Color = VERMILION,
+			}, model)
+		end
+	end
+
+	-- Paper screens across the back, divided by dark timber.
+	local back = front - depth + 1.4
+	part({
+		Name = "Shoji",
+		Size = Vector3.new(width - 2, pillarHeight - 1, 0.3),
+		CFrame = CFrame.new(0, deckTop + (pillarHeight - 1) / 2, back),
+		Material = Enum.Material.SmoothPlastic,
+		Color = Color3.fromRGB(236, 228, 210),
+	}, model)
+	for _, y in { 2.5, 5.5 } do
+		part({
+			Name = "ShojiRail",
+			Size = Vector3.new(width - 2, 0.25, 0.4),
+			CFrame = CFrame.new(0, deckTop + y, back + 0.05),
+			Material = Enum.Material.Wood,
+			Color = TIMBER,
+			CastShadow = false,
+			CanQuery = false,
+		}, model)
+	end
+	for x = -width / 2 + 4, width / 2 - 4, 4 do
+		part({
+			Name = "ShojiStile",
+			Size = Vector3.new(0.25, pillarHeight - 1, 0.4),
+			CFrame = CFrame.new(x, deckTop + (pillarHeight - 1) / 2, back + 0.05),
+			Material = Enum.Material.Wood,
+			Color = TIMBER,
+			CastShadow = false,
+			CanQuery = false,
+		}, model)
+	end
+
+	-- Roof: a lintel, two broad sloped slabs with deep eaves, and a ridge beam.
+	local eave = deckTop + pillarHeight
+	part({
+		Name = "Lintel",
+		Size = Vector3.new(width + 1, 1, depth),
+		CFrame = center * CFrame.new(0, eave + 0.5, 0),
+		Material = Enum.Material.Wood,
+		Color = TIMBER,
+	}, model)
+	local slope = math.rad(28)
+	local run = depth / 2 + 3
+	for _, side in { -1, 1 } do
+		part({
+			Name = "Roof",
+			Size = Vector3.new(width + 6, 0.9, run / math.cos(slope)),
+			CFrame = center
+				* CFrame.new(0, eave + 1 + math.tan(slope) * run / 2, side * run / 2)
+				* CFrame.Angles(-side * slope, 0, 0),
+			Material = Enum.Material.ClayRoofTiles,
+			Color = ROOF,
+		}, model)
+	end
+	part({
+		Name = "Ridge",
+		Size = Vector3.new(width + 6, 1.2, 1.4),
+		CFrame = center * CFrame.new(0, eave + 1.4 + math.tan(slope) * run, 0),
+		Material = Enum.Material.Slate,
+		Color = ROOF,
+	}, model)
+
+	-- Two paper lanterns under the eaves, the only lights on the building.
+	for _, x in { -10, 10 } do
+		local lantern = part({
+			Name = "PaperLantern",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(1.8, 1.4, 1.4),
+			CFrame = CFrame.new(x, eave - 1.6, front + 0.2) * CFrame.Angles(0, 0, math.rad(90)),
+			Material = Enum.Material.Neon,
+			Color = Color3.fromRGB(214, 96, 52),
+			CastShadow = false,
+			CanCollide = false,
+			CanQuery = false,
+		}, model)
+		local light = Instance.new("PointLight")
+		light.Color = Color3.fromRGB(255, 160, 90)
+		light.Range = 18
+		light.Brightness = 1.2
+		light.Shadows = false
+		light.Parent = lantern
+	end
+
+	model.Parent = parent
+end
+
+-- A few weathered boulders in the courtyard: cover to break line-of-sight in the ring.
+local function boulders()
+	local t = workspace.Terrain
+	local spots = {
+		{ Vector3.new(-34, -2.2, 22), 5 },
+		{ Vector3.new(38, -2.6, -18), 6 },
+		{ Vector3.new(12, -2.4, 40), 4.5 },
+		{ Vector3.new(-26, -2.4, -38), 4.8 },
+	}
+	for _, spot in spots do
+		t:FillBall(spot[1], spot[2], Enum.Material.Rock)
+		t:FillBall(spot[1] + Vector3.new(spot[2] * 0.7, -0.8, 0.4), spot[2] * 0.55, Enum.Material.Rock)
+	end
+end
+
 function MapBuilder.build()
 	terrain()
+	boulders()
 
 	-- Safe to re-run (e.g. once in edit mode for layout): replace any earlier build.
 	local previous = workspace:FindFirstChild("Castle")
@@ -186,6 +339,7 @@ function MapBuilder.build()
 	local map = Instance.new("Folder")
 	map.Name = "Castle"
 	walls(map)
+	shrine(map)
 
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = "PlayerSpawn"

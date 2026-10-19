@@ -49,6 +49,7 @@ local vitality: Bar
 local posture: Bar
 local postureGroup: CanvasGroup
 local ownGroup: CanvasGroup
+local controlsHint: TextLabel
 local gourdLabel: TextLabel
 local enemies: { [Model]: EnemyEntry } = {}
 
@@ -491,14 +492,12 @@ local function buildScreen()
 	hint.TextXAlignment = Enum.TextXAlignment.Right
 	hint.TextYAlignment = Enum.TextYAlignment.Bottom
 	hint.TextColor3 = PARCHMENT
-	hint.TextTransparency = 0.2
-	hint.TextStrokeTransparency = 0.7
+	hint.TextTransparency = 1 -- shown by showControls() once the player enters
+	hint.TextStrokeTransparency = 1
 	hint.Text = "Slash  —  Left Mouse\nDeflect · Guard  —  F\nDodge  —  Q   (dash into a thrust: Mikiri)\n"
 		.. "Perilous Thrust  —  E      Sweep  —  C\nHealing Gourd  —  G      Lock On  —  R"
 	hint.Parent = screen
-	task.delay(CONTROLS_HINT_TIME, function()
-		tween(hint, 2, { TextTransparency = 1, TextStrokeTransparency = 1 })
-	end)
+	controlsHint = hint
 
 	screen.Parent = player:WaitForChild("PlayerGui")
 end
@@ -528,6 +527,15 @@ local function onCombatEvent(kind: string, data: { [string]: any })
 	if kind == "PostureBroken" and data.model and data.model ~= character then
 		showEnemy(data.model, 2)
 	end
+end
+
+-- Shows the controls reminder for a while, then fades it (called once you enter).
+function CombatHUD.showControls()
+	controlsHint.TextTransparency = 0.2
+	controlsHint.TextStrokeTransparency = 0.7
+	task.delay(CONTROLS_HINT_TIME, function()
+		tween(controlsHint, 2, { TextTransparency = 1, TextStrokeTransparency = 1 })
+	end)
 end
 
 function CombatHUD.start()

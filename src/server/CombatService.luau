@@ -470,6 +470,13 @@ function CombatService.perform(c: Combatant, action: Action, stamp: number?, fla
 		return true
 	elseif action == "Heal" then
 		return heal(c)
+	elseif action == "Ready" then
+		-- Players are untouchable until their client is actually in the game (past the
+		-- title screen); spawn protection runs from here.
+		if c.protectedUntil == math.huge then
+			c.protectedUntil = now() + Config.SpawnProtection
+		end
+		return true
 	end
 	return false
 end
@@ -554,7 +561,7 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		nextDodgeAt = 0,
 		jumpStamp = -math.huge,
 		gourds = Config.Gourd.Charges,
-		protectedUntil = now() + Config.SpawnProtection,
+		protectedUntil = if player then math.huge else now() + Config.SpawnProtection,
 		lastAttacker = nil,
 		lastAttackedAt = 0,
 		executed = false,

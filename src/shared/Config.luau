@@ -82,6 +82,13 @@ local attacks: { [AttackKind]: AttackSpec } = {
 local Config = {
 	Attacks = attacks,
 
+	-- Working title; change freely.
+	Title = {
+		Name = "L A S T   B L A D E",
+		Kanji = "最後の刃",
+		Tagline = "Deflect.  Break their posture.  Be the last blade standing.",
+	},
+
 	Combo = {
 		Sequence = { "Light1", "Light2", "Light3" } :: { AttackKind },
 		Window = 0.5, -- after recovery ends, the next slash continues the combo for this long
