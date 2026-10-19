@@ -1,0 +1,15 @@
+# Build output
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+sourcemap.json
+
+# Packages
+Packages/
+ServerPackages/
+DevPackages/
+
+# OS / editor
+.DS_Store
+roblox.yml
