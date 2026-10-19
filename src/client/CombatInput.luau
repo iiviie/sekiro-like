@@ -23,6 +23,10 @@ local player = Players.LocalPlayer
 
 local SOFT_FACE_TIME = 0.35
 
+-- Mirror of the server's combo counter, used only to guess which swing to animate early.
+local comboIndex = 0
+local comboUntil = 0
+
 local CombatInput = {}
 
 local blockHeld = false
@@ -85,6 +89,24 @@ local function updateFacing(dt: number)
 	local target = CFrame.lookAt(root.Position, root.Position + goal)
 	local alpha = 1 - math.exp(-dt * Config.LockOn.TurnRate)
 	root.CFrame = root.CFrame:Lerp(target, alpha)
+end
+
+-- If we're free to swing right now, start the animation without waiting for the server.
+local function predictSlash()
+	local character = player.Character
+	if not character or character:GetAttribute("CombatState") ~= "Idle" then
+		return
+	end
+	local t = os.clock()
+	local sequence = Config.Combo.Sequence
+	if t > comboUntil or comboIndex >= #sequence then
+		comboIndex = 0
+	end
+	comboIndex += 1
+	local kind = sequence[comboIndex]
+	local spec = Config.Attacks[kind]
+	comboUntil = t + spec.windup + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
+	CombatVisuals.predictAttack(character, kind)
 end
 
 local function setBlockHeld(held: boolean)
@@ -155,6 +177,7 @@ function CombatInput.start()
 
 	bind("Attack", "Slash", UDim2.new(1, -150, 1, -160), function()
 		softFace()
+		predictSlash()
 		send("Attack")
 	end, nil, Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR1)
 

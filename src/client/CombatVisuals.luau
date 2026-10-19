@@ -28,6 +28,11 @@ local STEEL = Color3.fromRGB(200, 205, 215)
 
 local CombatVisuals = {}
 
+-- Your own swings start animating the moment you click (see predictAttack); the
+-- server's Windup for that swing then only needs to add sounds and telegraphs.
+local PREDICTION_MATCH_WINDOW = 0.5
+local predicted: { kind: string, at: number }? = nil
+
 local function now(): number
 	return workspace:GetServerTimeNow()
 end
@@ -205,6 +210,12 @@ local function hitstop(duration: number, ...: Model?)
 	end
 end
 
+-- Starts your own swing animation immediately, before the server confirms it.
+function CombatVisuals.predictAttack(model: Model, kind: Config.AttackKind)
+	predicted = { kind = kind, at = os.clock() }
+	Animator.play(model, kind, Config.Attacks[kind].windup)
+end
+
 -- A fading ghost copy of the body, left behind during a dash.
 local function afterimage(model: Model)
 	local ghost = Instance.new("Model")
@@ -279,7 +290,17 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		local model: Model = data.attacker
 		local kind: Config.AttackKind = data.kind
 		local remaining = math.max(data.hitAt - now(), 0)
-		Animator.play(model, kind, remaining)
+		local guess = predicted
+		local alreadyPlaying = isLocal(model)
+			and guess ~= nil
+			and guess.kind == kind
+			and os.clock() - guess.at < PREDICTION_MATCH_WINDOW
+		if isLocal(model) then
+			predicted = nil
+		end
+		if not alreadyPlaying then
+			Animator.play(model, kind, remaining)
+		end
 
 		local perilous = kind == "Perilous" or kind == "Sweep"
 		local heavy = kind == "Light3" or perilous

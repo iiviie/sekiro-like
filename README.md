@@ -1,124 +1,98 @@
-# sekiro-like
+# LAST BLADE (working title)
 
-A Roblox deflect-duel royale: Sekiro-style posture combat in short free-for-all rounds.
-This is the **week 1–3 combat prototype**: one sword, deflects, posture, deathblows and bots, in a greybox arena.
-The round loop (shrinking ring, rounds, spectating) comes after the combat feels fair at 200 ms ping.
+A Roblox posture-and-deflect sword royale. Free-for-all rounds in a castle courtyard: deflect to break posture, punish
+broken opponents with a deathblow, and be the last blade standing while a ring of red mist closes in.
 
 ## Setup
 
-Tools (installed with Homebrew): `rojo` 7.7, `selene`, `stylua`. The Rojo Studio plugin is installed with `rojo plugin install`.
+Tools (installed with Homebrew): `rojo` 7.7, `selene`, `stylua`. The Rojo Studio plugin is installed with
+`rojo plugin install`.
 
-1. Build the place file once and open it in Roblox Studio:
-   ```bash
-   rojo build -o sekiro-like.rbxl
-   ```
-   ```bash
-   open sekiro-like.rbxl
-   ```
+1. Open `sekiro-like.rbxl` in Roblox Studio. It holds the hand-placed props (torii, lanterns, trees, pagoda, distant
+   mountains) in `Workspace.Props`. Don't overwrite it with `rojo build` while it's open; build to another path instead.
 2. Start live sync, then in Studio open **Plugins → Rojo → Connect**:
    ```bash
    rojo serve
    ```
-   Edits to `src/` now sync into Studio as you save.
-3. In **Game Settings → Avatar**, set the avatar type to **R15**. The sword grips the R15 `RightHand`, and R15-only also
-   qualifies for the higher US 18+ DevEx rate.
+   Restart `rojo serve` after changing `default.project.json`; it doesn't hot-reload project structure.
+3. In **Game Settings → Avatar**, set the avatar type to **R15**.
 
-## Testing
+## Playing
 
-- **Solo:** press Play. Three bots ("Ronin") spawn and fight you and each other.
-- **Two players:** Test tab → Clients and Servers → 2 players.
-- **Lag:** in Studio Settings → Network, set *Incoming Replication Lag* to 0.1–0.2 s. The week-1 gate is that deflects
-  still feel fair at about 200 ms.
+Press Play. A title card shows first; click or press any key to enter.
 
-Lint and format before committing:
+- **Intermission (15 s):** spar with two practice bots. You respawn instantly.
+- **Match:** everyone, plus bots filling up to six fighters, starts on a circle around the courtyard. After 20 s a ring of
+  red mist starts closing and hurts anyone outside it. No respawns; fallen players spectate (click to switch). The last
+  one standing wins.
+- **Results:** a victory banner, then the next intermission.
 
-```bash
-selene src && stylua --check src
-```
-
-## Controls
+Wins and Kills show in the player list and are saved with DataStores (session-only in an unpublished place).
 
 | Action | Keyboard / mouse | Gamepad | Touch |
 |---|---|---|---|
 | Slash (press in rhythm for a 3-hit combo) | Left click | R1 | Slash |
 | Deflect (tap just before impact) / guard (hold) | F | L1 | Block |
+| Dodge (i-frames; dash *into* a thrust for a Mikiri Counter) | Q | B | Dodge |
 | Perilous thrust (unblockable) | E | Y | Thrust |
-| Dodge (i-frames) | Q | B | Dodge |
+| Perilous sweep (unblockable; jump over it) | C | X | Sweep |
+| Healing gourd (3 sips per life) | G | D-pad up | Heal |
 | Lock on / off | R or middle mouse | R3 | Lock |
 
-Pressing block during your own windup **feints** it: you cancel the attack for a small posture cost.
+Pressing block during your own windup **feints** it.
 
 ## Combat rules
 
 All numbers live in [src/shared/Config.luau](src/shared/Config.luau).
 
-- **Attack phases.** Every attack has a windup, an impact time `hitAt` fixed on the server clock, and recovery. Clients
-  land their swing animation on `hitAt`, so everyone sees impact at the same moment.
-- **Combo and buffering.** Slashes chain Light1 → Light2 → Light3 (a heavier overhead finisher). An attack pressed up to
-  0.3 s before you're free is buffered and fires the instant you can, and block or dodge can cancel recovery shortly after
-  impact, so inputs never feel eaten.
-- **Deflect.** If you press block within 0.25 s before impact, you deflect: the attacker recoils and takes posture damage,
-  and you take a little. Within 0.1 s it is a **perfect** deflect: heavy attacker posture damage, no cost to you, and a
-  recoil long enough to punish. If you hold block outside the window, you **guard**, which costs your own posture. Mashing
-  doesn't work, because presses less than 0.35 s apart don't re-arm the deflect.
-- **Perilous attacks** (red 危 and a red glow) ignore deflect and guard. Dodge them.
-- **Posture.** At 100 you are **broken** for 1.6 s, and any hit in that time is a **deathblow** (忍殺, instant kill).
-  Posture recovers after 1.2 s without posture damage, and faster while guarding.
-- **Spawn protection.** You can't be hit for 2 s after spawning, or until you attack or block.
-- **Netcode.** Clients send only intents, stamped with `workspace:GetServerTimeNow()`. The server clamps each stamp to at most
-  0.25 s in the past and resolves each hit 0.15 s after impact, so a deflect pressed on time on the defender's screen
-  counts while its packet is still in flight. The server owns posture, health and every outcome, and rate-limits each
-  player to 20 actions per second.
+- **Timing.** Every attack has a windup, an impact time `hitAt` fixed on the server clock, and recovery. Your own swing
+  starts animating the moment you click; the server confirms it and decides every outcome.
+- **Combo and buffering.** Slashes chain Light1 → Light2 → Light3. Inputs up to 0.3 s early are buffered, and block or
+  dodge can cancel recovery shortly after impact.
+- **Deflect.** Press block within 0.25 s before impact: the attacker recoils and takes posture damage. Within 0.1 s it is
+  a **perfect** deflect with a recoil long enough to punish. Holding block outside the window **guards**, which costs your
+  own posture. Mashing doesn't re-arm the deflect.
+- **Perilous attacks** (red glow and 危) can't be blocked. Dodge the **thrust**, or dash into it for a **Mikiri Counter**
+  (heavy posture damage, long stagger). Jump the **sweep**.
+- **Posture.** At 100 you are **broken** for 1.6 s and marked with a red dot; any hit then is a **deathblow** (忍殺).
+- **Healing gourd.** A 0.9 s sip that slows you; a hit mid-sip wastes it.
+- **Netcode.** Clients send intents stamped with `workspace:GetServerTimeNow()`. The server clamps stamps to 0.25 s in the
+  past and resolves 0.15 s after impact, so a deflect pressed on time on your screen counts. Players are protected until
+  their client is past the title screen.
 
-## Animation
+## Presentation
 
-- **Locomotion** uses Roblox's own Ninja Animation Package, which any experience can use.
-- **Combat motion** is procedural: [src/shared/Poses.luau](src/shared/Poses.luau) describes each pose as directions (where
-  the upper arm, forearm and blade point, which way the edge faces), solves them into joint rotations, and
-  [src/client/Animator.luau](src/client/Animator.luau) layers them over the locomotion every frame with eased keyframes
-  from [src/shared/Clips.luau](src/shared/Clips.luau). Windups stretch so the strike lands on the server's `hitAt`.
-  Animations owned by other creators can't play in your game unless they share them with you, so this needs no uploads.
-- **Feel:** sword trails, hitstop on impact, camera shake, sparks and flashes, dash afterimages, and sound effects
-  (mostly the licensed ProSoundEffects library). Every asset id is in [src/shared/Assets.luau](src/shared/Assets.luau).
+- **Animation.** Locomotion uses Roblox's Ninja Animation Package. Combat motion is procedural: [Poses.luau](src/shared/Poses.luau)
+  describes each pose as directions (where the arm, forearm and blade point), solves them into joint rotations, and
+  [Animator.luau](src/client/Animator.luau) layers them over the locomotion with eased keyframes from [Clips.luau](src/shared/Clips.luau).
+- **HUD.** Sekiro / Dark Souls style: a crimson vitality bar with a damage trail, a posture bar that grows from the centre
+  and hides when empty, gourd count, enemy bars only for your target and recent opponents, a red deathblow marker, kanji
+  splashes, a phase banner, a kill feed and spectating.
+- **Map.** [MapBuilder.luau](src/server/MapBuilder.luau) generates the terrain, castle walls, shrine hall and boulders.
+  Lighting and post effects are in `default.project.json`. Props in `Workspace.Props` came from the Creator Store and were
+  stripped of every script.
+- **Sound.** Licensed ProSoundEffects and APM library audio. Every asset id is in [Assets.luau](src/shared/Assets.luau).
+
+## Performance
+
+- The scene is about 450 parts, 6 lights and one terrain mesh. Decorative props don't collide, query or touch, and small
+  parts don't cast shadows. Distant mountains are single meshes with shadows and collision off.
+- Nothing in the HUD runs per frame. Bars update from attribute and health signals and animate with tweens. The ring is
+  the only per-frame update, and only during a match.
+- Round state replicates as a few attributes per phase; clients compute the ring and timers from the synced clock.
 
 ## Code map
 
 ```
 src/
-  shared/   (ReplicatedStorage.Shared)
-    Config.luau         all tuning numbers
-    Types.luau          combat states, actions, the "Combatant" tag
-    Assets.luau         katana mesh, animation pack and sound ids
-    Poses.luau          direction-based poses, solved to joint rotations
-    Clips.luau          keyframe timelines built from the poses
-  server/   (ServerScriptService.Server)
-    init.server.luau    boots arena, combat, bots
-    CombatService.luau  state machine, combo/buffer, hit resolution, posture, remote handling
-    BotService.luau     bot AI: target sharing, spacing, strafing, combos, deflects, punishes
-    Locomotion.luau     Ninja animation pack for players and bots
-    SwordRig.luau       katana mesh, grip weld and swing trail
-    ArenaBuilder.luau   greybox floor, pillars, spawn, lighting
-  client/   (StarterPlayerScripts.Client)
-    init.client.luau    boots visuals, HUD, input
-    Animator.luau       procedural pose layering on top of locomotion
-    CombatVisuals.luau  clips per combat event, sounds, sparks, hitstop, afterimages
-    CombatInput.luau    bindings, smooth facing, dodge dash
-    LockOn.luau         target lock and over-the-shoulder camera
-    CombatHUD.luau      posture and health bars
+  shared/   Config, Types, Assets, Poses, Clips, Round
+  server/   init, CombatService, BotService, RoundService, StatsService, MapBuilder, Locomotion, SwordRig
+  client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, TitleScreen, Ambience
 ```
 
-## Known shortcuts (by design for now)
+## Before publishing
 
-- **Greybox arena.** The map is still blocks built in code. A proper map belongs in the place file.
-- **Hits are detected on the server** with a box in front of the attacker. Moving targets are judged from the server's
-  slightly delayed view. If that feels unfair, switch to detecting on the attacker's client and validating on the server.
-- **The attacker's windup isn't predicted locally**, so your own swing starts one round trip after you click. Dash is
-  predicted.
-- **Classic replication, not Server Authority mode.** The combat rules are isolated in `CombatService`, so moving them
-  into `BindToSimulation` later is a contained change.
-
-## Next
-
-1. Playtest at 0–200 ms lag and tune `Config.Deflect`, `Config.Posture` and the pose timings until duels last 10–20 s.
-2. Build a real map (Japanese temple courtyard) in the place file.
-3. Build the round loop: 12–16 player server, shrinking ring, 3–5 minute rounds, bots filling empty slots, instant requeue.
+- Save the place in Studio, then run `rojo syncback` so `Workspace.Props` is tracked in git.
+- Game Settings: R15 only; Security → enable Studio access to API services to test DataStores.
+- Store page: icon and thumbnails (real gameplay captures work best), description, genre "Fighting".
+- Rename anything that borrows FromSoftware terms ("Shinobi Execution", "Mikiri") if you want to avoid trouble.
