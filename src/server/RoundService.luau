@@ -12,6 +12,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Round = require(ReplicatedStorage.Shared.Round)
 local BotService = require(script.Parent.BotService)
 local CombatService = require(script.Parent.CombatService)
+local StatsService = require(script.Parent.StatsService)
 
 type Combatant = CombatService.Combatant
 type Phase = Round.Phase
@@ -187,6 +188,9 @@ end
 
 local function results(winner: Combatant?)
 	setPhase("Results", Config.Round.Results)
+	if winner and winner.player then
+		StatsService.addWin(winner.player)
+	end
 	roundEvent:FireAllClients("Victory", {
 		winner = if winner then winner.model else nil,
 		name = if winner then displayName(winner.model) else nil,

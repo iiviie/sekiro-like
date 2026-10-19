@@ -38,6 +38,11 @@ local Assets = {
 		PostureBreak = "rbxassetid://9116673678", -- PSE: heavy metal impact
 		Dodge = "rbxassetid://9120729005", -- PSE: whoosh
 	},
+
+	Ambience = {
+		Bed = "rbxassetid://9112832288", -- PSE: distant mountain birds, heavy air (loop)
+		MatchMusic = "rbxassetid://1841476670", -- APM: "Drums of Combat"
+	},
 }
 
 return Assets
