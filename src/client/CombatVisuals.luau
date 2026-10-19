@@ -70,11 +70,11 @@ local function floatingText(model: Model, text: string, color: Color3, scale: nu
 	local label = Instance.new("TextLabel")
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.GothamBlack
+	label.Font = Enum.Font.Garamond
 	label.Text = text
 	label.TextColor3 = color
 	label.TextScaled = true
-	label.TextStrokeTransparency = 0.3
+	label.TextStrokeTransparency = 0.45
 	label.Parent = gui
 	gui.Parent = player:WaitForChild("PlayerGui")
 

@@ -31,6 +31,82 @@
           "$path": "src/client"
         }
       }
+    },
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Technology": "ShadowMap",
+        "TimeOfDay": "17:05:00",
+        "GeographicLatitude": 35,
+        "Brightness": 2.8,
+        "ExposureCompensation": 0.05,
+        "EnvironmentDiffuseScale": 0.55,
+        "EnvironmentSpecularScale": 0.6,
+        "GlobalShadows": true,
+        "ShadowSoftness": 0.3,
+        "Ambient": [
+          0.27,
+          0.23,
+          0.22
+        ],
+        "OutdoorAmbient": [
+          0.42,
+          0.36,
+          0.33
+        ],
+        "ColorShift_Top": [
+          0.95,
+          0.72,
+          0.52
+        ]
+      },
+      "Atmosphere": {
+        "$className": "Atmosphere",
+        "$properties": {
+          "Density": 0.38,
+          "Offset": 0.22,
+          "Color": [
+            0.86,
+            0.72,
+            0.6
+          ],
+          "Decay": [
+            0.45,
+            0.33,
+            0.32
+          ],
+          "Glare": 0.35,
+          "Haze": 2.0
+        }
+      },
+      "Bloom": {
+        "$className": "BloomEffect",
+        "$properties": {
+          "Intensity": 0.6,
+          "Size": 28,
+          "Threshold": 1.6
+        }
+      },
+      "Grade": {
+        "$className": "ColorCorrectionEffect",
+        "$properties": {
+          "Brightness": 0.0,
+          "Contrast": 0.12,
+          "Saturation": -0.18,
+          "TintColor": [
+            1.0,
+            0.95,
+            0.9
+          ]
+        }
+      },
+      "SunRays": {
+        "$className": "SunRaysEffect",
+        "$properties": {
+          "Intensity": 0.06,
+          "Spread": 0.7
+        }
+      }
     }
   }
 }

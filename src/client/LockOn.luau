@@ -17,6 +17,7 @@ local LockOn = {}
 
 local target: Model? = nil
 local reticle: BillboardGui? = nil
+local listeners: { (Model?) -> () } = {}
 
 local function rootOf(model: Model?): BasePart?
 	local root = model and model:FindFirstChild("HumanoidRootPart")
@@ -40,18 +41,23 @@ local function makeReticle(model: Model): BillboardGui?
 	gui.Name = "LockOnReticle"
 	gui.Adornee = torso
 	gui.AlwaysOnTop = true
-	gui.Size = UDim2.fromOffset(18, 18)
+	gui.Size = UDim2.fromOffset(16, 16)
+	gui.LightInfluence = 0
 
+	-- A small pale dot with a dark ring, like Sekiro's lock-on marker.
 	local dot = Instance.new("Frame")
 	dot.AnchorPoint = Vector2.new(0.5, 0.5)
 	dot.Position = UDim2.fromScale(0.5, 0.5)
-	dot.Size = UDim2.fromOffset(10, 10)
-	dot.Rotation = 45
-	dot.BackgroundColor3 = Color3.fromRGB(255, 240, 220)
+	dot.Size = UDim2.fromOffset(8, 8)
+	dot.BackgroundColor3 = Color3.fromRGB(240, 232, 214)
 	dot.BorderSizePixel = 0
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.5, 0)
+	corner.Parent = dot
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(150, 20, 20)
+	stroke.Color = Color3.fromRGB(20, 16, 14)
 	stroke.Thickness = 2
+	stroke.Transparency = 0.2
 	stroke.Parent = dot
 	dot.Parent = gui
 
@@ -106,6 +112,14 @@ function LockOn.set(model: Model?)
 	else
 		camera.CameraType = Enum.CameraType.Custom
 	end
+	for _, listener in listeners do
+		task.spawn(listener, model)
+	end
+end
+
+-- Calls `listener(target)` whenever the lock-on target changes (nil when released).
+function LockOn.changed(listener: (Model?) -> ())
+	table.insert(listeners, listener)
 end
 
 function LockOn.toggle()

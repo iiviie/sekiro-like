@@ -77,6 +77,11 @@ local Config = {
 	-- Spawn protection: you can't be hit and bots ignore you for this long.
 	SpawnProtection = 2,
 
+	Arena = {
+		WallHalfExtent = 78, -- castle walls form a square this far from the centre
+		FightRadius = 66, -- open ground inside the walls
+	},
+
 	Posture = {
 		Max = 100,
 		RegenPerSecond = 14,
@@ -151,7 +156,7 @@ local Config = {
 		RespawnDelay = 4,
 		AggroRange = 90,
 		PlayerBias = 0.6, -- players look this much closer, so bots prefer them over each other
-		ArenaRadius = 105, -- bots won't chase past this distance from the centre
+		ArenaRadius = 62, -- bots won't chase past this distance from the centre
 		ThinkInterval = 0.1,
 		TurnResponsiveness = 18,
 		-- Spacing: circle at StrafeDistance while waiting, step in to AttackDistance to swing.

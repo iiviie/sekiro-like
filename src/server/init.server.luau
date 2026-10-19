@@ -1,8 +1,8 @@
 --!strict
-local ArenaBuilder = require(script.ArenaBuilder)
 local BotService = require(script.BotService)
 local CombatService = require(script.CombatService)
+local MapBuilder = require(script.MapBuilder)
 
-ArenaBuilder.build()
+MapBuilder.build()
 CombatService.start()
 BotService.start()
