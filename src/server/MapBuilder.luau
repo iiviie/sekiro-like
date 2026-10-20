@@ -1,6 +1,7 @@
 --!strict
--- Builds the Ashina-style castle courtyard: terrain (packed-earth courtyard, autumn
--- grass, rock cliffs on the horizon) and the castle walls around the fighting area.
+-- Builds the Ashina-style castle courtyard: terrain (packed-earth courtyard with a raked-sand
+-- duelling circle, autumn grass, rock cliffs on the horizon), the castle walls around the
+-- fighting area, banners, braziers and drifting leaves.
 -- Hand-placed props (torii, lanterns, trees, pagoda) live in Workspace.Props in the
 -- place file. Lighting and post-processing are set in default.project.json.
 --
@@ -8,6 +9,7 @@
 -- per segment, with shadows only on the big shapes and no queries or touches on trim.
 
 local Config = require(game:GetService("ReplicatedStorage").Shared.Config)
+local Palette = require(game:GetService("ReplicatedStorage").Shared.Palette)
 
 local ARENA = Config.Arena
 local WALL_HEIGHT = 9
@@ -15,10 +17,12 @@ local WALL_THICKNESS = 2.4
 local SEGMENT_LENGTH = 24
 local GATE_WIDTH = 22 -- opening in the south wall, framed by the torii outside
 
-local PLASTER = Color3.fromRGB(226, 220, 205)
-local TIMBER = Color3.fromRGB(46, 34, 28)
-local STONE = Color3.fromRGB(92, 88, 82)
-local ROOF = Color3.fromRGB(52, 54, 58)
+local PLASTER = Palette.Plaster
+local TIMBER = Palette.Timber
+local STONE = Palette.Stone
+local ROOF = Palette.Roof
+local DUEL_RADIUS = 19 -- pale sand circle in the middle of the courtyard
+local FLOOR_Y = 2 -- where smooth terrain puts the walkable surface (see terrain())
 
 local MapBuilder = {}
 
@@ -39,30 +43,53 @@ local function terrain()
 	local t = workspace.Terrain
 	t:Clear()
 
-	t:SetMaterialColor(Enum.Material.Grass, Color3.fromRGB(118, 112, 62))
-	t:SetMaterialColor(Enum.Material.Ground, Color3.fromRGB(104, 88, 70))
-	t:SetMaterialColor(Enum.Material.Mud, Color3.fromRGB(84, 70, 58))
+	t:SetMaterialColor(Enum.Material.Grass, Palette.AutumnGrass)
+	t:SetMaterialColor(Enum.Material.LeafyGrass, Palette.Moss)
+	t:SetMaterialColor(Enum.Material.Ground, Palette.Earth)
 	t:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(88, 86, 84))
-	t:SetMaterialColor(Enum.Material.Slate, Color3.fromRGB(120, 114, 104))
+	t:SetMaterialColor(Enum.Material.Slate, Palette.Flagstone)
+	t:SetMaterialColor(Enum.Material.Sand, Color3.fromRGB(184, 168, 142))
 
 	local random = Random.new(7) -- fixed seed: the same map on every server
 
-	-- Base land, top surface at y = 0.
+	-- Base land. Smooth terrain draws the surface half a voxel above the last full voxel,
+	-- so the walkable ground ends up at y = FLOOR_Y. Repaint the top voxel layer with
+	-- ReplaceMaterial on the 4-stud grid: thin fills can't change a full voxel's material.
 	t:FillBlock(CFrame.new(0, -8, 0), Vector3.new(1024, 16, 1024), Enum.Material.Grass)
-	-- Packed-earth courtyard inside the walls, scuffed with darker worn patches.
-	local inner = ARENA.WallHalfExtent * 2 - 4
-	t:FillBlock(CFrame.new(0, -1, 0), Vector3.new(inner, 2, inner), Enum.Material.Ground)
-	for _ = 1, 14 do
-		-- Flat discs that only replace the top layer, so the ground stays level.
-		local spot = CFrame.new(random:NextNumber(-50, 50), -0.5, random:NextNumber(-50, 50))
-		t:FillCylinder(spot, 1, random:NextNumber(5, 11), Enum.Material.Mud)
+	local function paint(from: Vector3, to: Vector3, material: Enum.Material)
+		local region = Region3.new(from:Min(to), from:Max(to)):ExpandToGrid(4)
+		t:ReplaceMaterial(region, 4, Enum.Material.Grass, material)
+		t:ReplaceMaterial(region, 4, Enum.Material.Ground, material)
 	end
-	-- Flagstone path from the torii, through the gate, to the centre of the courtyard.
-	t:FillBlock(
-		CFrame.new(0, -0.9, ARENA.WallHalfExtent / 2 + 20),
-		Vector3.new(9, 2, ARENA.WallHalfExtent + 60),
-		Enum.Material.Slate
-	)
+	local top, bottom = 0, -4
+	-- Packed-earth courtyard inside the walls.
+	local inner = ARENA.WallHalfExtent * 2 - 4
+	paint(Vector3.new(-inner / 2, bottom, -inner / 2), Vector3.new(inner / 2, top, inner / 2), Enum.Material.Ground)
+	-- Tufts of moss and dry grass breaking up the bare earth; terrain blending softens
+	-- their square voxel edges.
+	for _ = 1, 16 do
+		local center = Vector3.new(random:NextNumber(-60, 60), 0, random:NextNumber(-60, 60))
+		local half = Vector3.new(random:NextNumber(3, 7), 0, random:NextNumber(3, 7))
+		if center.Magnitude > DUEL_RADIUS + 6 then
+			paint(center - half + Vector3.new(0, bottom, 0), center + half, Enum.Material.LeafyGrass)
+		end
+	end
+	-- Moss creeping along the foot of the walls hides the hard seam between floor and wall.
+	local edge = inner / 2
+	for _, axis in { Vector3.xAxis, Vector3.zAxis } do
+		for _, sign in { -1, 1 } do
+			local along = Vector3.new(1, 0, 1) - axis
+			local inside = axis * sign * (edge - 8)
+			local outside = axis * sign * edge
+			paint(
+				inside - along * edge + Vector3.new(0, bottom, 0),
+				outside + along * edge + Vector3.new(0, top, 0),
+				Enum.Material.LeafyGrass
+			)
+		end
+	end
+	-- Flagstone path from the torii, through the gate, to the duelling circle.
+	paint(Vector3.new(-4, bottom, DUEL_RADIUS + 1), Vector3.new(4, top, ARENA.WallHalfExtent + 50), Enum.Material.Slate)
 
 	-- Gentle grassy hills rolling away from the walls; distant mountains are meshes in
 	-- Workspace.Props, which are far cheaper than tall voxel peaks.
@@ -185,8 +212,8 @@ local function shrine(parent: Instance)
 	local center = CFrame.new(0, 0, front - depth / 2)
 	local deckTop = 3
 	local pillarHeight = 9
-	local VERMILION = Color3.fromRGB(128, 40, 30)
-	local DECK = Color3.fromRGB(96, 66, 46)
+	local VERMILION = Palette.Vermilion
+	local DECK = Palette.Deck
 
 	part({
 		Name = "Footing",
@@ -312,6 +339,180 @@ local function shrine(parent: Instance)
 	model.Parent = parent
 end
 
+-- The duelling circle: pale sand inside a flagstone kerb, so dark-clad fighters read
+-- clearly against the ground where most fights happen. Parts, not terrain, because terrain
+-- voxels are 4 studs and can't hold a crisp edge. About thirty parts.
+local function duelCircle(parent: Instance)
+	part({
+		Name = "DuelSand",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.3, DUEL_RADIUS * 2, DUEL_RADIUS * 2),
+		CFrame = CFrame.new(0, FLOOR_Y, 0) * CFrame.Angles(0, 0, math.rad(90)),
+		Material = Enum.Material.Sand,
+		Color = Color3.fromRGB(186, 170, 144),
+		CastShadow = false,
+	}, parent)
+	local stones = 36
+	local kerbRadius = DUEL_RADIUS + 0.7
+	local stoneLength = 2 * math.pi * kerbRadius / stones + 0.15
+	for i = 1, stones do
+		local angle = (i / stones) * math.pi * 2
+		local position = Vector3.new(math.cos(angle) * kerbRadius, FLOOR_Y + 0.1, math.sin(angle) * kerbRadius)
+		part({
+			Name = "Kerb",
+			Size = Vector3.new(stoneLength, 0.45, 1.4),
+			-- Each stone's long side runs along the circle; slight colour jitter between stones.
+			CFrame = CFrame.lookAt(position, Vector3.new(0, position.Y, 0)),
+			Material = Enum.Material.Slate,
+			Color = Palette.Flagstone:Lerp(Palette.Stone, (i * 7 % 5) / 8),
+			CastShadow = false,
+		}, parent)
+	end
+end
+
+-- Tall crimson nobori banners along the east and west walls, each with a brushed 刃.
+-- One part for the pole, one for the cloth and one SurfaceGui each.
+local function banners(parent: Instance)
+	local inset = ARENA.WallHalfExtent - WALL_THICKNESS / 2 - 2.2
+	for _, side in { -1, 1 } do
+		for _, z in { -46, -15, 15, 46 } do
+			local base = Vector3.new(side * inset, FLOOR_Y - 0.5, z)
+			local inward = Vector3.new(-side, 0, 0)
+			part({
+				Name = "BannerPole",
+				Shape = Enum.PartType.Cylinder,
+				Size = Vector3.new(15, 0.35, 0.35),
+				CFrame = CFrame.new(base + Vector3.new(0, 7.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+				Material = Enum.Material.Wood,
+				Color = TIMBER,
+				CanCollide = false,
+				CanQuery = false,
+			}, parent)
+			part({
+				Name = "BannerBar",
+				Size = Vector3.new(0.2, 0.2, 2.6),
+				CFrame = CFrame.new(base + Vector3.new(0, 14.2, 0) + inward * 0.25),
+				Material = Enum.Material.Wood,
+				Color = TIMBER,
+				CastShadow = false,
+				CanCollide = false,
+				CanQuery = false,
+			}, parent)
+			local center = base + Vector3.new(0, 10, 0) + inward * 0.3
+			local cloth = part({
+				Name = "Banner",
+				Size = Vector3.new(2.4, 8.4, 0.08),
+				CFrame = CFrame.lookAt(center, center + inward), -- front face toward the courtyard
+				Material = Enum.Material.Fabric,
+				Color = Palette.Crimson,
+				CanCollide = false,
+				CanQuery = false,
+			}, parent)
+			local gui = Instance.new("SurfaceGui")
+			gui.Face = Enum.NormalId.Front
+			gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+			gui.PixelsPerStud = 40
+			gui.LightInfluence = 1
+			gui.Parent = cloth
+			local mark = Instance.new("TextLabel")
+			mark.BackgroundTransparency = 1
+			mark.Size = UDim2.fromScale(1, 0.5)
+			mark.Position = UDim2.fromScale(0, 0.12)
+			mark.Text = "刃"
+			mark.TextScaled = true
+			mark.Font = Enum.Font.Garamond
+			mark.TextColor3 = Palette.Parchment
+			mark.Parent = gui
+		end
+	end
+end
+
+-- Two iron braziers at the foot of the shrine steps: warm firelight in the middle distance.
+local function braziers(parent: Instance)
+	local front = -ARENA.WallHalfExtent + WALL_THICKNESS / 2 + 14
+	for _, x in { -9.5, 9.5 } do
+		local base = Vector3.new(x, FLOOR_Y - 0.3, front + 6)
+		part({
+			Name = "BrazierStand",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(2.6, 1.2, 1.2),
+			CFrame = CFrame.new(base + Vector3.new(0, 1.3, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			Material = Enum.Material.Slate,
+			Color = STONE,
+		}, parent)
+		local bowl = part({
+			Name = "BrazierBowl",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(0.9, 3, 3),
+			CFrame = CFrame.new(base + Vector3.new(0, 3, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			Material = Enum.Material.CorrodedMetal,
+			Color = Color3.fromRGB(46, 40, 38),
+		}, parent)
+		local coals = part({
+			Name = "Coals",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(0.2, 2.5, 2.5),
+			CFrame = CFrame.new(base + Vector3.new(0, 3.42, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			Material = Enum.Material.Neon,
+			Color = Color3.fromRGB(255, 96, 34),
+			CastShadow = false,
+			CanCollide = false,
+			CanQuery = false,
+		}, parent)
+		local fire = Instance.new("Fire")
+		fire.Size = 4
+		fire.Heat = 7
+		fire.Color = Palette.Ember
+		fire.SecondaryColor = Color3.fromRGB(190, 40, 20)
+		fire.Parent = coals
+		local light = Instance.new("PointLight")
+		light.Color = Palette.Ember
+		light.Range = 16
+		light.Brightness = 1.6
+		light.Shadows = false
+		light.Parent = bowl
+	end
+end
+
+-- Maple leaves drifting down over the courtyard on the evening wind. One emitter; the
+-- particles are simulated on each client.
+local function fallingLeaves(parent: Instance)
+	local sky = part({
+		Name = "LeafEmitter",
+		Size = Vector3.new(ARENA.WallHalfExtent * 2, 1, ARENA.WallHalfExtent * 2),
+		CFrame = CFrame.new(-10, 34, -10),
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		CastShadow = false,
+	}, parent)
+	local leaves = Instance.new("ParticleEmitter")
+	leaves.Texture = "rbxassetid://241386641"
+	leaves.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(196, 56, 30)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(214, 112, 40)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 40, 28)),
+	})
+	leaves.Size = NumberSequence.new(0.35, 0.45)
+	leaves.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.08, 0),
+		NumberSequenceKeypoint.new(0.85, 0),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	leaves.EmissionDirection = Enum.NormalId.Bottom
+	leaves.Rate = 14
+	leaves.Lifetime = NumberRange.new(9, 13)
+	leaves.Speed = NumberRange.new(1.5, 3)
+	leaves.SpreadAngle = Vector2.new(30, 30)
+	leaves.Acceleration = Vector3.new(1.4, -0.9, 0.8)
+	leaves.Drag = 0.4
+	leaves.Rotation = NumberRange.new(0, 360)
+	leaves.RotSpeed = NumberRange.new(-120, 120)
+	leaves.LightInfluence = 1
+	leaves.Parent = sky
+end
+
 -- A few weathered boulders in the courtyard: cover to break line-of-sight in the ring.
 local function boulders()
 	local t = workspace.Terrain
@@ -340,6 +541,10 @@ function MapBuilder.build()
 	map.Name = "Castle"
 	walls(map)
 	shrine(map)
+	duelCircle(map)
+	banners(map)
+	braziers(map)
+	fallingLeaves(map)
 
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = "PlayerSpawn"

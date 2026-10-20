@@ -84,8 +84,12 @@ practice or automated combat tests.
 - **HUD.** Sekiro / Dark Souls style: a crimson vitality bar with a damage trail, a posture bar that grows from the centre
   and hides when empty, gourd count, enemy bars only for your target and recent opponents, a red deathblow marker, kanji
   splashes, a phase banner, a kill feed and spectating.
-- **Map.** [MapBuilder.luau](src/server/MapBuilder.luau) generates the terrain, castle walls, shrine hall and boulders.
-  Lighting and post effects are in `default.project.json`. Props in `Workspace.Props` came from the Creator Store and were
+- **Map.** [MapBuilder.luau](src/server/MapBuilder.luau) generates the terrain, castle walls, shrine hall, a pale-sand
+  duelling circle (so dark-clad fighters read clearly), moss along the walls, crimson nobori banners, braziers and
+  drifting maple leaves. World and HUD colours come from [Palette.luau](src/shared/Palette.luau).
+- **Lighting.** Golden hour under a storm-lit sunset sky: `LightingStyle = Realistic` with `PrioritizeLightingQuality`,
+  the sun placed where the skybox glows, warm key light against cool violet ambient, and a dense Atmosphere that pushes
+  the mountains back. All of it is in `default.project.json` (the deprecated `Technology` property is gone). Props in `Workspace.Props` came from the Creator Store and were
   stripped of every script.
 - **Sound.** Licensed ProSoundEffects and APM library audio. Every asset id is in [Assets.luau](src/shared/Assets.luau).
 

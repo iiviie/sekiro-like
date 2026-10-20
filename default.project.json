@@ -38,48 +38,62 @@
     "Lighting": {
       "$className": "Lighting",
       "$properties": {
-        "Technology": "ShadowMap",
-        "TimeOfDay": "17:05:00",
-        "GeographicLatitude": 35,
-        "Brightness": 2.8,
+        "TimeOfDay": "16:48:00",
+        "GeographicLatitude": -40,
+        "Brightness": 2.6,
         "ExposureCompensation": 0.05,
-        "EnvironmentDiffuseScale": 0.55,
-        "EnvironmentSpecularScale": 0.6,
+        "EnvironmentDiffuseScale": 0.5,
+        "EnvironmentSpecularScale": 0.35,
         "GlobalShadows": true,
-        "ShadowSoftness": 0.3,
+        "ShadowSoftness": 0.25,
         "Ambient": [
-          0.27,
-          0.23,
-          0.22
+          0.227,
+          0.188,
+          0.275
         ],
         "OutdoorAmbient": [
-          0.42,
-          0.36,
-          0.33
+          0.408,
+          0.345,
+          0.486
         ],
         "ColorShift_Top": [
-          0.95,
-          0.72,
-          0.52
-        ]
+          1.0,
+          0.698,
+          0.471
+        ],
+        "LightingStyle": "Realistic",
+        "PrioritizeLightingQuality": true
+      },
+      "Sky": {
+        "$className": "Sky",
+        "$properties": {
+          "SkyboxBk": "http://www.roblox.com/asset/?id=5133008838",
+          "SkyboxDn": "http://www.roblox.com/asset/?id=5132998156",
+          "SkyboxFt": "http://www.roblox.com/asset/?id=5132998362",
+          "SkyboxLf": "http://www.roblox.com/asset/?id=5132998795",
+          "SkyboxRt": "http://www.roblox.com/asset/?id=5132998563",
+          "SkyboxUp": "http://www.roblox.com/asset/?id=5132999149",
+          "CelestialBodiesShown": false,
+          "StarCount": 0
+        }
       },
       "Atmosphere": {
         "$className": "Atmosphere",
         "$properties": {
-          "Density": 0.38,
-          "Offset": 0.22,
+          "Density": 0.4,
+          "Offset": 0.08,
           "Color": [
-            0.86,
-            0.72,
-            0.6
+            0.659,
+            0.588,
+            0.62
           ],
           "Decay": [
-            0.45,
-            0.33,
-            0.32
+            0.408,
+            0.361,
+            0.455
           ],
-          "Glare": 0.35,
-          "Haze": 2.0
+          "Glare": 0.45,
+          "Haze": 1.4
         }
       },
       "Bloom": {
@@ -95,11 +109,11 @@
         "$properties": {
           "Brightness": 0.0,
           "Contrast": 0.12,
-          "Saturation": -0.18,
+          "Saturation": -0.1,
           "TintColor": [
             1.0,
-            0.95,
-            0.9
+            0.97,
+            0.94
           ]
         }
       },
