@@ -119,14 +119,24 @@ local function predictSlash()
 		comboIndex = 0
 	end
 	comboIndex += 1
-	local kind = sequence[comboIndex]
+	local kind: Config.AttackKind = sequence[comboIndex]
+	if kind == "Light3" and t - LocalCombat.idleSince >= Config.Combo.DelayAfter then
+		kind = "Overhead"
+	end
 	if not canAfford(character, kind) then
 		comboIndex -= 1
 		return
 	end
+	-- Mirror the server: chained slashes speed up only after a clean hit.
 	local spec = Config.Attacks[kind]
-	comboUntil = t + spec.windup + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
-	CombatVisuals.predictAttack(character, kind)
+	local windup = if spec.chainWindup
+			and comboIndex >= 2
+			and LocalCombat.lastSlashLanded
+		then spec.chainWindup
+		else spec.windup
+	LocalCombat.lastSlashLanded = false
+	comboUntil = t + windup + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
+	CombatVisuals.predictAttack(character, kind, windup)
 end
 
 local function setBlockHeld(held: boolean)
@@ -197,6 +207,19 @@ end
 
 function CombatInput.start()
 	LockOn.start()
+
+	-- Track when our character last became free to act, for the delayed third slash.
+	local function watchState(character: Model)
+		character:GetAttributeChangedSignal("CombatState"):Connect(function()
+			if character:GetAttribute("CombatState") == "Idle" then
+				LocalCombat.idleSince = os.clock()
+			end
+		end)
+	end
+	player.CharacterAdded:Connect(watchState)
+	if player.Character then
+		watchState(player.Character)
+	end
 
 	bind("Attack", "Slash", UDim2.new(1, -150, 1, -160), function()
 		softFace()

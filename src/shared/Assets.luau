@@ -15,11 +15,14 @@ local Assets = {
 	Katana = {
 		MeshId = "rbxassetid://114165484128397",
 		TextureId = "rbxassetid://85720589438351",
-		Scale = 0.6,
-		Size = Vector3.new(0.29, 0.38, 3.9), -- the mesh's bounds at Scale; blade along +Z, edge toward -Y
-		GripZ = -1.5, -- handle centre, where the fist closes
-		GuardZ = -0.95, -- tsuba; the swing trail starts here
-		TipZ = 1.9,
+		-- Stylised for readability at third-person distance: ~13% longer than the source
+		-- mesh and much broader, since thin blades turn to a pixel line on screen. (A real
+		-- katana scaled to a 5-stud R15 body would be ~2.7 studs; this is 4.4.)
+		Scale = Vector3.new(0.6 * 1.35, 0.6 * 2.6, 0.6 * 1.13),
+		Size = Vector3.new(0.39, 0.99, 4.4), -- the mesh's bounds at Scale; blade along +Z, edge toward -Y
+		GripZ = -1.7, -- handle centre, where the fist closes
+		GuardZ = -1.07, -- tsuba; the swing trail starts here
+		TipZ = 2.15,
 	},
 
 	-- Roblox Ninja Animation Package.

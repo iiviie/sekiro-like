@@ -43,7 +43,18 @@ local Clips: { [string]: Clip } = {
 		hold = 0.06,
 		fadeOut = 0.25,
 	},
+	-- The on-rhythm third slash: the overhead arc without the held beat.
 	Light3 = {
+		segments = {
+			{ pose = "Slash3Windup", duration = "windup", ease = "out" },
+			{ pose = "Slash3Strike", duration = 0.09, ease = "in", trail = true },
+			{ pose = "Slash3Follow", duration = 0.14, ease = "out", trail = true },
+		},
+		hold = 0.08,
+		fadeOut = 0.28,
+	},
+	-- Held back a beat: the delayed overhead, with a readable hang at the top.
+	Overhead = {
 		segments = {
 			{ pose = "Slash3Windup", duration = "windup", share = 0.6, ease = "out" },
 			{ pose = "Slash3Hold", duration = "windup", share = 0.4, ease = "inOut" }, -- the delayed beat

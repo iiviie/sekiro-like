@@ -25,16 +25,17 @@ local function trail(sword: BasePart)
 	local swing = Instance.new("Trail")
 	swing.Attachment0 = from
 	swing.Attachment1 = to
-	swing.Lifetime = 0.14
+	swing.Lifetime = 0.16
 	swing.MinLength = 0.05
-	swing.LightEmission = 0.7
+	swing.LightEmission = 0.8
 	swing.LightInfluence = 0
 	swing.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(170, 200, 255))
 	swing.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.25),
+		NumberSequenceKeypoint.new(0, 0.15),
 		NumberSequenceKeypoint.new(1, 1),
 	})
-	swing.WidthScale = NumberSequence.new(1)
+	-- Taper toward the tail so the arc reads as a cut, not a ribbon.
+	swing.WidthScale = NumberSequence.new(1, 0.35)
 	swing.Enabled = false -- client/Animator switches it on during strikes
 	swing.Parent = sword
 end
@@ -62,10 +63,22 @@ function SwordRig.attach(model: Model): BasePart?
 	mesh.MeshType = Enum.MeshType.FileMesh
 	mesh.MeshId = KATANA.MeshId
 	mesh.TextureId = KATANA.TextureId
-	mesh.Scale = Vector3.one * KATANA.Scale
+	mesh.Scale = KATANA.Scale
 	mesh.Parent = sword
 
 	trail(sword)
+
+	-- A thin ink outline keeps the blade's silhouette the same width on screen at any
+	-- distance or lighting, the cheapest way to make a sword read in third person.
+	local outline = Instance.new("Highlight")
+	outline.Name = "BladeOutline"
+	outline.Adornee = sword
+	outline.FillColor = Color3.fromRGB(235, 240, 255)
+	outline.FillTransparency = 0.8
+	outline.OutlineColor = Color3.fromRGB(20, 18, 22)
+	outline.OutlineTransparency = 0.15
+	outline.DepthMode = Enum.HighlightDepthMode.Occluded
+	outline.Parent = sword
 
 	-- The fist closes around the handle with the blade pointing out of the front of the
 	-- hand, edge down, so arm poses aim the blade.

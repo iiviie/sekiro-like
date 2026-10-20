@@ -11,10 +11,12 @@
 --   posture, health and every outcome.
 --
 -- Flow
---   Slashes chain Light1 -> Light2 -> Light3 while pressed inside Combo.Window. Attacks
---   pressed slightly early are buffered and fire the moment the fighter is free, and a
---   block press shortly after impact cancels the rest of recovery, so inputs never feel
---   eaten. A deflected attacker recoils; after a perfect deflect, long enough to punish.
+--   Slashes chain Light1 -> Light2 -> (Light3 | Overhead) while pressed inside Combo.Window.
+--   A string speeds up only while it keeps landing; a deflect ends it. The third hit is a
+--   read: fast on rhythm, a delayed Overhead after a pause, a perilous morph (E/C), or a
+--   feint (block) -- one morph or feint per string. Attacks pressed slightly early are
+--   buffered (last input wins) and fire the moment the fighter is free; block or dodge
+--   clears the buffer and can cut recovery short, so inputs never feel eaten.
 
 local CollectionService = game:GetService("CollectionService")
 local PhysicsService = game:GetService("PhysicsService")
@@ -72,6 +74,10 @@ export type Combatant = {
 	groupReadyAt: { [string]: number }, -- shared cooldown groups (Config.Cooldowns)
 	groupUses: { [string]: number },
 	groupLastUseAt: { [string]: number },
+	idleSince: number, -- when the fighter last became free to act (for the delayed ender)
+	lastSlashLanded: boolean, -- the previous attack in the string hit cleanly
+	stringTrickUsed: boolean, -- this string has already morphed or feinted
+	justFeinted: boolean, -- the next slash comes out of a feint
 
 	dodgeStamp: number,
 	dodgeForward: boolean, -- dashed toward the attacker (for Mikiri)
@@ -130,6 +136,9 @@ local function refreshWalkSpeed(c: Combatant)
 end
 
 local function setState(c: Combatant, state: CombatState, duration: number?)
+	if state == "Idle" and c.state ~= "Idle" then
+		c.idleSince = now()
+	end
 	c.state = state
 	c.stateEndsAt = if duration then now() + duration else math.huge
 	c.model:SetAttribute("CombatState", state)
@@ -353,6 +362,7 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 	else
 		target.lastAttacker = attacker
 		target.lastAttackedAt = now()
+		attacker.lastSlashLanded = true
 		target.humanoid:TakeDamage(spec.damage)
 		addPosture(target, spec.postureDamage * Config.HitPostureMultiplier)
 		stagger(target, Config.HitStagger)
@@ -380,7 +390,18 @@ local function nextComboKind(c: Combatant, t: number): AttackKind
 		c.comboIndex = 0
 	end
 	c.comboIndex += 1
-	return sequence[c.comboIndex]
+	if c.comboIndex == 1 then
+		-- A new string, unless it is the slash right out of a feint: you can't feint
+		-- again out of a feinted attack.
+		c.stringTrickUsed = c.justFeinted
+		c.lastSlashLanded = false
+	end
+	c.justFeinted = false
+	local kind = sequence[c.comboIndex]
+	if kind == "Light3" and t - c.idleSince >= Config.Combo.DelayAfter then
+		return "Overhead" -- held back a beat: the delayed overhead
+	end
+	return kind
 end
 
 local function enemyWithinReach(c: Combatant, strike: CFrame): boolean
@@ -396,7 +417,7 @@ local function enemyWithinReach(c: Combatant, strike: CFrame): boolean
 	return false
 end
 
-local function startAttack(c: Combatant, kind: AttackKind): boolean
+local function startAttack(c: Combatant, kind: AttackKind, windupOverride: number?): boolean
 	local spec = Config.Attacks[kind]
 	local t = now()
 	if c.state ~= "Idle" or t < (c.nextAttackAt[kind] or 0) then
@@ -409,6 +430,10 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 	if not spendStamina(c, Config.Stamina.Costs[kind]) then
 		return false
 	end
+	-- Strings speed up only while they keep landing.
+	local windup = windupOverride
+		or (if spec.chainWindup and c.comboIndex >= 2 and c.lastSlashLanded then spec.chainWindup else spec.windup)
+	c.lastSlashLanded = false
 	if group then
 		-- Escalating shared cooldown: each use soon after the last makes the next wait longer.
 		local rules = Config.Cooldowns[group]
@@ -423,19 +448,23 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 	if spec.riposte then
 		c.riposteUntil = 0
 		c.comboIndex = 1 -- the riposte stands in for the first slash: chain on into Light2
-		c.comboUntil = t + spec.windup + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
+		c.comboUntil = t + windup + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
 	end
 
 	setBlocking(c, false)
 	cancelAttack(c)
 	c.protectedUntil = 0 -- attacking ends spawn protection
 	local token = c.attackToken
-	local hitAt = t + spec.windup
+	local hitAt = t + windup
 	c.windupHitAt = hitAt
 	c.windupKind = kind
 	c.cancelableAt = hitAt + Config.Net.ResolveGrace + Config.Combo.RecoveryCancel
 	c.nextAttackAt[kind] = t + spec.cooldown
 	c.comboUntil = hitAt + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
+	if spec.ender then
+		-- The string is over: a short rest hands the turn to the defender.
+		c.nextAttackAt.Light1 = hitAt + Config.Net.ResolveGrace + spec.recovery + Config.Combo.EnderRest
+	end
 	setState(c, "Windup")
 
 	broadcast("Windup", { attacker = c.model, kind = kind, hitAt = hitAt })
@@ -443,7 +472,7 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 		task.spawn(listener, c, kind, hitAt)
 	end
 
-	task.delay(spec.windup, function()
+	task.delay(windup, function()
 		if c.attackToken ~= token or c.state ~= "Windup" then
 			return -- interrupted, feinted or broken during the windup
 		end
@@ -471,7 +500,40 @@ local function bufferAction(c: Combatant, action: Action)
 	c.bufferedAt = now()
 end
 
+-- E or C late in a string turns its ender into a perilous attack with a shorter windup:
+-- from Light2's recovery (once it has resolved) or early in the third slash's windup.
+local function tryMorph(c: Combatant, action: Action): boolean
+	if (action ~= "Perilous" and action ~= "Sweep") or c.stringTrickUsed then
+		return false
+	end
+	local t = now()
+	local fromRecovery = c.state == "Recovery" and c.comboIndex == 2 and t >= c.cancelableAt
+	local thirdKind = c.windupKind
+	local fromWindup = c.state == "Windup"
+		and (thirdKind == "Light3" or thirdKind == "Overhead")
+		and t < c.windupHitAt - Config.Feint.Cutoff
+	if not fromRecovery and not fromWindup then
+		return false
+	end
+	local kind: AttackKind = if action == "Perilous" then "Perilous" else "Sweep"
+	local group = Config.Attacks[kind].cooldownGroup
+	if group and t < (c.groupReadyAt[group] or 0) then
+		return false
+	end
+	cancelAttack(c)
+	setState(c, "Idle")
+	if startAttack(c, kind, Config.Combo.MorphWindup) then
+		c.stringTrickUsed = true
+		c.comboIndex = 0
+		return true
+	end
+	return false
+end
+
 local function attack(c: Combatant, action: Action): boolean
+	if tryMorph(c, action) then
+		return true
+	end
 	if c.state ~= "Idle" then
 		bufferAction(c, action)
 		return false
@@ -498,13 +560,24 @@ end
 
 local function pressBlock(c: Combatant, stamp: number): boolean
 	local t = now()
+	c.buffered = nil -- defending overrides any queued attack
 	if c.state == "Windup" then
-		-- Blocking out of a windup is a feint: it baits deflects at a small posture cost.
-		if t > c.windupHitAt - Config.Feint.Cutoff then
+		-- Blocking out of a windup is a feint: it baits deflects at a small posture and
+		-- stamina cost. Once per string, never out of a riposte, never right before impact.
+		local kind = c.windupKind
+		if
+			t > c.windupHitAt - Config.Feint.Cutoff
+			or c.stringTrickUsed
+			or (kind and Config.Attacks[kind].riposte)
+			or not spendStamina(c, Config.Feint.StaminaCost)
+		then
 			return false
 		end
+		c.stringTrickUsed = true
+		c.justFeinted = true
 		cancelAttack(c)
 		c.comboIndex = 0
+		c.nextAttackAt.Light1 = 0 -- a feinted ender didn't finish the string: slash straight out of it
 		addPosture(c, Config.Feint.PostureCost)
 		if c.state == "Broken" then
 			return false
@@ -532,6 +605,7 @@ end
 
 local function dodge(c: Combatant, stamp: number, forward: boolean): boolean
 	local t = now()
+	c.buffered = nil
 	cancelRecovery(c)
 	if c.state ~= "Idle" or t < c.nextDodgeAt then
 		return false
@@ -712,6 +786,10 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		groupReadyAt = {},
 		groupUses = {},
 		groupLastUseAt = {},
+		idleSince = 0,
+		lastSlashLanded = false,
+		stringTrickUsed = false,
+		justFeinted = false,
 		dodgeStamp = -math.huge,
 		dodgeForward = false,
 		nextDodgeAt = 0,

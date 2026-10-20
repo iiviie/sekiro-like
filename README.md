@@ -31,7 +31,7 @@ Wins and Kills show in the player list and are saved with DataStores (session-on
 
 | Action | Keyboard / mouse | Gamepad | Touch |
 |---|---|---|---|
-| Slash (press in rhythm for a 3-hit combo) | Left click | R1 | Slash |
+| Slash (rhythm for a 3-hit string; pause before the 3rd for an overhead) | Left click | R1 | Slash |
 | Deflect (tap just before impact) / guard (hold) | F | L1 | Block |
 | Dodge (i-frames; dash *into* a thrust for a Mikiri Counter) | Q | B | Dodge |
 | Perilous thrust (unblockable) | E | Y | Thrust |
@@ -39,7 +39,7 @@ Wins and Kills show in the player list and are saved with DataStores (session-on
 | Healing gourd (3 sips per life) | G | D-pad up | Heal |
 | Lock on / off | R or middle mouse | R3 | Lock |
 
-Pressing block during your own windup **feints** it.
+Pressing block during your own windup **feints** it. Slashing right after a deflect is a **Riposte**.
 
 ## Combat rules
 
@@ -49,8 +49,14 @@ All numbers live in [src/shared/Config.luau](src/shared/Config.luau). The rules 
   starts animating the moment you click; the server confirms it and decides every outcome.
 - **Hit area.** A box in front of where the attacker stood and faced at the moment of the strike (turning afterwards
   can't re-aim it): slashes 6 wide × 7 deep, finisher 5 × 7.5, thrust 4 × 9, sweep 10 × 8.5, all 6 tall.
-- **Combo and buffering.** Slashes chain Light1 → Light2 → Light3 (a delayed overhead). Inputs up to 0.3 s early are
-  buffered, and block or dodge can cancel recovery shortly after impact.
+- **Strings.** Slashes chain Light1 → Light2 → third hit, and speed up only while they keep landing (0.42 → 0.32 →
+  0.34 s windups on hit; normal on block; a deflect ends the string). The third hit is a read: click on rhythm for a fast
+  Light3, pause 0.25 s for the delayed **Overhead** (more posture, catches early deflects), press E/C during Light2's
+  recovery or the third windup to **morph** into a perilous attack with a 0.65 s windup, or press block to **feint**.
+  One morph or feint per string, and you can't feint out of a feint. After an ender there's a 0.3 s rest: the defender's
+  turn. Hit stun (0.25 s) ends before the next chained hit, so strings are never true combos.
+- **Buffering.** Attacks pressed up to 0.3 s early fire as soon as you're free; the last input wins, and a block or dodge
+  clears the queue.
 - **Deflect.** A block press arms a deflect for 0.2 s before impact; the last 0.09 s is a **perfect** deflect. Each press
   soon after the last shrinks that window (down to 0.067 s), and the penalty clears after 0.5 s or on a successful
   deflect, so pressing early is safe (it guards) and mashing isn't. Deflecting knocks the attacker into a recoil (0.5 s,
@@ -86,6 +92,9 @@ practice or automated combat tests.
 - **Animation.** Locomotion uses Roblox's Ninja Animation Package. Combat motion is procedural: [Poses.luau](src/shared/Poses.luau)
   describes each pose as directions (where the arm, forearm and blade point), solves them into joint rotations, and
   [Animator.luau](src/client/Animator.luau) layers them over the locomotion with eased keyframes from [Clips.luau](src/shared/Clips.luau).
+- **Swords.** The katana is 4.4 studs and much broader than the source mesh, with a thin ink outline (a Highlight) so it
+  reads at camera distance. Trails taper, steel-white for slashes and red for perilous attacks. Roblox caps how many
+  Highlights render at once (about 31), so keep fighters plus perilous telegraphs under that.
 - **HUD.** Sekiro / Dark Souls style: a crimson vitality bar with a damage trail, a posture bar that grows from the centre
   and hides when empty, gourd count, enemy bars only for your target and recent opponents, a red deathblow marker, kanji
   splashes, a phase banner, a kill feed and spectating. The closing mist is a wall of camera-facing beams (a cylinder

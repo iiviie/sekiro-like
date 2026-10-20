@@ -126,10 +126,18 @@ local function sampleAction(action: Action): ({ [string]: Weighted }?, boolean)
 	return out, false
 end
 
-local function setTrail(model: Model, enabled: boolean)
+-- Trails are colour-coded by what's swinging: steel-white for slashes, red for perilous.
+local STEEL_TRAIL = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(170, 200, 255))
+local PERIL_TRAIL = ColorSequence.new(Color3.fromRGB(255, 90, 70), Color3.fromRGB(200, 20, 20))
+
+local function setTrail(model: Model, enabled: boolean, clipName: string?)
 	local sword = model:FindFirstChild("Sword")
 	local trail = sword and sword:FindFirstChildOfClass("Trail")
 	if trail and trail.Enabled ~= enabled then
+		if enabled then
+			local perilous = clipName == "Perilous" or clipName == "Sweep"
+			trail.Color = if perilous then PERIL_TRAIL else STEEL_TRAIL
+		end
 		trail.Enabled = enabled
 	end
 end
@@ -171,7 +179,7 @@ local function step(state: State, dt: number)
 			state.action = nil
 		end
 	end
-	setTrail(state.model, trailOn)
+	setTrail(state.model, trailOn, action and action.name)
 
 	for name, joint in state.joints do
 		local current = joint.Transform

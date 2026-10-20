@@ -61,6 +61,9 @@ function DevHooks.start()
 				riposteUntil = c.riposteUntil - workspace:GetServerTimeNow(),
 				perilousReadyIn = (c.groupReadyAt.Perilous or 0) - workspace:GetServerTimeNow(),
 				windupKind = c.windupKind,
+				windupIn = c.windupHitAt - workspace:GetServerTimeNow(),
+				comboIndex = c.comboIndex,
+				trickUsed = c.stringTrickUsed,
 			}
 		elseif command == "clear" then
 			for _, model in dummies do

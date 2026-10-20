@@ -37,7 +37,7 @@ local CombatVisuals = {
 -- Your own swings start animating the moment you click (see predictAttack); the
 -- server's Windup for that swing then only needs to add sounds and telegraphs.
 local PREDICTION_MATCH_WINDOW = 0.5
-local predicted: { kind: string, at: number }? = nil
+local predicted: { kind: string, at: number, windup: number }? = nil
 
 local function now(): number
 	return workspace:GetServerTimeNow()
@@ -386,9 +386,10 @@ local function hitstop(duration: number, ...: Model?)
 end
 
 -- Starts your own swing animation immediately, before the server confirms it.
-function CombatVisuals.predictAttack(model: Model, kind: Config.AttackKind)
-	predicted = { kind = kind, at = os.clock() }
-	Animator.play(model, kind, Config.Attacks[kind].windup)
+function CombatVisuals.predictAttack(model: Model, kind: Config.AttackKind, windup: number?)
+	local duration = windup or Config.Attacks[kind].windup
+	predicted = { kind = kind, at = os.clock(), windup = duration }
+	Animator.play(model, kind, duration)
 end
 
 -- A fading ghost copy of the body, left behind during a dash.
@@ -579,10 +580,13 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		local kind: Config.AttackKind = data.kind
 		local remaining = math.max(data.hitAt - now(), 0)
 		local guess = predicted
+		-- Keep our predicted swing unless the server's timing differs noticeably (say the
+		-- string didn't speed up after all); then re-time it to the real impact.
 		local alreadyPlaying = isLocal(model)
 			and guess ~= nil
 			and guess.kind == kind
 			and os.clock() - guess.at < PREDICTION_MATCH_WINDOW
+			and math.abs((guess.at + guess.windup - os.clock()) - remaining) < 0.08
 		if isLocal(model) then
 			predicted = nil
 			CombatVisuals.lastOwnHitAt = data.hitAt
@@ -592,7 +596,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		end
 
 		local perilous = kind == "Perilous" or kind == "Sweep"
-		local heavy = kind == "Light3" or perilous
+		local heavy = kind == "Light3" or kind == "Overhead" or perilous
 		if perilous then
 			telegraphPerilous(model, remaining)
 		end
@@ -629,11 +633,14 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Hit = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
+		if isLocal(attacker) then
+			LocalCombat.lastSlashLanded = true -- our next chained slash speeds up
+		end
 		Animator.play(defender, "HitReact")
 		-- Hits escalate through a string: a longer freeze, a heavier sound and a camera
 		-- kick on enders and perilous attacks.
 		local kind = data.kind
-		local ender = kind == "Light3" or kind == "Perilous" or kind == "Sweep"
+		local ender = kind == "Light3" or kind == "Overhead" or kind == "Perilous" or kind == "Sweep"
 		hitstop(Config.Visual.HitHitstop[kind] or Config.Visual.Hitstop, attacker, defender)
 		local root = rootOf(defender)
 		if root then

@@ -2,8 +2,9 @@
 -- Every combat number lives here so feel can be tuned without touching logic.
 -- Times are seconds on the shared server clock (workspace:GetServerTimeNow()).
 
--- Light1-3 are the slash combo; the client picks the matching clip from the kind name.
-export type AttackKind = "Light1" | "Light2" | "Light3" | "Riposte" | "Perilous" | "Sweep"
+-- Light1-3 are the slash combo; the third hit branches (see Combo). The client picks the
+-- matching clip from the kind name.
+export type AttackKind = "Light1" | "Light2" | "Light3" | "Overhead" | "Riposte" | "Perilous" | "Sweep"
 
 export type AttackSpec = {
 	windup: number, -- telegraph before impact; keep >= 0.3 so 200 ms ping players can still read it
@@ -24,6 +25,10 @@ export type AttackSpec = {
 	armorFrom: number?,
 	cooldownGroup: string?, -- attacks in a group share one escalating cooldown (Config.Cooldowns)
 	riposte: boolean?, -- only available just after a successful deflect
+	-- Windup when the previous slash in the string *landed* (Chivalry 2's rule: strings
+	-- speed up on hit, never on block or deflect).
+	chainWindup: number?,
+	ender: boolean?, -- ends a string: a short rest before the next string can start
 }
 
 local attacks: { [AttackKind]: AttackSpec } = {
@@ -40,6 +45,7 @@ local attacks: { [AttackKind]: AttackSpec } = {
 	},
 	Light2 = {
 		windup = 0.40,
+		chainWindup = 0.32,
 		recovery = 0.25,
 		cooldown = 0,
 		damage = 9,
@@ -49,17 +55,36 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		lunge = 18,
 		unblockable = false,
 	},
+	-- The third hit is a read. Click on rhythm for a fast Light3; pause first (Combo.DelayAfter)
+	-- for the delayed Overhead, which catches early deflects and hits posture harder; press E/C
+	-- for a perilous morph; or press block to feint.
 	Light3 = {
-		windup = 0.55,
+		windup = 0.42,
+		chainWindup = 0.34,
+		recovery = 0.35,
+		cooldown = 0,
+		damage = 11,
+		postureDamage = 22,
+		range = 7.5,
+		width = 6,
+		lunge = 22,
+		unblockable = false,
+		ender = true,
+	},
+	Overhead = {
+		windup = 0.62,
+		chainWindup = 0.56,
 		recovery = 0.45,
 		cooldown = 0,
 		damage = 14,
-		postureDamage = 28,
+		postureDamage = 34,
 		range = 7.5,
 		width = 5,
 		lunge = 26,
 		unblockable = false,
+		ender = true,
 	},
+
 	-- Deflect, then slash within Deflect.RiposteWindow: a fast counter-cut that can't be
 	-- interrupted. It is the parry's payoff, so it has to land inside the attacker's recoil
 	-- even at 250 ms ping (recoil 0.5 s >= startup 0.18 s + ~0.125 s one-way + cushion).
@@ -135,8 +160,15 @@ local Config = {
 
 	Combo = {
 		Sequence = { "Light1", "Light2", "Light3" } :: { AttackKind },
-		Window = 0.5, -- after recovery ends, the next slash continues the combo for this long
-		Buffer = 0.3, -- an attack pressed this close to the end of recovery fires as soon as it can
+		Window = 0.7, -- after recovery ends, the next slash continues the combo for this long
+		-- Attack-to-attack buffer. Last input wins, and a block, dodge, deflect or stagger
+		-- clears it, so a panic click can't commit you after the fight has moved on.
+		Buffer = 0.3,
+		DelayAfter = 0.25, -- the third slash pressed this long after Light2 ends is the Overhead
+		EnderRest = 0.3, -- after an ender the next string waits this long: the defender's turn
+		-- E or C during Light2's recovery or the third slash's windup morphs the ender into
+		-- a perilous attack with this shorter windup. One morph or feint per string.
+		MorphWindup = 0.65,
 		RecoveryCancel = 0.06, -- after impact resolves, block can cancel the rest of recovery
 	},
 
@@ -149,9 +181,10 @@ local Config = {
 		Costs = {
 			Light1 = 12,
 			Light2 = 12,
-			Light3 = 16,
-			Perilous = 22,
-			Sweep = 22,
+			Light3 = 14,
+			Overhead = 16,
+			Perilous = 32, -- ~2.5x a slash
+			Sweep = 32,
 			Dodge = 18,
 		} :: { [string]: number },
 	},
@@ -245,6 +278,7 @@ local Config = {
 	Feint = {
 		Cutoff = 0.12, -- a windup can't be cancelled this close to impact
 		PostureCost = 6,
+		StaminaCost = 8,
 	},
 
 	Dodge = {
@@ -260,7 +294,7 @@ local Config = {
 		MaxActionsPerSecond = 20,
 	},
 
-	HitStagger = 0.3,
+	HitStagger = 0.25, -- ends before the next chained hit lands, so strings are never true combos
 	HitPostureMultiplier = 0.5, -- unguarded hits still build some posture
 	DeathblowDamage = 1000,
 
@@ -274,7 +308,7 @@ local Config = {
 		Range = 45, -- max distance to acquire a target
 		BreakRange = 60, -- lock drops beyond this
 		TurnRate = 16, -- how quickly the character turns to face its target
-		CameraDistance = 11,
+		CameraDistance = 9.5, -- close enough that both blades read clearly
 		CameraHeight = 3.2,
 		CameraShoulder = 2,
 		CameraSmoothing = 10,
@@ -292,7 +326,8 @@ local Config = {
 		HitHitstop = {
 			Light1 = 0.045,
 			Light2 = 0.055,
-			Light3 = 0.1,
+			Light3 = 0.08,
+			Overhead = 0.11,
 			Riposte = 0.08,
 			Perilous = 0.13,
 			Sweep = 0.13,
