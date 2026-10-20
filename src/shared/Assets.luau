@@ -5,6 +5,13 @@
 --   Sounds: mostly the ProSoundEffects library Roblox licenses for the Creator Store.
 
 local Assets = {
+	-- Straw kasa for the ronin bots: made with Roblox's own mesh generator (free, ours to use).
+	Kasa = {
+		MeshId = "rbxassetid://109129135721194",
+		TextureId = "rbxassetid://123248396899497",
+		NativeSize = Vector3.new(2.165, 0.9, 2.157),
+	},
+
 	Katana = {
 		MeshId = "rbxassetid://114165484128397",
 		TextureId = "rbxassetid://85720589438351",

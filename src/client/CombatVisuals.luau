@@ -26,7 +26,8 @@ local player = Players.LocalPlayer
 local SOUNDS = Assets.Sounds
 local GOLD = Color3.fromRGB(255, 214, 110)
 local SPARK = Color3.fromRGB(255, 185, 90)
-local BLOOD = Color3.fromRGB(170, 10, 20)
+local BLOOD = Color3.fromRGB(150, 8, 16)
+local BLOOD_DARK = Color3.fromRGB(64, 4, 8)
 local STEEL = Color3.fromRGB(200, 205, 215)
 
 local CombatVisuals = {
@@ -205,24 +206,148 @@ local function contactPoint(attacker: Model, defender: Model): Vector3?
 	return (a.Position + b.Position) / 2 + Vector3.new(0, 1, 0)
 end
 
-local function shake(intensity: number, duration: number)
+-- A directional camera kick: the view snaps along the line of the blow and settles,
+-- rather than jittering at random (which reads as an explosion). Without a direction
+-- it falls back to a small rattle.
+local function shake(intensity: number, duration: number, from: Model?, to: Model?)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
+	local root = rootOf(character)
+	if not humanoid or not root then
 		return
 	end
-	local endsAt = os.clock() + duration
+	local a, b = rootOf(from), rootOf(to)
+	local direction: Vector3? = nil
+	if a and b and (b.Position - a.Position).Magnitude > 0.1 then
+		-- CameraOffset is in the root's object space.
+		local world = (b.Position - a.Position).Unit
+		direction = root.CFrame:VectorToObjectSpace(Vector3.new(world.X, world.Y * 0.3, world.Z)).Unit
+	end
+	local startedAt = os.clock()
 	local connection: RBXScriptConnection
 	connection = RunService.RenderStepped:Connect(function()
-		local remaining = endsAt - os.clock()
-		if remaining <= 0 then
+		local u = (os.clock() - startedAt) / duration
+		if u >= 1 or not humanoid.Parent then
 			humanoid.CameraOffset = Vector3.zero
 			connection:Disconnect()
 			return
 		end
-		local strength = intensity * (remaining / duration)
-		humanoid.CameraOffset = Vector3.new(math.random() - 0.5, math.random() - 0.5, 0) * strength
+		local decay = (1 - u) * (1 - u)
+		local jitter = Vector3.new(math.random() - 0.5, math.random() - 0.5, 0) * intensity * decay
+		if direction then
+			humanoid.CameraOffset = direction * intensity * decay * math.cos(u * math.pi * 2.5) + jitter * 0.2
+		else
+			humanoid.CameraOffset = jitter
+		end
 	end)
+end
+
+-- Blood: dark, unlit droplets thrown along the blow and pulled down by gravity, plus a
+-- faint red mist. Deliberately not a glowing spark burst.
+local function bloodSpray(position: Vector3, direction: Vector3?, count: number, speed: number)
+	local anchor = anchorAt(position)
+	if direction and direction.Magnitude > 0.01 then
+		anchor.CFrame = CFrame.lookAt(position, position + direction)
+	end
+
+	local drops = Instance.new("ParticleEmitter")
+	drops.Texture = Assets.UI.Glow
+	drops.Color = ColorSequence.new(BLOOD, BLOOD_DARK)
+	drops.LightEmission = 0
+	drops.LightInfluence = 0.6
+	drops.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.32), NumberSequenceKeypoint.new(1, 0.06) })
+	drops.Speed = NumberRange.new(speed * 0.35, speed)
+	drops.EmissionDirection = Enum.NormalId.Front
+	drops.SpreadAngle = if direction then Vector2.new(38, 26) else Vector2.new(180, 180)
+	drops.Lifetime = NumberRange.new(0.35, 0.7)
+	drops.Acceleration = Vector3.new(0, -70, 0)
+	drops.Drag = 1.5
+	drops.Rate = 0
+	drops.Orientation = Enum.ParticleOrientation.VelocityParallel
+	drops.Squash = NumberSequence.new(1.6)
+	drops.Parent = anchor
+	drops:Emit(count)
+
+	local mist = Instance.new("ParticleEmitter")
+	mist.Texture = Assets.UI.Glow
+	mist.Color = ColorSequence.new(BLOOD)
+	mist.LightEmission = 0
+	mist.LightInfluence = 0.6
+	mist.Size = NumberSequence.new(0.8, 2.4)
+	mist.Transparency = NumberSequence.new(0.55, 1)
+	mist.Speed = NumberRange.new(2, 5)
+	mist.EmissionDirection = Enum.NormalId.Front
+	mist.SpreadAngle = Vector2.new(60, 60)
+	mist.Lifetime = NumberRange.new(0.25, 0.45)
+	mist.Rate = 0
+	mist.Parent = anchor
+	mist:Emit(math.ceil(count / 10))
+end
+
+-- A few overlapping dark pools on the floor under a deathblow, fading after a while.
+local function bloodPool(position: Vector3, direction: Vector3?)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { workspace.Terrain, workspace:FindFirstChild("Castle") :: Instance }
+	local hit = workspace:Raycast(position + Vector3.new(0, 2, 0), Vector3.new(0, -12, 0), params)
+	if not hit then
+		return
+	end
+	local flat = if direction then Vector3.new(direction.X, 0, direction.Z) else Vector3.zero
+	flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.zero
+	for i = 1, 4 do
+		local pool = Instance.new("Part")
+		pool.Shape = Enum.PartType.Cylinder
+		pool.Anchored = true
+		pool.CanCollide = false
+		pool.CanQuery = false
+		pool.CanTouch = false
+		pool.CastShadow = false
+		pool.Material = Enum.Material.SmoothPlastic
+		pool.Color = BLOOD_DARK
+		pool.Reflectance = 0.05
+		local size = (2.8 - i * 0.45) * (0.8 + math.random() * 0.4)
+		pool.Size = Vector3.new(0.04, size, size)
+		local spread = flat * (i - 1) * 1.1 + Vector3.new(math.random() - 0.5, 0, math.random() - 0.5) * 0.8
+		pool.CFrame = CFrame.new(hit.Position + spread + Vector3.new(0, 0.03 + i * 0.004, 0))
+			* CFrame.Angles(0, 0, math.rad(90))
+		pool.Transparency = 1
+		pool.Parent = workspace
+		TweenService:Create(pool, TweenInfo.new(0.25), { Transparency = 0.12 }):Play()
+		task.delay(6, function()
+			TweenService:Create(pool, TweenInfo.new(2.5), { Transparency = 1 }):Play()
+		end)
+		Debris:AddItem(pool, 9)
+	end
+end
+
+-- The direction a blow travels, attacker to defender, flattened.
+local function blowDirection(attacker: Model, defender: Model): Vector3?
+	local a, b = rootOf(attacker), rootOf(defender)
+	if not a or not b then
+		return nil
+	end
+	local offset = b.Position - a.Position
+	local flat = Vector3.new(offset.X, 0, offset.Z)
+	return if flat.Magnitude > 0.1 then flat.Unit + Vector3.new(0, 0.35, 0) else nil
+end
+
+-- Drains the colour from the screen for a beat, tinted red: the deathblow's freeze-frame.
+local function deathblowGrade()
+	local camera = workspace.CurrentCamera
+	local grade = Instance.new("ColorCorrectionEffect")
+	grade.Saturation = -0.75
+	grade.Contrast = 0.3
+	grade.TintColor = Color3.fromRGB(255, 205, 200)
+	grade.Parent = camera
+	task.delay(0.18, function()
+		TweenService:Create(grade, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Saturation = 0,
+			Contrast = 0,
+			TintColor = Color3.new(1, 1, 1),
+		}):Play()
+	end)
+	Debris:AddItem(grade, 1)
 end
 
 -- Pushes the local character forward during its own strike (players own their physics).
@@ -274,6 +399,13 @@ local function afterimage(model: Model)
 		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Transparency < 1 then
 			local copy = part:Clone()
 			copy:ClearAllChildren()
+			-- Keep the shape of mesh-built pieces (katana, kasa), just untextured.
+			local mesh = part:FindFirstChildOfClass("SpecialMesh")
+			if mesh then
+				local shape = mesh:Clone()
+				shape.TextureId = ""
+				shape.Parent = copy
+			end
 			copy.Anchored = true
 			copy.CanCollide = false
 			copy.CanQuery = false
@@ -482,11 +614,11 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		hitstop(Config.Visual.Hitstop, attacker, defender)
 		local root = rootOf(defender)
 		if root then
-			burst(root.Position + Vector3.new(0, 0.8, 0), BLOOD, 22, 18, 2)
+			bloodSpray(root.Position + Vector3.new(0, 0.8, 0), blowDirection(attacker, defender), 26, 22)
 		end
 		playSound(if math.random() < 0.5 then SOUNDS.Hit else SOUNDS.HitAlt, root, 0.7)
-		if isLocal(defender) then
-			shake(0.5, 0.2)
+		if isLocal(defender) or isLocal(attacker) then
+			shake(if isLocal(defender) then 0.5 else 0.25, 0.2, attacker, defender)
 		end
 	end,
 
@@ -507,12 +639,22 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		hitstop(Config.Visual.DeathblowHitstop, attacker, defender)
 		local root = rootOf(defender)
 		if root then
-			burst(root.Position, BLOOD, 80, 30, 7)
+			local direction = blowDirection(attacker, defender)
+			-- The cut lands a beat into the deathblow clip: a long arc of blood, then pools.
+			bloodSpray(root.Position + Vector3.new(0, 0.6, 0), direction, 90, 34)
+			flare(root.Position + Vector3.new(0, 0.6, 0), BLOOD, 10)
+			task.delay(0.12, function()
+				if root.Parent then
+					bloodSpray(root.Position + Vector3.new(0, 0.2, 0), direction, 40, 20)
+					bloodPool(root.Position, direction)
+				end
+			end)
 		end
 		playSound(SOUNDS.PostureBreak, root, 0.9, 0.8)
 		playSound(SOUNDS.HitAlt, root, 0.9, 0.85)
 		if isLocal(attacker) or isLocal(defender) then
-			shake(0.9, 0.35)
+			shake(0.9, 0.35, attacker, defender)
+			deathblowGrade()
 		end
 	end,
 
@@ -570,7 +712,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		playSound(SOUNDS.PerfectDeflect, root, 0.8, 0.9)
 		playSound(SOUNDS.PostureBreak, root, 0.6, 1.2)
 		if isLocal(attacker) or isLocal(defender) then
-			shake(0.6, 0.2)
+			shake(0.6, 0.2, attacker, defender)
 		end
 	end,
 

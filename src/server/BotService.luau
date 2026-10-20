@@ -13,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local CombatService = require(script.Parent.CombatService)
 local Locomotion = require(script.Parent.Locomotion)
+local Outfit = require(script.Parent.Outfit)
 local Round = require(ReplicatedStorage.Shared.Round)
 
 type Combatant = CombatService.Combatant
@@ -31,8 +32,6 @@ type Brain = {
 	strafeSwitchAt: number,
 }
 
-local BOT_CLOTH = Color3.fromRGB(70, 22, 26)
-local BOT_SKIN = Color3.fromRGB(234, 184, 146)
 local TARGET_SHARE_PENALTY = 30 -- studs added per other bot already on a target
 
 local BotService = {}
@@ -73,15 +72,11 @@ end
 
 local function buildRig(index: number): Model
 	local description = Instance.new("HumanoidDescription")
-	description.HeadColor = BOT_SKIN
-	description.LeftArmColor = BOT_SKIN
-	description.RightArmColor = BOT_SKIN
-	description.TorsoColor = BOT_CLOTH
-	description.LeftLegColor = BOT_CLOTH
-	description.RightLegColor = BOT_CLOTH
+	Outfit.describe(description, index)
 
 	local model = Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R15)
 	model.Name = `Ronin {index}`
+	Outfit.dress(model)
 	return model
 end
 

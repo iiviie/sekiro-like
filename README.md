@@ -91,6 +91,11 @@ practice or automated combat tests.
   the sun placed where the skybox glows, warm key light against cool violet ambient, and a dense Atmosphere that pushes
   the mountains back. All of it is in `default.project.json` (the deprecated `Technology` property is gone). Props in `Workspace.Props` came from the Creator Store and were
   stripped of every script.
+- **Fighters.** Bots are dressed by [Outfit.luau](src/server/Outfit.luau): a woven kasa (made with Studio's mesh
+  generator), gi and hakama in one of four muted colourways, and a crimson sash.
+- **Combat VFX.** Hits throw dark, gravity-pulled blood along the line of the blow instead of glowing sparks; deathblows
+  add a heavier arc, pools on the floor and a brief desaturated freeze. The camera kicks along the blow and settles
+  rather than jittering at random.
 - **Sound.** Licensed ProSoundEffects and APM library audio. Every asset id is in [Assets.luau](src/shared/Assets.luau).
 
 ## Performance
@@ -105,8 +110,8 @@ practice or automated combat tests.
 
 ```
 src/
-  shared/   Config, Types, Assets, Poses, Clips, Round
-  server/   init, CombatService, BotService, RoundService, StatsService, MapBuilder, Locomotion, SwordRig
+  shared/   Config, Types, Assets, Palette, Poses, Clips, Round
+  server/   init, CombatService, BotService, RoundService, StatsService, MapBuilder, Outfit, Locomotion, SwordRig
   client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, TitleScreen, Ambience
 ```
 
