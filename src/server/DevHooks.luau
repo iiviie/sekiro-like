@@ -26,11 +26,13 @@ function DevHooks.start()
 		local args = { ... }
 		if command == "spawn" then
 			local name, position, facing = args[1] :: string, args[2] :: Vector3, args[3] :: Vector3
+			local weapon = args[4] :: string?
 			local model = Players:CreateHumanoidModelFromDescription(
 				Instance.new("HumanoidDescription"),
 				Enum.HumanoidRigType.R15
 			)
 			model.Name = name
+			model:SetAttribute("Weapon", weapon)
 			model:PivotTo(CFrame.lookAt(position, facing))
 			model.Parent = workspace
 			local c = CombatService.register(model, nil)

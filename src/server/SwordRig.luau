@@ -1,25 +1,22 @@
 --!strict
--- Puts the katana in a character's right hand. The mesh comes from the Creator Store
--- (see Shared/Assets) and is built from code with a SpecialMesh, so the place file
--- doesn't need to carry it. Body motion comes from client/Animator, so the grip is fixed.
+-- Puts a fighter's weapon (Shared/Weapons) in its right hand. Meshes are built from code
+-- with a SpecialMesh, so the place file doesn't need to carry them. Body motion comes from client/Animator, so the grip is fixed.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Assets = require(ReplicatedStorage.Shared.Assets)
-
-local KATANA = Assets.Katana
+local Weapons = require(ReplicatedStorage.Shared.Weapons)
 
 local SwordRig = {}
 
-local function trail(sword: BasePart)
+local function trail(sword: BasePart, look: Weapons.WeaponLook)
 	local from = Instance.new("Attachment")
 	from.Name = "TrailStart"
-	from.Position = Vector3.new(0, 0, KATANA.GuardZ + 0.3)
+	from.Position = Vector3.new(0, 0, look.GuardZ + 0.3)
 	from.Parent = sword
 
 	local to = Instance.new("Attachment")
 	to.Name = "TrailEnd"
-	to.Position = Vector3.new(0, 0, KATANA.TipZ)
+	to.Position = Vector3.new(0, 0, look.TipZ)
 	to.Parent = sword
 
 	local swing = Instance.new("Trail")
@@ -40,7 +37,8 @@ local function trail(sword: BasePart)
 	swing.Parent = sword
 end
 
-function SwordRig.attach(model: Model): BasePart?
+function SwordRig.attach(model: Model, weaponId: string?): BasePart?
+	local look = Weapons.get(weaponId).look
 	local hand = model:FindFirstChild("RightHand") or model:FindFirstChild("Right Arm")
 	if not hand or not hand:IsA("BasePart") then
 		warn(`[SwordRig] {model.Name} has no right hand to hold a sword`)
@@ -54,19 +52,19 @@ function SwordRig.attach(model: Model): BasePart?
 
 	local sword = Instance.new("Part")
 	sword.Name = "Sword"
-	sword.Size = KATANA.Size
+	sword.Size = look.Size
 	sword.CanCollide = false
 	sword.CanTouch = false
 	sword.Massless = true
 
 	local mesh = Instance.new("SpecialMesh")
 	mesh.MeshType = Enum.MeshType.FileMesh
-	mesh.MeshId = KATANA.MeshId
-	mesh.TextureId = KATANA.TextureId
-	mesh.Scale = KATANA.Scale
+	mesh.MeshId = look.MeshId
+	mesh.TextureId = look.TextureId
+	mesh.Scale = look.Scale
 	mesh.Parent = sword
 
-	trail(sword)
+	trail(sword, look)
 
 	-- A thin ink outline keeps the blade's silhouette the same width on screen at any
 	-- distance or lighting, the cheapest way to make a sword read in third person.
@@ -87,7 +85,7 @@ function SwordRig.attach(model: Model): BasePart?
 	weld.Part0 = hand
 	weld.Part1 = sword
 	weld.C0 = CFrame.new(0, -0.15, 0) * CFrame.Angles(0, math.pi, 0)
-	weld.C1 = CFrame.new(0, 0, KATANA.GripZ)
+	weld.C1 = CFrame.new(0, 0, look.GripZ)
 	weld.Parent = sword
 
 	sword.Parent = model

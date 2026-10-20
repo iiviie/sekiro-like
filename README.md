@@ -87,12 +87,28 @@ All numbers live in [src/shared/Config.luau](src/shared/Config.luau). The rules 
 Set the workspace attribute `HoldIntermission` to `true` from the Studio command bar to stay in intermission for
 practice or automated combat tests.
 
+## Weapons
+
+Every move is read through [Weapons.luau](src/shared/Weapons.luau): a weapon is the base moveset in `Config.Attacks`
+bent by a few multipliers (windup, recovery, damage, posture damage, reach, stamina) plus per-move overrides, and a
+look (mesh, scale, grip). A load-time validator rejects unknown moves and fields.
+
+| Weapon | Archetype | Strengths | Weaknesses / counter |
+|---|---|---|---|
+| Katana | All-rounder | Baseline speed and reach | None special |
+| Odachi | Bruiser | 1.7× posture damage, 1.25× reach, armoured overhead | 1.4× windup, 1.3× recovery, 1.35× stamina; deflect it and punish, or interrupt early |
+
+Rules for new weapons: every weapon spends the same budget (sidegrades, never upgrades); defensive verbs (deflect,
+guard, dodge, jump, Mikiri) and perilous timing are universal; reach follows the blade's length. Bots alternate the
+roster. Players carry their `Weapon` player attribute (the lobby's Weapons menu sets it). Next on the research's ship
+order: naginata (reach), then dual blades; kusarigama last.
+
 ## Presentation
 
 - **Animation.** Locomotion uses Roblox's Ninja Animation Package. Combat motion is procedural: [Poses.luau](src/shared/Poses.luau)
   describes each pose as directions (where the arm, forearm and blade point), solves them into joint rotations, and
   [Animator.luau](src/client/Animator.luau) layers them over the locomotion with eased keyframes from [Clips.luau](src/shared/Clips.luau).
-- **Swords.** The katana is 4.4 studs and much broader than the source mesh, with a thin ink outline (a Highlight) so it
+- **Swords.** The katana is 4.4 studs (the odachi 5.85) and much broader than the source mesh, with a thin ink outline (a Highlight) so it
   reads at camera distance. Trails taper, steel-white for slashes and red for perilous attacks. Roblox caps how many
   Highlights render at once (about 31), so keep fighters plus perilous telegraphs under that.
 - **HUD.** Sekiro / Dark Souls style: a crimson vitality bar with a damage trail, a posture bar that grows from the centre
@@ -128,8 +144,8 @@ practice or automated combat tests.
 
 ```
 src/
-  shared/   Config, Types, Assets, Palette, Poses, Clips, Round
-  server/   init, CombatService, BotService, RoundService, StatsService, MapBuilder, Outfit, Locomotion, SwordRig
+  shared/   Config, Weapons, Types, Assets, Palette, Poses, Clips, Round
+  server/   init, CombatService, BotService, RoundService, StatsService, MapBuilder, Outfit, Locomotion, SwordRig, DevHooks
   client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, TitleScreen, Ambience
 ```
 

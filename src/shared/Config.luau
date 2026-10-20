@@ -29,6 +29,9 @@ export type AttackSpec = {
 	-- speed up on hit, never on block or deflect).
 	chainWindup: number?,
 	ender: boolean?, -- ends a string: a short rest before the next string can start
+	-- Filled in by Weapons.spec: which move and weapon this resolved spec belongs to.
+	kind: AttackKind?,
+	weapon: string?,
 }
 
 local attacks: { [AttackKind]: AttackSpec } = {

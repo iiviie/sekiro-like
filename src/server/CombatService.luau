@@ -27,6 +27,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Types = require(Shared.Types)
+local Weapons = require(Shared.Weapons)
 local Locomotion = require(script.Parent.Locomotion)
 local SwordRig = require(script.Parent.SwordRig)
 
@@ -44,6 +45,7 @@ export type Combatant = {
 	humanoid: Humanoid,
 	root: BasePart,
 	player: Player?,
+	weapon: string, -- Weapons id; every move is read through Weapons.spec(weapon, kind)
 
 	state: CombatState,
 	stateEndsAt: number,
@@ -209,7 +211,7 @@ local function stagger(c: Combatant, duration: number)
 	-- Hyper armour covers only the end of a windup: hits then hurt but don't stop the
 	-- swing. Earlier, a read windup can still be interrupted.
 	local kind = c.windupKind
-	local armorFrom = kind and Config.Attacks[kind].armorFrom
+	local armorFrom = kind and Weapons.spec(c.weapon, kind).armorFrom
 	if c.state == "Windup" and armorFrom and now() >= c.windupHitAt - armorFrom then
 		return
 	end
@@ -252,14 +254,6 @@ local function findTargets(attacker: Combatant, spec: AttackSpec, strike: CFrame
 		end
 	end
 	return targets
-end
-
-local specKinds: { [AttackSpec]: AttackKind } = {}
-for kind, spec in Config.Attacks do
-	specKinds[spec] = kind
-end
-local function kindOf(spec: AttackSpec): AttackKind?
-	return specKinds[spec]
 end
 
 local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSpec, hitAt: number)
@@ -366,10 +360,7 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		target.humanoid:TakeDamage(spec.damage)
 		addPosture(target, spec.postureDamage * Config.HitPostureMultiplier)
 		stagger(target, Config.HitStagger)
-		broadcast(
-			"Hit",
-			{ attacker = attacker.model, defender = target.model, damage = spec.damage, kind = kindOf(spec) }
-		)
+		broadcast("Hit", { attacker = attacker.model, defender = target.model, damage = spec.damage, kind = spec.kind })
 	end
 end
 
@@ -418,7 +409,7 @@ local function enemyWithinReach(c: Combatant, strike: CFrame): boolean
 end
 
 local function startAttack(c: Combatant, kind: AttackKind, windupOverride: number?): boolean
-	local spec = Config.Attacks[kind]
+	local spec = Weapons.spec(c.weapon, kind)
 	local t = now()
 	if c.state ~= "Idle" or t < (c.nextAttackAt[kind] or 0) then
 		return false
@@ -427,7 +418,7 @@ local function startAttack(c: Combatant, kind: AttackKind, windupOverride: numbe
 	if group and t < (c.groupReadyAt[group] or 0) then
 		return false
 	end
-	if not spendStamina(c, Config.Stamina.Costs[kind]) then
+	if not spendStamina(c, Weapons.staminaCost(c.weapon, kind)) then
 		return false
 	end
 	-- Strings speed up only while they keep landing.
@@ -516,7 +507,7 @@ local function tryMorph(c: Combatant, action: Action): boolean
 		return false
 	end
 	local kind: AttackKind = if action == "Perilous" then "Perilous" else "Sweep"
-	local group = Config.Attacks[kind].cooldownGroup
+	local group = Weapons.spec(c.weapon, kind).cooldownGroup
 	if group and t < (c.groupReadyAt[group] or 0) then
 		return false
 	end
@@ -568,7 +559,7 @@ local function pressBlock(c: Combatant, stamp: number): boolean
 		if
 			t > c.windupHitAt - Config.Feint.Cutoff
 			or c.stringTrickUsed
-			or (kind and Config.Attacks[kind].riposte)
+			or (kind and Weapons.spec(c.weapon, kind).riposte)
 			or not spendStamina(c, Config.Feint.StaminaCost)
 		then
 			return false
@@ -741,6 +732,13 @@ function CombatService.onDeflect(listener: DeflectListener)
 	table.insert(deflectListeners, listener)
 end
 
+-- The weapon a new fighter carries: the model's Weapon attribute (bots), else the
+-- player's chosen weapon, else the default.
+local function weaponFor(model: Model, player: Player?): string
+	local chosen = model:GetAttribute("Weapon") or (player and player:GetAttribute("Weapon"))
+	return Weapons.get(if typeof(chosen) == "string" then chosen else nil).id
+end
+
 function CombatService.register(model: Model, player: Player?): Combatant?
 	local existing = combatants[model]
 	if existing then
@@ -759,6 +757,7 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		humanoid = humanoid,
 		root = root,
 		player = player,
+		weapon = weaponFor(model, player),
 		state = "Idle",
 		stateEndsAt = math.huge,
 		attackToken = 0,
@@ -824,7 +823,8 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 
 	-- Keep the body together on death so the client can play the collapse.
 	humanoid.BreakJointsOnDeath = false
-	SwordRig.attach(model)
+	model:SetAttribute("Weapon", c.weapon)
+	SwordRig.attach(model, c.weapon)
 	model:SetAttribute("PostureMax", Config.Posture.Max)
 	model:SetAttribute("Posture", 0)
 	model:SetAttribute("Blocking", false)
@@ -879,7 +879,7 @@ local function onCharacterAdded(player: Player, character: Model)
 	end
 	Locomotion.applyToPlayer(character)
 	if combatants[character] then
-		SwordRig.attach(character)
+		SwordRig.attach(character, combatants[character].weapon)
 	end
 end
 

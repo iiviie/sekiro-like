@@ -19,6 +19,7 @@ local Motion = require(script.Parent.Motion)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Types = require(ReplicatedStorage.Shared.Types)
+local Weapons = require(ReplicatedStorage.Shared.Weapons)
 
 local combatEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent
 local player = Players.LocalPlayer
@@ -387,7 +388,7 @@ end
 
 -- Starts your own swing animation immediately, before the server confirms it.
 function CombatVisuals.predictAttack(model: Model, kind: Config.AttackKind, windup: number?)
-	local duration = windup or Config.Attacks[kind].windup
+	local duration = windup or Weapons.spec(Weapons.of(model), kind).windup
 	predicted = { kind = kind, at = os.clock(), windup = duration }
 	Animator.play(model, kind, duration)
 end
@@ -528,7 +529,7 @@ function alreadyShown(attacker: Model, defender: Model): boolean
 end
 
 local function predictIncoming(attacker: Model, kind: Config.AttackKind, hitAt: number)
-	local spec = Config.Attacks[kind]
+	local spec = Weapons.spec(Weapons.of(attacker), kind)
 	local mine, theirs = rootOf(player.Character), rootOf(attacker)
 	if spec.unblockable or not mine or not theirs then
 		return
@@ -609,7 +610,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			end
 			playSound(if heavy then SOUNDS.HeavySwing else SOUNDS.Swing, rootOf(model), if heavy then 0.7 else 0.55)
 			if isLocal(model) then
-				lunge(Config.Attacks[kind].lunge)
+				lunge(Weapons.spec(Weapons.of(model), kind).lunge)
 			end
 		end)
 	end,

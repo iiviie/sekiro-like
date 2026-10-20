@@ -1,6 +1,6 @@
 --!strict
 -- Every external asset id in one place. All of these were checked to load in Studio.
---   Katana mesh: Creator Store "Katana" (asset 105044896803684), built from code with a SpecialMesh.
+--   Katana mesh (all blades, see Shared/Weapons): Creator Store "Katana" (asset 105044896803684).
 --   Locomotion: Roblox's own Ninja Animation Package, usable in any experience.
 --   Sounds: mostly the ProSoundEffects library Roblox licenses for the Creator Store.
 
@@ -12,18 +12,7 @@ local Assets = {
 		NativeSize = Vector3.new(2.165, 0.9, 2.157),
 	},
 
-	Katana = {
-		MeshId = "rbxassetid://114165484128397",
-		TextureId = "rbxassetid://85720589438351",
-		-- Stylised for readability at third-person distance: ~13% longer than the source
-		-- mesh and much broader, since thin blades turn to a pixel line on screen. (A real
-		-- katana scaled to a 5-stud R15 body would be ~2.7 studs; this is 4.4.)
-		Scale = Vector3.new(0.6 * 1.35, 0.6 * 2.6, 0.6 * 1.13),
-		Size = Vector3.new(0.39, 0.99, 4.4), -- the mesh's bounds at Scale; blade along +Z, edge toward -Y
-		GripZ = -1.7, -- handle centre, where the fist closes
-		GuardZ = -1.07, -- tsuba; the swing trail starts here
-		TipZ = 2.15,
-	},
+	-- Weapon meshes and their sizes live with each weapon in Shared/Weapons.
 
 	-- Roblox Ninja Animation Package.
 	Locomotion = {

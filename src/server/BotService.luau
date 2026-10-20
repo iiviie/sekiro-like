@@ -11,6 +11,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Weapons = require(ReplicatedStorage.Shared.Weapons)
 local CombatService = require(script.Parent.CombatService)
 local Locomotion = require(script.Parent.Locomotion)
 local Outfit = require(script.Parent.Outfit)
@@ -76,6 +77,8 @@ local function buildRig(index: number): Model
 
 	local model = Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R15)
 	model.Name = `Ronin {index}`
+	-- Mix the weapon roster so players meet every archetype.
+	model:SetAttribute("Weapon", Weapons.Order[(index - 1) % #Weapons.Order + 1])
 	Outfit.dress(model)
 	return model
 end
@@ -356,7 +359,7 @@ local function react(bot: Combatant, attacker: Combatant, spec: AttackSpec, hitA
 end
 
 local function onWindup(attacker: Combatant, kind: AttackKind, hitAt: number)
-	local spec = Config.Attacks[kind]
+	local spec = Weapons.spec(attacker.weapon, kind)
 	for bot in brains do
 		if bot ~= attacker and alive(bot) then
 			local distance = (bot.root.Position - attacker.root.Position).Magnitude

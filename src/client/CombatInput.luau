@@ -18,6 +18,7 @@ local LocalCombat = require(script.Parent.LocalCombat)
 local LockOn = require(script.Parent.LockOn)
 local Motion = require(script.Parent.Motion)
 local Types = require(ReplicatedStorage.Shared.Types)
+local Weapons = require(ReplicatedStorage.Shared.Weapons)
 
 local combatAction = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatAction") :: RemoteEvent
 local player = Players.LocalPlayer
@@ -93,7 +94,7 @@ local function updateFacing(dt: number)
 end
 
 local function canAfford(character: Model, action: string): boolean
-	local cost = Config.Stamina.Costs[action]
+	local cost = Weapons.staminaCost(Weapons.of(character), action)
 	local stamina = character:GetAttribute("Stamina")
 	return not cost or typeof(stamina) ~= "number" or stamina >= cost
 end
@@ -110,9 +111,9 @@ local function predictSlash()
 		-- Right after a deflect the slash is a Riposte, which then chains into Light2.
 		LocalCombat.riposteUntil = -math.huge
 		comboIndex = 1
-		local spec = Config.Attacks.Riposte
+		local spec = Weapons.spec(Weapons.of(character), "Riposte")
 		comboUntil = t + spec.windup + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
-		CombatVisuals.predictAttack(character, "Riposte")
+		CombatVisuals.predictAttack(character, "Riposte", spec.windup)
 		return
 	end
 	if t > comboUntil or comboIndex >= #sequence then
@@ -128,7 +129,7 @@ local function predictSlash()
 		return
 	end
 	-- Mirror the server: chained slashes speed up only after a clean hit.
-	local spec = Config.Attacks[kind]
+	local spec = Weapons.spec(Weapons.of(character), kind)
 	local windup = if spec.chainWindup
 			and comboIndex >= 2
 			and LocalCombat.lastSlashLanded
