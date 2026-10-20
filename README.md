@@ -157,12 +157,10 @@ order: naginata (reach), then dual blades; kusarigama last.
 ```
 src/
   shared/   Config, Weapons, Ranks, Types, Assets, Palette, Poses, Clips, Round
-  server/   init, CombatService, BotService, RoundService, StatsService, LobbyService, LobbyBuilder, LeaderboardService,
-            MapBuilder,
-            Outfit, Locomotion, SwordRig, DevHooks
-  client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, LobbyHUD, Panels, UI, TrainerReadout,
-            TitleScreen,
-            Ambience
+  server/   init, CombatService, BotService, RoundService, StatsService, LobbyService, LobbyBuilder,
+            LeaderboardService, MapBuilder, Outfit, Locomotion, SwordRig, DevHooks
+  client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, LobbyHUD, Panels, UI,
+            TrainerReadout, TitleScreen, Ambience
 ```
 
 ## Before publishing
