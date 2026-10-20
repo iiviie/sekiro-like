@@ -197,8 +197,6 @@ local specs: { [string]: PoseSpec } = {
 		LeftKnee = { -24, 0, 0 },
 	},
 
-
-
 	-- Light 2: rising backhand from the lower left up and out to the upper right.
 	Slash2Windup = {
 		RightArm = {
@@ -264,7 +262,6 @@ local specs: { [string]: PoseSpec } = {
 		LeftHip = { 38, 0, 0 },
 		LeftKnee = { -46, 0, 0 },
 	},
-
 
 	-- Light 3: two-handed overhead finisher, driven down into a deep lunge.
 	Slash3Windup = {
