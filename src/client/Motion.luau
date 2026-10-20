@@ -1,5 +1,7 @@
 --!strict
 -- The only way the client pushes its own character around (dashes and attack lunges).
+-- `push` holds a constant velocity; `surge` eases one out, which is what dashes and lunges
+-- use so they burst and settle rather than start and stop dead.
 -- One push at a time: a new one replaces the old, so two constraints never fight. Force
 -- is capped, so a collision can never be "solved" by launching the character, and a
 -- safety net clamps any runaway upward velocity that sneaks in some other way.
@@ -50,6 +52,35 @@ function Motion.push(velocity: Vector3, duration: number)
 			active = nil
 		end
 		push:Destroy()
+	end)
+end
+
+-- A push whose speed eases out from `startSpeed` to `endSpeed` over `duration`
+-- (quadratic ease-out): a burst that settles into the run instead of stopping dead.
+function Motion.surge(direction: Vector3, startSpeed: number, endSpeed: number, duration: number)
+	local flat = Vector3.new(direction.X, 0, direction.Z)
+	if flat.Magnitude < 1e-3 then
+		return
+	end
+	flat = flat.Unit
+	Motion.push(flat * startSpeed, duration)
+	local push = active
+	if not push then
+		return
+	end
+	local startedAt = os.clock()
+	local connection: RBXScriptConnection
+	connection = RunService.PreSimulation:Connect(function()
+		if active ~= push then
+			connection:Disconnect()
+			return
+		end
+		local u = math.clamp((os.clock() - startedAt) / duration, 0, 1)
+		local speed = endSpeed + (startSpeed - endSpeed) * (1 - u) * (1 - u)
+		push.PlaneVelocity = Vector2.new(flat.X * speed, flat.Z * speed)
+		if u >= 1 then
+			connection:Disconnect()
+		end
 	end)
 end
 

@@ -592,8 +592,13 @@ local function onCombatEvent(kind: string, data: { [string]: any })
 	local attacker: Model? = data.attacker
 	local defender: Model? = data.defender
 	if kind == "Deathblow" and attacker == character and defender then
-		CombatHUD.splash(UI.KanjiExecution, "Shinobi Execution", DEATH_RED, 1.1)
-		removeEnemy(defender)
+		if data.lethal == false then
+			CombatHUD.splash(UI.KanjiExecution, "Deathblow  ·  they still stand", DEATH_RED, 1.1)
+			showEnemy(defender)
+		else
+			CombatHUD.splash(UI.KanjiExecution, "Shinobi Execution", DEATH_RED, 1.1)
+			removeEnemy(defender)
+		end
 	elseif kind == "Died" and data.model == character then
 		CombatHUD.splash(UI.KanjiDeath, "Death", DEATH_RED, 2.6)
 	elseif kind == "Died" and data.model then

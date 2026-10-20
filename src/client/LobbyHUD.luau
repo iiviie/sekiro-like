@@ -27,6 +27,7 @@ local pvpButton: TextButton
 local rewardsBadge: Frame
 
 local NAV = {
+	{ id = "Guide", glyph = "道", label = "How to fight" },
 	{ id = "Weapons", glyph = "刀", label = "Weapons" },
 	{ id = "Store", glyph = "店", label = "Store" },
 	{ id = "Profile", glyph = "名", label = "Profile" },
@@ -101,7 +102,7 @@ local function build()
 	local bottom = UI.new("Frame", {
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -14),
-		Size = UDim2.fromOffset(520, 170),
+		Size = UDim2.fromOffset(640, 170),
 		BackgroundTransparency = 1,
 	}, screen)
 
@@ -143,7 +144,7 @@ local function build()
 	local nav = UI.new("Frame", {
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.fromScale(0.5, 1),
-		Size = UDim2.fromOffset(520, 76),
+		Size = UDim2.fromOffset(640, 76),
 		BackgroundTransparency = 1,
 	}, bottom)
 	UI.new("UIListLayout", {
@@ -238,6 +239,12 @@ LobbyHUD.entered = false -- set once the title card is dismissed
 function LobbyHUD.setEntered()
 	LobbyHUD.entered = true
 	refreshVisibility()
+	-- First visit: open the rules before the first fight.
+	task.delay(1, function()
+		if (player:GetAttribute("Played") or 0) == 0 and screen.Enabled then
+			Panels.open("Guide")
+		end
+	end)
 end
 
 function LobbyHUD.start()

@@ -10,6 +10,8 @@
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local CombatVisuals = require(script.Parent.CombatVisuals)
@@ -77,20 +79,42 @@ local function facingGoal(root: BasePart): Vector3?
 	return nil
 end
 
+local function yawOf(v: Vector3): number
+	return math.atan2(-v.X, -v.Z)
+end
+
+-- Facing. With a target (lock-on, a soft target while attacking or guarding) the body
+-- tracks it smoothly. Otherwise it turns toward where you're walking at a capped rate,
+-- slower mid-swing, so a sword fighter pivots with weight instead of snapping around.
 local function updateFacing(dt: number)
-	local _, root, humanoid = getCharacter()
-	if not root or not humanoid or humanoid.Health <= 0 then
-		return
-	end
-	local goal = facingGoal(root)
-	if not goal or goal.Magnitude < 0.1 then
-		humanoid.AutoRotate = true
+	local character, root, humanoid = getCharacter()
+	if not character or not root or not humanoid or humanoid.Health <= 0 then
 		return
 	end
 	humanoid.AutoRotate = false
-	local target = CFrame.lookAt(root.Position, root.Position + goal)
-	local alpha = 1 - math.exp(-dt * Config.LockOn.TurnRate)
-	root.CFrame = root.CFrame:Lerp(target, alpha)
+	local goal = facingGoal(root)
+	if goal and goal.Magnitude >= 0.1 then
+		local target = CFrame.lookAt(root.Position, root.Position + goal)
+		local alpha = 1 - math.exp(-dt * Config.LockOn.TurnRate)
+		root.CFrame = root.CFrame:Lerp(target, alpha)
+		return
+	end
+	local want: Vector3? = nil
+	if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+		want = cameraFlatLook() -- shift-lock: face the camera
+	elseif humanoid.MoveDirection.Magnitude > 0.1 then
+		want = humanoid.MoveDirection
+	end
+	if not want then
+		return
+	end
+	local state = character:GetAttribute("CombatState")
+	local combat = blockHeld or state == "Windup" or state == "Recovery" or state == "Broken"
+	local rate = math.rad(if combat then Config.Movement.CombatTurnRate else Config.Movement.TurnRate)
+	local current = yawOf(root.CFrame.LookVector)
+	local diff = (yawOf(want) - current + math.pi) % (math.pi * 2) - math.pi
+	local step = math.clamp(diff, -rate * dt, rate * dt)
+	root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, current + step, 0)
 end
 
 local function canAfford(character: Model, action: string): boolean
@@ -187,7 +211,15 @@ local function dash()
 	end
 	direction = Vector3.new(direction.X, 0, direction.Z).Unit
 
-	Motion.push(direction * Config.Dodge.Speed, Config.Dodge.DashDuration)
+	local dodge = Config.Dodge
+	Motion.surge(direction, dodge.DashStartSpeed, dodge.DashEndSpeed, dodge.DashDuration)
+	-- A brief widening of the view sells the burst of speed.
+	local camera = workspace.CurrentCamera
+	local base = 70 -- the gameplay field of view (back-to-back dashes mustn't creep it up)
+	camera.FieldOfView = base + dodge.DashFovKick
+	TweenService:Create(camera, TweenInfo.new(dodge.DashDuration + 0.1, Enum.EasingStyle.Quad), {
+		FieldOfView = base,
+	}):Play()
 
 	CombatVisuals.dash(character)
 	send("Dodge", forward)

@@ -18,6 +18,7 @@ local LocalCombat = {
 	riposteUntil = -math.huge, -- server-clock time a slash still counts as a Riposte
 	lastSlashLanded = false, -- our previous swing hit cleanly, so the string speeds up
 	idleSince = 0, -- os.clock() when our character last became free to act
+	attackingUntil = 0, -- os.clock() until which our predicted swing slows us (see Movement)
 }
 
 function LocalCombat.pressBlock(stamp: number)

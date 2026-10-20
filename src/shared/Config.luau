@@ -35,8 +35,10 @@ export type AttackSpec = {
 }
 
 local attacks: { [AttackKind]: AttackSpec } = {
+	-- Opening swings must be reactable: human reaction (~0.25 s) plus up to ~0.125 s of
+	-- one-way ping, plus a moment to press. Below ~0.45 s players feel hit "before the sword".
 	Light1 = {
-		windup = 0.42,
+		windup = 0.5,
 		recovery = 0.25,
 		cooldown = 0,
 		damage = 9,
@@ -47,8 +49,8 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		unblockable = false,
 	},
 	Light2 = {
-		windup = 0.40,
-		chainWindup = 0.32,
+		windup = 0.46,
+		chainWindup = 0.38, -- a rhythm read after a landed hit, still deflectable on the beat
 		recovery = 0.25,
 		cooldown = 0,
 		damage = 9,
@@ -62,8 +64,8 @@ local attacks: { [AttackKind]: AttackSpec } = {
 	-- for the delayed Overhead, which catches early deflects and hits posture harder; press E/C
 	-- for a perilous morph; or press block to feint.
 	Light3 = {
-		windup = 0.42,
-		chainWindup = 0.34,
+		windup = 0.46,
+		chainWindup = 0.4,
 		recovery = 0.35,
 		cooldown = 0,
 		damage = 11,
@@ -229,14 +231,13 @@ local Config = {
 	-- The free-roam lobby: a floating shrine island above the castle. Players spawn here,
 	-- queue for the royale (PLAY or the glowing pad), and spar safely.
 	Lobby = {
-		Origin = Vector3.new(0, 80, 300), -- centre of the island's top surface
-		Radius = 44,
+		-- Centre of the island's lower tier (terrain fill top; you walk 2 studs above it).
+		-- The layout itself is in server/LobbyBuilder; it publishes spawn, pad and trainer
+		-- positions as attributes on Workspace.Lobby.
+		Origin = Vector3.new(0, 80, 300),
+		Radius = 70,
 		FallY = 40, -- below this height a lobby player is put back on the island
-		QueuePad = Vector3.new(0, 0, -20), -- offsets from Origin
-		QueuePadRadius = 6,
-		Spawn = Vector3.new(0, 0, 24),
-		Trainer = Vector3.new(-24, 0, 2),
-		Leaderboards = { Vector3.new(22, 0, 6), Vector3.new(30, 0, -10) },
+		QueuePadRadius = 7,
 		AutoQueue = true, -- new players start queued: a first fight within ~30 s
 		PvPToggleDelay = 3, -- turning lobby PvP on takes this long, so it can't be an ambush
 	},
@@ -274,6 +275,7 @@ local Config = {
 		GuardRegenMultiplier = 1.5, -- holding guard recovers posture faster, like Sekiro
 		BrokenDuration = 1.6, -- the deathblow window
 		ResetAfterBreak = 0.35, -- fraction of Max left when a break expires unpunished
+		SurvivedDeathblowStun = 0.9, -- knocked down this long by a deathblow that didn't kill
 		-- As in Sekiro, posture recovers more slowly the more vitality you've lost: at zero
 		-- vitality it recovers at this fraction of the normal rate.
 		VitalityRegenFloor = 0.25,
@@ -296,7 +298,7 @@ local Config = {
 		ChainWindow = 1.5, -- deflects in quick succession each deal more posture damage...
 		ChainBonus = 0.2,
 		ChainMax = 1.6, -- ...up to +60%
-		GuardPostureMultiplier = 1,
+		GuardPostureMultiplier = 0.7, -- holding guard is safe for a while, not forever
 		FacingDot = 0.15, -- defender must roughly face the attacker to deflect or guard
 		-- A deflected attacker stays open long enough for one counter-slash (windup 0.40-0.42 s
 		-- plus resolve) to land, as in Sekiro; a perfect deflect leaves a bigger window.
@@ -317,8 +319,22 @@ local Config = {
 	Dodge = {
 		IFrames = 0.3,
 		Cooldown = 0.9,
-		Speed = 50,
-		DashDuration = 0.16,
+		Speed = 50, -- bots' sidestep speed
+		-- The player's dash bursts out and eases down to walking pace, ~9.5 studs in all,
+		-- instead of a constant speed and a dead stop (which reads as a teleport).
+		DashStartSpeed = 78,
+		DashEndSpeed = 16,
+		DashDuration = 0.26,
+		DashFovKick = 6, -- degrees, recovered over the dash
+	},
+
+	-- Client-side locomotion feel (see client/Movement). Speeds are studs/s.
+	Movement = {
+		StartFraction = 0.45, -- from standstill you start at this share of full speed...
+		Acceleration = 14, -- ...and close the gap at this rate (~0.15 s to full)
+		SpeedBlend = 12, -- how quickly speed follows a state change (attack, guard)
+		TurnRate = 620, -- degrees/s while moving freely
+		CombatTurnRate = 360, -- while swinging, guarding or broken
 	},
 
 	Net = {
@@ -349,7 +365,10 @@ local Config = {
 	-- can't steal the kill someone else earned. Others still land normal hits.
 	BreakerOnlyDeathblow = 1.5,
 	HitPostureMultiplier = 0.5, -- unguarded hits still build some posture
-	DeathblowDamage = 1000,
+	-- A deathblow takes a big chunk, and kills outright only an already wounded fighter
+	-- (Sekiro bosses carry more than one "life"): a single posture break at full vitality
+	-- isn't the end of your round.
+	DeathblowDamage = 65,
 
 	WalkSpeed = 16,
 	AttackWalkSpeed = 6,
@@ -400,14 +419,16 @@ local Config = {
 		StrafeDistance = 8,
 		SeparationRadius = 4, -- push away from other fighters closer than this
 		RetreatPosture = 0.7, -- back off to recover when own posture passes this fraction
-		AttackInterval = { 0.6, 1.6 },
+		AttackInterval = { 0.9, 2.0 },
 		ComboContinueChance = 0.6, -- chance to chain each next slash
 		PerilousChance = 0.15,
-		PunishChance = 0.9, -- chance to counter-attack right after a perfect deflect
+		PunishChance = 0.6, -- chance to counter-attack right after a perfect deflect
 		-- Defense rolls, cumulative: perfect, then normal deflect, then hold guard, else eat the hit.
-		PerfectChance = 0.15,
-		DeflectChance = 0.45,
-		GuardChance = 0.25,
+		-- Together these defend ~60% of swings (it was 85%): good players still need to mix
+		-- up timing, but a new player's honest slashes land.
+		PerfectChance = 0.08,
+		DeflectChance = 0.3,
+		GuardChance = 0.22,
 		DodgePerilousChance = 0.5,
 		MikiriChance = 0.4, -- of the dodges against a thrust, how many dash in for a Mikiri
 		HealBelow = 0.4, -- sip the gourd when vitality drops under this fraction
@@ -416,10 +437,10 @@ local Config = {
 		-- likelier to deflect the next one.
 		StreakMemory = 1.6,
 		ReadAfter = 2, -- from the second swing in a streak, the bot stops attacking and waits to deflect
-		StreakDeflectBonus = 0.22,
-		StreakPerfectBonus = 0.15,
-		MaxDeflectChance = 0.92,
-		MaxPerfectChance = 0.6,
+		StreakDeflectBonus = 0.15,
+		StreakPerfectBonus = 0.08,
+		MaxDeflectChance = 0.75,
+		MaxPerfectChance = 0.35,
 		-- Openings: attack a target stuck in recovery, recoil or a sip.
 		OpeningChance = 0.75,
 		OpeningCooldown = 0.6,

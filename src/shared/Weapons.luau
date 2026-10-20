@@ -92,13 +92,13 @@ local defs: { [string]: WeaponDef } = {
 		windup = 1.4,
 		recovery = 1.3,
 		damage = 1.3,
-		postureDamage = 1.7,
+		postureDamage = 1.5,
 		reach = 1.25,
 		stamina = 1.35,
 		moves = {
 			-- Strings don't speed up as much: an odachi string is two swings, not a flurry.
-			Light2 = { chainWindup = 0.5 },
-			Light3 = { chainWindup = 0.52 },
+			Light2 = { chainWindup = 0.54 },
+			Light3 = { chainWindup = 0.56 },
 			-- Its overhead has late-windup armour: trade into it and lose.
 			Overhead = { armorFrom = 0.25 },
 			-- The riposte is the one fast move it gets, so the parry still pays.

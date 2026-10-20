@@ -21,14 +21,18 @@ Tools (installed with Homebrew): `rojo` 7.7, `selene`, `stylua`. The Rojo Studio
 
 Press Play. A letterboxed title card (a slow dolly toward the shrine) shows first; click or press any key to enter.
 
-- **Lobby.** You arrive on a floating shrine island above the castle. New players start **queued**, so the first fight
+- **Lobby.** You arrive on a floating shrine island above the castle: a cobbled spawn plaza, a grand stair up to the
+  torii terrace (where the Royale pad is, overlooking the castle), the dojo with the Deflect Trainer on the left wing,
+  the hall of champions with the leaderboards on the right, two waterfalls, rope bridges to two islets, and more
+  islets over a sea of cloud. It's sculpted terrain built by [LobbyBuilder.luau](src/server/LobbyBuilder.luau) at
+  server start, so it doesn't exist in edit mode. First-time players get the **How to fight** guide. New players start **queued**, so the first fight
   comes within ~15 s; press **PLAY** (or step on the glowing red pad) to join or leave the queue. While anyone is queued
   a 12 s countdown runs. Lobby PvP is off by default (turning it on takes 3 s); with it off nobody can touch you except
   the **Deflect Trainer**, which swings at whoever steps into its sand ring and never deals damage; after each swing a
   readout says how many milliseconds before impact you pressed and what it earned. Fall off the island and you're put
   back. Two boards show **Total Wins** and **Ranked Rating** (OrderedDataStores once published; this server's players
   until then), and every player carries a title with their wins and rank.
-- **Menus** (bottom bar): **Weapons** (equip, or unlock with coins), **Store** (how coins are earned; gem packs once
+- **Menus** (bottom bar): **How to fight** (the rules in plain words), **Weapons** (equip, or unlock with coins), **Store** (how coins are earned; gem packs once
   developer products exist), **Profile** (wins, losses, W/L, kills, deathblows, most used weapons, ranked season tier
   and rating), **Rewards** (7-day daily streak, gems on day 7), **Settings** (camera shake, hitstop, controls hint).
 - **Match:** queued players plus bots filling up to six fighters start on a circle around the courtyard. After 20 s a
@@ -85,9 +89,12 @@ All numbers live in [src/shared/Config.luau](src/shared/Config.luau). The rules 
 - **Free-for-all rules.** When two or more different fighters have struck you within 3 s you gain **Resolve**: posture
   recovers twice as fast and hit stun is halved. It never applies in a 1v1. For 1.5 s after a posture break, only the
   fighter who broke it can deathblow; anyone else's hit just chips vitality.
+- **Telegraphs.** Every swing coming at you flashes a white glint at the blade tip 0.3 s before impact: press block as it
+  flashes. Your own hits pop up DEFLECTED / GUARDED / damage over the target.
 - **Posture.** Builds from deflected swings, guarded hits and taking hits. It recovers after 1.2 s without posture
   damage, faster while guarding, and **slower the lower your vitality**. At 100 you're **broken** for 1.6 s with a red
-  deathblow marker; any hit then is a **deathblow** (忍殺).
+  deathblow marker; a hit then is a **deathblow** (忍殺): 65 damage, so it kills a wounded fighter and knocks an
+  unhurt one down hard. Holding guard takes 70% of an attack's posture damage.
 - **Stamina.** Slashes, perilous attacks and dodges cost stamina; deflecting is free.
 - **Healing gourd.** A 0.9 s sip that slows you; a hit mid-sip wastes it. There is no passive regeneration.
 - **Bots** read rhythm: from the second swing of a mashed string they stop attacking, hold their ground, deflect, and
@@ -101,6 +108,14 @@ All numbers live in [src/shared/Config.luau](src/shared/Config.luau). The rules 
 Set the workspace attribute `HoldIntermission` to `true` from the Studio command bar to keep the lobby countdown from
 finishing. In Studio, `ServerStorage.CombatTest` (a BindableFunction from DevHooks) spawns dummy fighters, performs
 actions with exact timing, reads their state and grants currency, for automated combat tests.
+
+## Movement
+
+[Movement.luau](src/client/Movement.luau) sets your WalkSpeed on your own client every frame, so slowing for a swing or
+guard is instant instead of a round trip late: you push off from 45% of full speed and reach it in ~0.15 s, and state
+changes blend. When nothing is targeted you turn toward where you walk at a capped rate (620°/s, 360°/s mid-swing or
+guarding) instead of snapping. Dashes burst at 78 studs/s and ease out to walking pace over 0.26 s (~9.5 studs) with a
+small FOV kick; attack lunges ease out too. Research: `research_notes/Sword combat design and lobby/movement_feel.md`.
 
 ## Weapons
 

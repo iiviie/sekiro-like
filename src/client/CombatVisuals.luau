@@ -377,7 +377,8 @@ local function lunge(speed: number)
 			end
 		end
 	end
-	Motion.push(forward * speed, 0.12)
+	-- Burst then settle; the lunge never carries you more than a short step.
+	Motion.surge(forward, speed * 1.25, speed * 0.2, 0.16)
 end
 
 local function hitstop(duration: number, ...: Model?)
@@ -394,8 +395,10 @@ end
 
 -- Starts your own swing animation immediately, before the server confirms it.
 function CombatVisuals.predictAttack(model: Model, kind: Config.AttackKind, windup: number?)
-	local duration = windup or Weapons.spec(Weapons.of(model), kind).windup
+	local spec = Weapons.spec(Weapons.of(model), kind)
+	local duration = windup or spec.windup
 	predicted = { kind = kind, at = os.clock(), windup = duration }
+	LocalCombat.attackingUntil = os.clock() + duration + Config.Net.ResolveGrace + spec.recovery
 	Animator.play(model, kind, duration)
 end
 
@@ -466,6 +469,64 @@ local function telegraphPerilous(model: Model, duration: number)
 	if mine and theirs and not isLocal(model) and (mine.Position - theirs.Position).Magnitude < 24 then
 		CombatHUD.flashPeril()
 	end
+end
+
+-- The parry cue: a white glint at the blade tip a fixed time before impact, on every
+-- swing coming at you. Pressing block as it flashes lands the deflect window at typical
+-- reaction times, so the rhythm is learnable instead of a guess at a moving blade.
+local GLINT_LEAD = 0.3
+local GLINT_RANGE = 26
+
+local function glint(model: Model, hitAt: number)
+	local mine, theirs = rootOf(player.Character), rootOf(model)
+	if not mine or not theirs or (mine.Position - theirs.Position).Magnitude > GLINT_RANGE then
+		return
+	end
+	task.delay(math.max(hitAt - GLINT_LEAD - now(), 0), function()
+		if not model.Parent or model:GetAttribute("CombatState") ~= "Windup" then
+			return -- interrupted or feinted before the tell
+		end
+		local sword = model:FindFirstChild("Sword")
+		local tip = sword and sword:FindFirstChild("TrailEnd")
+		local position = if tip and tip:IsA("Attachment")
+			then tip.WorldPosition
+			else theirs.Position + Vector3.new(0, 2, 0)
+		flare(position, Color3.fromRGB(255, 252, 240), 7)
+		burst(position, Color3.fromRGB(255, 250, 235), 6, 6, 0.8)
+	end)
+end
+
+-- Floating outcome text over the fighter you struck: why that hit did (or didn't) land.
+local function popText(target: Model, text: string, color: Color3, big: boolean?)
+	local head = target:FindFirstChild("Head")
+	if not head or not head:IsA("BasePart") then
+		return
+	end
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(220, 40)
+	gui.StudsOffsetWorldSpace = Vector3.new((math.random() - 0.5) * 1.5, 2.2, 0)
+	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
+	gui.MaxDistance = 60
+	gui.Adornee = head
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Enum.Font.SourceSansBold
+	label.TextSize = if big then 30 else 22
+	label.TextColor3 = color
+	label.TextStrokeTransparency = 0.3
+	label.Text = text
+	label.Parent = gui
+	gui.Parent = head
+	TweenService:Create(gui, TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		StudsOffsetWorldSpace = gui.StudsOffsetWorldSpace + Vector3.new(0, 2.2, 0),
+	}):Play()
+	TweenService:Create(label, TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+	}):Play()
+	Debris:AddItem(gui, 1)
 end
 
 local alreadyShown: (attacker: Model, defender: Model) -> boolean
@@ -609,6 +670,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		end
 		if not isLocal(model) then
 			predictIncoming(model, kind, data.hitAt)
+			glint(model, data.hitAt)
 		end
 		task.delay(math.max(remaining - 0.05, 0), function()
 			if not model.Parent then
@@ -623,6 +685,9 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Deflect = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
+		if isLocal(attacker) then
+			popText(defender, if data.perfect then "PERFECT DEFLECT" else "DEFLECTED", Color3.fromRGB(255, 196, 90))
+		end
 		if isLocal(defender) then
 			LocalCombat.deflected() -- opens the riposte (also mirrored by prediction)
 		end
@@ -633,6 +698,9 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Guard = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
+		if isLocal(attacker) then
+			popText(defender, "GUARDED", Color3.fromRGB(190, 195, 205))
+		end
 		if not alreadyShown(attacker, defender) then
 			guardEffects(attacker, defender)
 		end
@@ -642,6 +710,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		local attacker: Model, defender: Model = data.attacker, data.defender
 		if isLocal(attacker) then
 			LocalCombat.lastSlashLanded = true -- our next chained slash speeds up
+			popText(defender, `-{math.floor((data.damage or 0) + 0.5)}`, Color3.fromRGB(255, 250, 240))
 		end
 		Animator.play(defender, "HitReact")
 		-- Hits escalate through a string: a longer freeze, a heavier sound and a camera
@@ -677,8 +746,12 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Deathblow = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
+		if isLocal(attacker) then
+			popText(defender, `DEATHBLOW  -{Config.DeathblowDamage}`, Color3.fromRGB(230, 50, 40), true)
+		end
 		Animator.play(attacker, "Deathblow")
-		Animator.play(defender, "Executed")
+		-- A deathblow on an unwounded fighter knocks them down instead of killing.
+		Animator.play(defender, if data.lethal == false then "HitReact" else "Executed")
 		hitstop(Config.Visual.DeathblowHitstop, attacker, defender)
 		local root = rootOf(defender)
 		if root then

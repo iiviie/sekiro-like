@@ -3,6 +3,7 @@
 -- drums that swell in when a match starts and fade when it ends. Reacts to the round
 -- phase attribute; nothing polls.
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
@@ -42,17 +43,33 @@ function Ambience.start()
 	local music = loop(Assets.Ambience.MatchMusic)
 	fade(bed, BED_VOLUME, 3)
 
-	local state = Round.state()
-	local function onPhase()
-		if Round.phase() == "Match" then
+	-- The drums play only while you're actually fighting in the match, not in the lobby.
+	local player = Players.LocalPlayer
+	local playing = false
+	local function refresh()
+		local character = player.Character
+		local fighting = Round.phase() == "Match" and character ~= nil and character:GetAttribute("InMatch") == true
+		if fighting == playing then
+			return
+		end
+		playing = fighting
+		if fighting then
 			music.TimePosition = 0
 			fade(music, MUSIC_VOLUME, 2.5)
 		else
 			fade(music, 0, 3)
 		end
 	end
-	state:GetAttributeChangedSignal("Phase"):Connect(onPhase)
-	onPhase()
+	Round.state():GetAttributeChangedSignal("Phase"):Connect(refresh)
+	local function watch(character: Model)
+		character:GetAttributeChangedSignal("InMatch"):Connect(refresh)
+		refresh()
+	end
+	player.CharacterAdded:Connect(watch)
+	if player.Character then
+		watch(player.Character)
+	end
+	refresh()
 end
 
 return Ambience

@@ -129,7 +129,12 @@ local function isAlive(c: Combatant): boolean
 	return combatants[c.model] == c and c.state ~= "Dead"
 end
 
+-- Bots only: a player's own client sets its WalkSpeed every frame (client/Movement), so
+-- the slowdown for a swing or guard is instant on their screen.
 local function refreshWalkSpeed(c: Combatant)
+	if c.player then
+		return
+	end
 	local speed = Config.WalkSpeed
 	if c.state == "Windup" or c.state == "Recovery" or c.state == "Staggered" or c.state == "Drinking" then
 		speed = Config.AttackWalkSpeed
@@ -319,9 +324,18 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		report(spec, "Deathblow", attacker, target)
 		target.lastAttacker = attacker
 		target.lastAttackedAt = now()
-		target.executed = true
+		local lethal = target.humanoid.Health <= Config.DeathblowDamage
+		target.executed = lethal
+		broadcast("Deathblow", { attacker = attacker.model, defender = target.model, lethal = lethal })
 		target.humanoid:TakeDamage(Config.DeathblowDamage)
-		broadcast("Deathblow", { attacker = attacker.model, defender = target.model })
+		if not lethal and isAlive(target) then
+			-- Survived the deathblow: knocked down hard, posture partly restored, back up.
+			target.posture = Config.Posture.Max * Config.Posture.ResetAfterBreak
+			target.lastPostureDamageAt = now()
+			target.brokenBy = nil
+			setState(target, "Staggered", Config.Posture.SurvivedDeathblowStun)
+			publishPosture(target)
+		end
 		return
 	end
 

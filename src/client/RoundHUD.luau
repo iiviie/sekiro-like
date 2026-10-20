@@ -389,7 +389,13 @@ local function onRoundEvent(kind: string, data: { [string]: any })
 	elseif kind == "Victory" then
 		local fought = wasInMatch
 		wasInMatch = false
-		if not fought then
+		local character = player.Character
+		local inLobby = character == nil or character:GetAttribute("InMatch") ~= true
+		if not fought or (inLobby and not (data.winner and data.winner == character)) then
+			-- Back in the lobby: just a line in the feed, not a full-screen banner.
+			if data.name then
+				pushFeed(`{data.name} won the royale`, GOLD)
+			end
 			return
 		end
 		if data.winner and data.winner == player.Character then

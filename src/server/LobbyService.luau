@@ -19,7 +19,6 @@ local StatsService = require(script.Parent.StatsService)
 type Combatant = CombatService.Combatant
 
 local LOBBY = Config.Lobby
-local ORIGIN = LOBBY.Origin
 local TRAINER_RANGE = 9
 local TRAINER_INTERVAL = { 1.1, 1.9 }
 local SECONDS_PER_DAY = 86400
@@ -68,8 +67,17 @@ function LobbyService.setInMatch(model: Model, value: boolean)
 	end
 end
 
+-- Layout points published by LobbyBuilder on Workspace.Lobby.
+local function point(name: string): Vector3
+	local lobby = workspace:FindFirstChild("Lobby")
+	local value = lobby and lobby:GetAttribute(name)
+	return if typeof(value) == "Vector3" then value else LOBBY.Origin + Vector3.new(0, 2, 0)
+end
+
 function LobbyService.spawnCFrame(): CFrame
-	return CFrame.lookAt(ORIGIN + LOBBY.Spawn + Vector3.new(0, 3, 0), ORIGIN + LOBBY.QueuePad + Vector3.new(0, 3, 0))
+	local pad = point("QueuePad")
+	local spawn = point("SpawnPoint")
+	return CFrame.lookAt(spawn + Vector3.new(0, 3, 0), Vector3.new(pad.X, spawn.Y + 3, pad.Z))
 end
 
 local function claimDaily(player: Player)
@@ -158,7 +166,7 @@ local function trainer()
 	local model = Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R15)
 	model.Name = "Deflect Trainer"
 	model:SetAttribute("Trainer", true)
-	local home = ORIGIN + LOBBY.Trainer + Vector3.new(0, 3, 0)
+	local home = point("TrainerHome") + Vector3.new(0, 3, 0)
 	model:PivotTo(CFrame.new(home))
 	local root = model:FindFirstChild("HumanoidRootPart") :: BasePart
 	root.Anchored = true
@@ -255,7 +263,7 @@ function LobbyService.start()
 	trainer()
 
 	-- Stepping onto the glowing pad queues you; falling off the island puts you back.
-	local padCenter = ORIGIN + LOBBY.QueuePad
+	local padCenter = point("QueuePad")
 	RunService.Heartbeat:Connect(function()
 		for _, player in Players:GetPlayers() do
 			local character = player.Character

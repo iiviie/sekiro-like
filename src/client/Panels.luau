@@ -84,6 +84,87 @@ end
 
 ---------------------------------------------------------------------------------------
 
+-- How to fight: the rules in the order a new player needs them.
+local GUIDE = {
+	{
+		"Deflect  ·  F",
+		"Tap F just before the enemy's blade lands. Watch for the white glint at their sword tip: press as it flashes. A deflect costs you nothing and fills THEIR posture; a perfect one (tighter timing) fills it more. Then click straight away for a fast Riposte.",
+	},
+	{
+		"Guard  ·  hold F",
+		"Holding F blocks damage but fills YOUR posture. Don't turtle: tap to deflect instead. Mashing F shrinks your deflect window.",
+	},
+	{
+		"Posture",
+		"The bar in the middle. When it's full you're Broken: open to a deathblow, which takes a big chunk of vitality and kills a wounded fighter. Posture drains back when you stop taking hits, slower when your vitality is low.",
+	},
+	{
+		"Red 危 = perilous",
+		"Can't be guarded. A thrust: deflect it, or dash INTO it with Q for a Mikiri Counter. A sweep: jump over it. Either way, reading it wrecks the attacker's posture.",
+	},
+	{
+		"Attacking  ·  click",
+		"Click on the beat for a three-hit string; it speeds up while it keeps landing. Pause before the third for a slow overhead that beats early deflects. E (thrust) or C (sweep) late in a string turns the ender perilous. Block mid-swing to feint.",
+	},
+	{
+		"Survive",
+		"Q dodges (dash into thrusts, away from sweeps). G sips your gourd (3 per life): only when you're safe. Outnumbered by two or more? You gain Resolve: faster posture and shorter stun.",
+	},
+}
+
+local function guidePanel()
+	local list = UI.new("ScrollingFrame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 4,
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		CanvasSize = UDim2.new(),
+	}, body)
+	UI.new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+	for i, entry in GUIDE do
+		local card = UI.panel({
+			Size = UDim2.new(1, -10, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			LayoutOrder = i,
+			BackgroundColor3 = UI.PanelLight,
+		}, list)
+		UI.new("UIPadding", {
+			PaddingLeft = UDim.new(0, 12),
+			PaddingRight = UDim.new(0, 12),
+			PaddingTop = UDim.new(0, 8),
+			PaddingBottom = UDim.new(0, 10),
+		}, card)
+		UI.new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, card)
+		UI.text({
+			Size = UDim2.new(1, 0, 0, 24),
+			LayoutOrder = 1,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Font = UI.Display,
+			TextSize = 24,
+			TextColor3 = if i == 4 then Color3.fromRGB(230, 80, 70) else UI.Gold,
+			Text = entry[1],
+		}, card)
+		UI.text({
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			LayoutOrder = 2,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextWrapped = true,
+			TextSize = 16,
+			Text = entry[2],
+		}, card)
+	end
+	UI.text({
+		Size = UDim2.new(1, -10, 0, 40),
+		LayoutOrder = 99,
+		TextWrapped = true,
+		TextSize = 15,
+		TextTransparency = 0.2,
+		Text = "Practise on the Deflect Trainer in the dojo (left wing): it tells you how many milliseconds early you pressed.",
+	}, list)
+end
+
 local function weaponsPanel()
 	local have = owned()
 	local equipped = attr("Weapon", Weapons.Default)
@@ -386,6 +467,7 @@ local function settingsPanel()
 end
 
 local builders: { [string]: () -> () } = {
+	Guide = guidePanel,
 	Weapons = weaponsPanel,
 	Store = storePanel,
 	Profile = profilePanel,
@@ -398,7 +480,7 @@ function Panels.redraw()
 		return
 	end
 	clear()
-	titleLabel.Text = current :: string
+	titleLabel.Text = if current == "Guide" then "How to fight" else current :: string
 	builders[current :: string]()
 end
 
