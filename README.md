@@ -139,12 +139,17 @@ order: naginata (reach), then dual blades; kusarigama last.
   a ~0.22 s held follow-through at full extension. The whole body drives each cut: torso and hips twist, the front foot
   steps in and the stance drops (Light1 diagonal cut, Light2 rising backhand, Light3 overhead into a deep lunge).
   In Studio, `PlayerScripts.AnimTest:Invoke("sample", model, clip, windup, t)` freezes any clip at time `t` for review.
-- **Poses from Blender.** Stances and attack keyposes are authored in Blender on a matching R15 rig with
-  [art/anim/katana.blend](art/anim/katana.blend): the left hand is IK-locked to the hilt (a real two-handed grip),
-  feet are IK targets, and the torso, hips and head are keyed in character-space angles. Running the `run` text block
-  in Blender bakes every pose to joint Transforms in [BakedPoses.luau](src/shared/BakedPoses.luau) (generated; don't
-  edit by hand), which override the hand-written poses of the same name. Edit poses in the `poses` text block, rerun,
-  and check them in Studio with `AnimTest:Invoke("pose", model, name)`.
+- **Animation from Blender.** Sword stances and the seven attack clips (Light1-3, Overhead, Riposte, thrust, sweep)
+  are keyed in Blender on a matching R15 rig ([art/anim/katana.blend](art/anim/katana.blend)) with the left hand
+  IK-locked to the hilt and IK feet. Each clip is keyposes on a timeline (cock, coil, a last pull back for
+  anticipation, an arc breakdown, the strike, an overshoot, the settle), Bezier-interpolated by Blender and sampled at
+  30 fps into [BakedPoses.luau](src/shared/BakedPoses.luau) and [BakedClips.luau](src/shared/BakedClips.luau)
+  (generated; don't edit). Frames before impact stretch to the server's windup. To change one: edit the `poses` or
+  `clips` text block in Blender, run the `run` block, and review in Studio with
+  `AnimTest:Invoke("sample", model, clip, windup, t)` or `AnimTest:Invoke("pose", model, name)`.
+- **At runtime** the left arm is solved live (two-bone IK) onto the hilt whenever a two-handed clip or stance is
+  showing, so the grip holds between frames too. While you move, attack clips leave the hips and legs to the walk
+  cycle, so you keep stepping under a swing.
 - **Animation.** Locomotion uses Roblox's standard R15 animations (upright and natural; the Ninja pack's low stances
   made everyone look crouched). Out of combat the sword is carried low at the side; locked on, or within 4 s of an
   exchange, fighters raise a low guard. Combat motion is procedural: [Poses.luau](src/shared/Poses.luau)
@@ -194,7 +199,7 @@ landing over 35% of kills. Tune numbers in `Config` and `Weapons`, then watch th
 
 ```
 src/
-  shared/   Config, Weapons, Ranks, Types, Assets, Palette, Poses, Clips, Round
+  shared/   Config, Weapons, Ranks, Types, Assets, Palette, Poses, Clips, BakedPoses, BakedClips, Round
   server/   init, CombatService, BotService, RoundService, StatsService, LobbyService, LobbyBuilder,
             LeaderboardService, Telemetry, MapBuilder, Outfit, Locomotion, SwordRig, DevHooks
   client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, LobbyHUD, Panels, UI,

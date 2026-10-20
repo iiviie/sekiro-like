@@ -642,8 +642,10 @@ local function inCombat(model: Model): boolean
 	return os.clock() - (lastCombatAt[model] or -math.huge) < COMBAT_LINGER
 end
 
+local heldTestPose: string? = nil -- Studio tooling (AnimTest) is holding a pose for review
+
 local function refreshBase(model: Model)
-	if _G.AnimTestPose and isLocal(model) then
+	if heldTestPose and isLocal(model) then
 		return -- Studio tooling is holding a pose for review
 	end
 	local state = model:GetAttribute("CombatState")
@@ -923,10 +925,10 @@ function CombatVisuals.start()
 				Animator.hitstop(model, 30)
 			elseif command == "pose" then
 				-- Hold a named pose as the stance until released (clip = pose name).
-				_G.AnimTestPose = clip
+				heldTestPose = clip
 				Animator.setBase(model, clip)
 			elseif command == "release" then
-				_G.AnimTestPose = nil
+				heldTestPose = nil
 				Animator.hitstop(model, 0)
 				Animator.stop(model)
 			end

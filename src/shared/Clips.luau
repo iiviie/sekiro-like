@@ -19,6 +19,8 @@ export type Clip = {
 	segments: { Segment },
 	hold: number?, -- seconds to hold the last pose
 	fadeOut: number?, -- seconds to blend back to the base stance
+	twoHanded: boolean?, -- the left hand stays IK-locked to the hilt throughout
+	baked: boolean?, -- sampled from Blender: the impact is exactly the end of the windup segments
 }
 
 -- How far into the strike segment the blade actually connects.
@@ -142,7 +144,18 @@ local Clips: { [string]: Clip } = {
 	},
 }
 
+-- Sword clips keyed in Blender and sampled at 30 fps (art/anim/katana.blend) replace the
+-- hand-written ones of the same name.
+for name, clip in require(script.Parent.BakedClips) do
+	clip.baked = true
+	Clips[name] = clip
+end
+
+-- Stances held with both hands on the hilt (the left hand is IK-locked to it).
+local TwoHandedStances = { Ready = true, Guard = true, GuardImpact = true }
+
 return {
 	Clips = Clips,
 	ImpactFraction = IMPACT_FRACTION,
+	TwoHandedStances = TwoHandedStances,
 }
