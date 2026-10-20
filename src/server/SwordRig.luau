@@ -11,7 +11,7 @@ local SwordRig = {}
 local function trail(sword: BasePart, look: Weapons.WeaponLook)
 	local from = Instance.new("Attachment")
 	from.Name = "TrailStart"
-	from.Position = Vector3.new(0, 0, look.GuardZ + 0.3)
+	from.Position = Vector3.new(0, 0, look.GuardZ + 0.15)
 	from.Parent = sword
 
 	local to = Instance.new("Attachment")
@@ -22,17 +22,20 @@ local function trail(sword: BasePart, look: Weapons.WeaponLook)
 	local swing = Instance.new("Trail")
 	swing.Attachment0 = from
 	swing.Attachment1 = to
-	swing.Lifetime = 0.16
-	swing.MinLength = 0.05
-	swing.LightEmission = 0.8
-	swing.LightInfluence = 0
-	swing.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(170, 200, 255))
+	-- A soft white smear that fans out behind the cut (Dueling Grounds' look): it lingers a
+	-- little and fades, so the eye reads the whole arc of a 70 ms strike.
+	swing.Lifetime = 0.22
+	swing.MinLength = 0.02
+	swing.LightEmission = 0.6
+	swing.LightInfluence = 0.15
+	swing.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(205, 220, 255))
 	swing.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.15),
+		NumberSequenceKeypoint.new(0, 0.3),
+		NumberSequenceKeypoint.new(0.4, 0.55),
 		NumberSequenceKeypoint.new(1, 1),
 	})
-	-- Taper toward the tail so the arc reads as a cut, not a ribbon.
-	swing.WidthScale = NumberSequence.new(1, 0.35)
+	swing.WidthScale = NumberSequence.new(1, 0.3)
+	swing.FaceCamera = false
 	swing.Enabled = false -- client/Animator switches it on during strikes
 	swing.Parent = sword
 end

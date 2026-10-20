@@ -127,7 +127,7 @@ local function sampleAction(action: Action): ({ [string]: Weighted }?, boolean)
 end
 
 -- Trails are colour-coded by what's swinging: steel-white for slashes, red for perilous.
-local STEEL_TRAIL = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(170, 200, 255))
+local STEEL_TRAIL = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(205, 220, 255))
 local PERIL_TRAIL = ColorSequence.new(Color3.fromRGB(255, 90, 70), Color3.fromRGB(200, 20, 20))
 
 local function setTrail(model: Model, enabled: boolean, clipName: string?)
@@ -307,6 +307,14 @@ function Animator.hitstop(model: Model, duration: number)
 	local state = states[model]
 	if state then
 		state.freezeUntil = math.max(state.freezeUntil, os.clock() + duration)
+	end
+end
+
+-- Ends any hitstop freeze immediately (tooling).
+function Animator.unfreeze(model: Model)
+	local state = states[model]
+	if state then
+		state.freezeUntil = 0
 	end
 end
 

@@ -25,54 +25,59 @@ export type Clip = {
 local IMPACT_FRACTION = 0.6
 
 local Clips: { [string]: Clip } = {
+	-- Cock fast (~a third of the windup), hold the coil (the readable telegraph), strike in
+	-- ~70 ms, then hold the extended follow-through ~0.22 s before settling back.
 	Light1 = {
 		segments = {
-			{ pose = "Slash1Windup", duration = "windup", ease = "out" },
-			{ pose = "Slash1Strike", duration = 0.09, ease = "in", trail = true },
-			{ pose = "Slash1Follow", duration = 0.12, ease = "out", trail = true },
+			{ pose = "Slash1Windup", duration = "windup", share = 0.32, ease = "out" },
+			{ pose = "Slash1Coil", duration = "windup", share = 0.68, ease = "inOut" },
+			{ pose = "Slash1Strike", duration = 0.07, ease = "in", trail = true },
+			{ pose = "Slash1Follow", duration = 0.09, ease = "out", trail = true },
 		},
-		hold = 0.06,
-		fadeOut = 0.25,
+		hold = 0.22,
+		fadeOut = 0.3,
 	},
 	Light2 = {
 		segments = {
-			{ pose = "Slash2Windup", duration = "windup", ease = "out" },
-			{ pose = "Slash2Strike", duration = 0.09, ease = "in", trail = true },
-			{ pose = "Slash2Follow", duration = 0.12, ease = "out", trail = true },
+			{ pose = "Slash2Windup", duration = "windup", share = 0.32, ease = "out" },
+			{ pose = "Slash2Coil", duration = "windup", share = 0.68, ease = "inOut" },
+			{ pose = "Slash2Strike", duration = 0.07, ease = "in", trail = true },
+			{ pose = "Slash2Follow", duration = 0.09, ease = "out", trail = true },
 		},
-		hold = 0.06,
-		fadeOut = 0.25,
+		hold = 0.22,
+		fadeOut = 0.3,
 	},
-	-- The on-rhythm third slash: the overhead arc without the held beat.
+	-- The on-rhythm third slash: snaps overhead and drives down into a deep lunge.
 	Light3 = {
 		segments = {
-			{ pose = "Slash3Windup", duration = "windup", ease = "out" },
-			{ pose = "Slash3Strike", duration = 0.09, ease = "in", trail = true },
-			{ pose = "Slash3Follow", duration = 0.14, ease = "out", trail = true },
+			{ pose = "Slash3Windup", duration = "windup", share = 0.35, ease = "out" },
+			{ pose = "Slash3Hold", duration = "windup", share = 0.65, ease = "inOut" },
+			{ pose = "Slash3Strike", duration = 0.08, ease = "in", trail = true },
+			{ pose = "Slash3Follow", duration = 0.12, ease = "out", trail = true },
 		},
-		hold = 0.08,
-		fadeOut = 0.28,
+		hold = 0.26,
+		fadeOut = 0.34,
 	},
-	-- Held back a beat: the delayed overhead, with a readable hang at the top.
+	-- Held back a beat: the delayed overhead, a longer coil at the top.
 	Overhead = {
 		segments = {
-			{ pose = "Slash3Windup", duration = "windup", share = 0.6, ease = "out" },
-			{ pose = "Slash3Hold", duration = "windup", share = 0.4, ease = "inOut" }, -- the delayed beat
-			{ pose = "Slash3Strike", duration = 0.1, ease = "in", trail = true },
-			{ pose = "Slash3Follow", duration = 0.16, ease = "out", trail = true },
+			{ pose = "Slash3Windup", duration = "windup", share = 0.25, ease = "out" },
+			{ pose = "Slash3Hold", duration = "windup", share = 0.75, ease = "inOut" },
+			{ pose = "Slash3Strike", duration = 0.08, ease = "in", trail = true },
+			{ pose = "Slash3Follow", duration = 0.12, ease = "out", trail = true },
 		},
-		hold = 0.12,
-		fadeOut = 0.3,
+		hold = 0.3,
+		fadeOut = 0.34,
 	},
 	-- The counter-cut out of a deflect: Light2's arc, snapped out fast.
 	Riposte = {
 		segments = {
-			{ pose = "Slash2Windup", duration = "windup", ease = "out" },
-			{ pose = "Slash2Strike", duration = 0.07, ease = "in", trail = true },
-			{ pose = "Slash2Follow", duration = 0.12, ease = "out", trail = true },
+			{ pose = "Slash2Coil", duration = "windup", ease = "out" },
+			{ pose = "Slash2Strike", duration = 0.06, ease = "in", trail = true },
+			{ pose = "Slash2Follow", duration = 0.08, ease = "out", trail = true },
 		},
-		hold = 0.06,
-		fadeOut = 0.22,
+		hold = 0.2,
+		fadeOut = 0.28,
 	},
 	Perilous = {
 		segments = {

@@ -134,6 +134,11 @@ order: naginata (reach), then dual blades; kusarigama last.
 
 ## Presentation
 
+- **Swings.** Modelled on Dueling Grounds, frame-counted from a 60 fps recording: a fast snap (about a third of the
+  windup) into a cocked pose, a held coil that is the readable telegraph, a ~70 ms strike with a soft white smear, then
+  a ~0.22 s held follow-through at full extension. The whole body drives each cut: torso and hips twist, the front foot
+  steps in and the stance drops (Light1 diagonal cut, Light2 rising backhand, Light3 overhead into a deep lunge).
+  In Studio, `PlayerScripts.AnimTest:Invoke("sample", model, clip, windup, t)` freezes any clip at time `t` for review.
 - **Animation.** Locomotion uses Roblox's standard R15 animations (upright and natural; the Ninja pack's low stances
   made everyone look crouched). Out of combat the sword is carried low at the side; locked on, or within 4 s of an
   exchange, fighters raise a low guard. Combat motion is procedural: [Poses.luau](src/shared/Poses.luau)

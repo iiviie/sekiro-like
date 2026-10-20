@@ -907,6 +907,26 @@ end
 function CombatVisuals.start()
 	Animator.start()
 
+	-- Studio-only: lets tooling sample a clip at an exact time, e.g.
+	-- AnimTest:Invoke("sample", model, "Light1", 0.5, 0.2) plays it, then freezes 0.2 s in.
+	if RunService:IsStudio() then
+		local hook = Instance.new("BindableFunction")
+		hook.Name = "AnimTest"
+		hook.OnInvoke = function(command: string, model: Model, clip: string, windup: number, at: number)
+			if command == "sample" then
+				Animator.unfreeze(model)
+				Animator.play(model, clip, windup)
+				task.wait(at)
+				Animator.hitstop(model, 30)
+			elseif command == "release" then
+				Animator.hitstop(model, 0)
+				Animator.stop(model)
+			end
+			return true
+		end
+		hook.Parent = player:WaitForChild("PlayerScripts")
+	end
+
 	combatEvent.OnClientEvent:Connect(function(kind: string, data: { [string]: any })
 		-- Anyone swinging or being swung at is in combat for a few seconds.
 		for _, key in { "attacker", "defender", "model" } do
