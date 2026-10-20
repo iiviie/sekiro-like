@@ -53,6 +53,16 @@ local Clips: { [string]: Clip } = {
 		hold = 0.12,
 		fadeOut = 0.3,
 	},
+	-- The counter-cut out of a deflect: Light2's arc, snapped out fast.
+	Riposte = {
+		segments = {
+			{ pose = "Slash2Windup", duration = "windup", ease = "out" },
+			{ pose = "Slash2Strike", duration = 0.07, ease = "in", trail = true },
+			{ pose = "Slash2Follow", duration = 0.12, ease = "out", trail = true },
+		},
+		hold = 0.06,
+		fadeOut = 0.22,
+	},
 	Perilous = {
 		segments = {
 			{ pose = "ThrustWindup", duration = "windup", share = 0.5, ease = "out" },

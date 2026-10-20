@@ -309,6 +309,16 @@ function CombatHUD.flashPeril()
 	tween(perilFlash, 0.9, { ImageTransparency = 1 }, Enum.EasingStyle.Sine)
 end
 
+-- A brief white flash at the screen's edges: you landed a perfect deflect.
+local perfectFlash: ImageLabel
+function CombatHUD.flashPerfect()
+	if not perfectFlash then
+		return
+	end
+	perfectFlash.ImageTransparency = 0.25
+	tween(perfectFlash, 0.35, { ImageTransparency = 1 }, Enum.EasingStyle.Quad)
+end
+
 -- Shows the controls reminder for a while, then fades it (called once you enter).
 function CombatHUD.showControls()
 	controlsHint.TextTransparency = 0.25
@@ -458,6 +468,12 @@ local function buildScreen()
 	perilFlash = image(screen, UI.Vignette, {
 		Size = UDim2.fromScale(1, 1),
 		ImageColor3 = Color3.fromRGB(150, 0, 0),
+		ImageTransparency = 1,
+		ZIndex = 0,
+	})
+	perfectFlash = image(screen, UI.Vignette, {
+		Size = UDim2.fromScale(1, 1),
+		ImageColor3 = Color3.fromRGB(255, 244, 220),
 		ImageTransparency = 1,
 		ZIndex = 0,
 	})

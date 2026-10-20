@@ -106,6 +106,15 @@ local function predictSlash()
 	end
 	local t = os.clock()
 	local sequence = Config.Combo.Sequence
+	if workspace:GetServerTimeNow() <= LocalCombat.riposteUntil then
+		-- Right after a deflect the slash is a Riposte, which then chains into Light2.
+		LocalCombat.riposteUntil = -math.huge
+		comboIndex = 1
+		local spec = Config.Attacks.Riposte
+		comboUntil = t + spec.windup + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
+		CombatVisuals.predictAttack(character, "Riposte")
+		return
+	end
 	if t > comboUntil or comboIndex >= #sequence then
 		comboIndex = 0
 	end

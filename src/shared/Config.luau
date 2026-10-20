@@ -3,7 +3,7 @@
 -- Times are seconds on the shared server clock (workspace:GetServerTimeNow()).
 
 -- Light1-3 are the slash combo; the client picks the matching clip from the kind name.
-export type AttackKind = "Light1" | "Light2" | "Light3" | "Perilous" | "Sweep"
+export type AttackKind = "Light1" | "Light2" | "Light3" | "Riposte" | "Perilous" | "Sweep"
 
 export type AttackSpec = {
 	windup: number, -- telegraph before impact; keep >= 0.3 so 200 ms ping players can still read it
@@ -19,6 +19,11 @@ export type AttackSpec = {
 	noGuard: boolean?, -- holding guard does nothing; only a timed deflect works (thrusts)
 	thrust: boolean?, -- can be Mikiri-countered by dashing into it
 	low: boolean?, -- a sweep: jump over it
+	-- Hyper armour: hits during the last `armorFrom` seconds of the windup hurt but don't
+	-- interrupt it. Early in the windup the swing can still be stopped by a hit.
+	armorFrom: number?,
+	cooldownGroup: string?, -- attacks in a group share one escalating cooldown (Config.Cooldowns)
+	riposte: boolean?, -- only available just after a successful deflect
 }
 
 local attacks: { [AttackKind]: AttackSpec } = {
@@ -55,11 +60,27 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		lunge = 26,
 		unblockable = false,
 	},
+	-- Deflect, then slash within Deflect.RiposteWindow: a fast counter-cut that can't be
+	-- interrupted. It is the parry's payoff, so it has to land inside the attacker's recoil
+	-- even at 250 ms ping (recoil 0.5 s >= startup 0.18 s + ~0.125 s one-way + cushion).
+	Riposte = {
+		windup = 0.18,
+		recovery = 0.3,
+		cooldown = 0,
+		damage = 11,
+		postureDamage = 24,
+		range = 7.5,
+		width = 6,
+		lunge = 22,
+		unblockable = false,
+		armorFrom = 0.18,
+		riposte = true,
+	},
 	Perilous = {
 		windup = 0.95,
 		recovery = 0.55,
-		cooldown = 3,
-		damage = 28,
+		cooldown = 0, -- see Cooldowns.Perilous, shared with the sweep
+		damage = 18, -- ~2x a slash: strong when it lands, but a read costs far more
 		postureDamage = 35,
 		range = 9,
 		width = 4,
@@ -68,12 +89,14 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		perilous = true,
 		noGuard = true,
 		thrust = true,
+		armorFrom = 0.3,
+		cooldownGroup = "Perilous",
 	},
 	Sweep = {
 		windup = 0.95,
 		recovery = 0.6,
-		cooldown = 3,
-		damage = 24,
+		cooldown = 0, -- see Cooldowns.Perilous, shared with the thrust
+		damage = 16,
 		postureDamage = 30,
 		range = 8.5,
 		width = 10,
@@ -81,6 +104,8 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		unblockable = true,
 		perilous = true,
 		low = true,
+		armorFrom = 0.3,
+		cooldownGroup = "Perilous",
 	},
 }
 
@@ -92,6 +117,20 @@ local Config = {
 		Name = "L A S T   B L A D E",
 		Kanji = "最後の刃",
 		Tagline = "Deflect.  Break their posture.  Be the last blade standing.",
+	},
+
+	-- Shared cooldowns. Each use inside `Memory` seconds of the last multiplies the next
+	-- cooldown by `Escalation`, so alternating thrust and sweep can't be spammed.
+	Cooldowns = {
+		Perilous = { Base = 7, Escalation = 1.5, Memory = 8 },
+	} :: { [string]: { Base: number, Escalation: number, Memory: number } },
+
+	-- What a correctly read perilous attack costs its owner: a big posture chunk and a long
+	-- recovery, so a perilous is a gamble, not a free unblockable.
+	PerilousCounter = {
+		DeflectPosture = 40, -- a deflected thrust, on top of the normal deflect posture
+		DeflectRecoil = 0.8,
+		JumpedRecovery = 0.7, -- a sweep that was jumped leaves its owner open this long
 	},
 
 	Combo = {
@@ -181,23 +220,26 @@ local Config = {
 	Deflect = {
 		Window = 0.2,
 		MinWindow = 0.067,
-		PerfectWindow = 0.07, -- the last ~4 frames before impact
+		PerfectWindow = 0.09, -- the last ~5 frames before impact, judged on the defender's clock
 		SpamPenaltyPerPress = 0.045,
 		SpamMemory = 0.5,
 		LateTolerance = 0.03, -- clock-sync slack for presses stamped just after impact
 		AttackerPosture = 18,
 		PerfectAttackerPosture = 30,
-		PerilousPostureMultiplier = 1.4, -- deflecting a perilous thrust hurts its owner more
 		DefenderPosture = 6, -- deflecting still costs a little posture; a perfect one doesn't
-		ChainWindow = 1.2, -- deflects in quick succession each deal more posture damage...
-		ChainBonus = 0.25,
-		ChainMax = 2, -- ...up to double
+		ChainWindow = 1.5, -- deflects in quick succession each deal more posture damage...
+		ChainBonus = 0.2,
+		ChainMax = 1.6, -- ...up to +60%
 		GuardPostureMultiplier = 1,
 		FacingDot = 0.15, -- defender must roughly face the attacker to deflect or guard
 		-- A deflected attacker stays open long enough for one counter-slash (windup 0.40-0.42 s
 		-- plus resolve) to land, as in Sekiro; a perfect deflect leaves a bigger window.
 		AttackerRecoil = 0.5,
 		PerfectAttackerRecoil = 0.75,
+		RiposteWindow = 0.5, -- slash this soon after a deflect for a Riposte
+		-- Right after a deflect, swings from anyone *else* are auto-guarded, so a third party
+		-- can't trade into your riposte.
+		ThirdPartyGuard = 0.35,
 	},
 
 	Feint = {
@@ -238,11 +280,23 @@ local Config = {
 		CameraSmoothing = 10,
 	},
 
+	-- Four clearly separate feedback tiers (hitstop seconds). Hitstop only freezes the two
+	-- fighters involved, on their own clients; in a free-for-all a long freeze is a liability.
 	Visual = {
 		PerilousColor = Color3.fromRGB(255, 40, 40),
-		Hitstop = 0.07,
-		PerfectHitstop = 0.11,
-		DeathblowHitstop = 0.16,
+		GuardHitstop = 0.035,
+		Hitstop = 0.07, -- deflect
+		PerfectHitstop = 0.105,
+		DeathblowHitstop = 0.12,
+		-- Clean hits, escalating through the string.
+		HitHitstop = {
+			Light1 = 0.045,
+			Light2 = 0.055,
+			Light3 = 0.1,
+			Riposte = 0.08,
+			Perilous = 0.13,
+			Sweep = 0.13,
+		} :: { [string]: number },
 	},
 
 	Bots = {

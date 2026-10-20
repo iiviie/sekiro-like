@@ -67,6 +67,11 @@ export type Combatant = {
 	deflectChain: number, -- deflects in quick succession, for the chain bonus
 	lastDeflectAt: number,
 	windupKind: AttackKind?, -- what this fighter is winding up, for hyper armour
+	riposteUntil: number, -- a slash before this is a Riposte (set by a successful deflect)
+	lastDeflected: Combatant?, -- whose swing we last deflected, for the third-party guard
+	groupReadyAt: { [string]: number }, -- shared cooldown groups (Config.Cooldowns)
+	groupUses: { [string]: number },
+	groupLastUseAt: { [string]: number },
 
 	dodgeStamp: number,
 	dodgeForward: boolean, -- dashed toward the attacker (for Mikiri)
@@ -192,9 +197,11 @@ local function stagger(c: Combatant, duration: number)
 	if c.state == "Broken" or c.state == "Dead" then
 		return
 	end
-	-- Perilous attacks have hyper armour: hits hurt, but don't stop the swing.
+	-- Hyper armour covers only the end of a windup: hits then hurt but don't stop the
+	-- swing. Earlier, a read windup can still be interrupted.
 	local kind = c.windupKind
-	if c.state == "Windup" and kind and Config.Attacks[kind].perilous then
+	local armorFrom = kind and Config.Attacks[kind].armorFrom
+	if c.state == "Windup" and armorFrom and now() >= c.windupHitAt - armorFrom then
 		return
 	end
 	if c.state == "Windup" then
@@ -238,6 +245,14 @@ local function findTargets(attacker: Combatant, spec: AttackSpec, strike: CFrame
 	return targets
 end
 
+local specKinds: { [AttackSpec]: AttackKind } = {}
+for kind, spec in Config.Attacks do
+	specKinds[spec] = kind
+end
+local function kindOf(spec: AttackSpec): AttackKind?
+	return specKinds[spec]
+end
+
 local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSpec, hitAt: number)
 	if hitAt < target.protectedUntil then
 		return
@@ -257,6 +272,11 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		local close = (attacker.root.Position - target.root.Position).Magnitude <= Config.Jump.KickRange
 		if close then
 			addPosture(attacker, Config.Jump.KickPosture)
+		end
+		-- A jumped sweep leaves its owner stuck in a long recovery: the read is rewarded.
+		if attacker.state == "Recovery" then
+			attacker.stateEndsAt = math.max(attacker.stateEndsAt, now() + Config.PerilousCounter.JumpedRecovery)
+			attacker.cancelableAt = attacker.stateEndsAt
 		end
 		broadcast("Jumped", { attacker = attacker.model, defender = target.model, kick = close })
 		return
@@ -279,6 +299,15 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 	local deflectRules = Config.Deflect
 	local canDeflect = not spec.unblockable and isFacing(target, attacker)
 	local canGuard = canDeflect and not spec.noGuard
+	-- Just after a deflect, swings from anyone else are auto-guarded.
+	local thirdParty = target.lastDeflected ~= nil
+		and target.lastDeflected ~= attacker
+		and hitAt - target.lastDeflectAt <= deflectRules.ThirdPartyGuard
+	if thirdParty and not spec.unblockable then
+		addPosture(target, spec.postureDamage * Config.Deflect.GuardPostureMultiplier * 0.5)
+		broadcast("Guard", { attacker = attacker.model, defender = target.model })
+		return
+	end
 	local sinceDeflect = hitAt - target.deflectStamp
 	local deflectArmed = sinceDeflect >= -deflectRules.LateTolerance and sinceDeflect <= target.deflectWindow
 
@@ -292,7 +321,10 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		target.spamStacks = 0 -- a successful deflect clears the mashing penalty
 		local multiplier = math.min(deflectRules.ChainMax, 1 + deflectRules.ChainBonus * target.deflectChain)
 		if spec.perilous then
-			multiplier *= deflectRules.PerilousPostureMultiplier
+			-- A deflected perilous thrust is a big read: it costs its owner a posture chunk
+			-- and a long recoil.
+			recoil = math.max(recoil, Config.PerilousCounter.DeflectRecoil)
+			addPosture(attacker, Config.PerilousCounter.DeflectPosture)
 		end
 		if perfect then
 			addPosture(attacker, deflectRules.PerfectAttackerPosture * multiplier)
@@ -300,10 +332,18 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 			addPosture(attacker, deflectRules.AttackerPosture * multiplier)
 			addPosture(target, deflectRules.DefenderPosture)
 		end
+		-- The payoff: a fast, uninterruptible counter-cut is available for a moment.
+		target.riposteUntil = t + deflectRules.RiposteWindow
+		target.lastDeflected = attacker
 		if attacker.state ~= "Broken" then
 			stagger(attacker, recoil)
 		end
-		broadcast("Deflect", { attacker = attacker.model, defender = target.model, perfect = perfect })
+		broadcast("Deflect", {
+			attacker = attacker.model,
+			defender = target.model,
+			perfect = perfect,
+			chain = target.deflectChain,
+		})
 		for _, listener in deflectListeners do
 			task.spawn(listener, attacker, target, perfect)
 		end
@@ -316,7 +356,10 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		target.humanoid:TakeDamage(spec.damage)
 		addPosture(target, spec.postureDamage * Config.HitPostureMultiplier)
 		stagger(target, Config.HitStagger)
-		broadcast("Hit", { attacker = attacker.model, defender = target.model, damage = spec.damage })
+		broadcast(
+			"Hit",
+			{ attacker = attacker.model, defender = target.model, damage = spec.damage, kind = kindOf(spec) }
+		)
 	end
 end
 
@@ -359,8 +402,28 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 	if c.state ~= "Idle" or t < (c.nextAttackAt[kind] or 0) then
 		return false
 	end
+	local group = spec.cooldownGroup
+	if group and t < (c.groupReadyAt[group] or 0) then
+		return false
+	end
 	if not spendStamina(c, Config.Stamina.Costs[kind]) then
 		return false
+	end
+	if group then
+		-- Escalating shared cooldown: each use soon after the last makes the next wait longer.
+		local rules = Config.Cooldowns[group]
+		local uses = if t - (c.groupLastUseAt[group] or -math.huge) <= rules.Memory
+			then (c.groupUses[group] or 0) + 1
+			else 0
+		c.groupUses[group] = uses
+		c.groupLastUseAt[group] = t
+		c.groupReadyAt[group] = t + rules.Base * rules.Escalation ^ uses
+		c.model:SetAttribute(group .. "ReadyAt", c.groupReadyAt[group])
+	end
+	if spec.riposte then
+		c.riposteUntil = 0
+		c.comboIndex = 1 -- the riposte stands in for the first slash: chain on into Light2
+		c.comboUntil = t + spec.windup + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
 	end
 
 	setBlocking(c, false)
@@ -417,6 +480,7 @@ local function attack(c: Combatant, action: Action): boolean
 	local kind: AttackKind = if action == "Perilous"
 		then "Perilous"
 		elseif action == "Sweep" then "Sweep"
+		elseif t <= c.riposteUntil then "Riposte"
 		else nextComboKind(c, t)
 	return startAttack(c, kind)
 end
@@ -643,6 +707,11 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		deflectChain = 0,
 		lastDeflectAt = -math.huge,
 		windupKind = nil,
+		riposteUntil = 0,
+		lastDeflected = nil,
+		groupReadyAt = {},
+		groupUses = {},
+		groupLastUseAt = {},
 		dodgeStamp = -math.huge,
 		dodgeForward = false,
 		nextDodgeAt = 0,

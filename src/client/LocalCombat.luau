@@ -15,6 +15,7 @@ local LocalCombat = {
 	lastPressAt = -math.huge,
 	spamStacks = 0,
 	blocking = false,
+	riposteUntil = -math.huge, -- server-clock time a slash still counts as a Riposte
 }
 
 function LocalCombat.pressBlock(stamp: number)
@@ -30,9 +31,10 @@ function LocalCombat.pressBlock(stamp: number)
 	LocalCombat.blocking = true
 end
 
--- A successful deflect clears the mashing penalty (mirrors the server).
+-- A successful deflect clears the mashing penalty and opens the riposte (mirrors the server).
 function LocalCombat.deflected()
 	LocalCombat.spamStacks = 0
+	LocalCombat.riposteUntil = workspace:GetServerTimeNow() + Config.Deflect.RiposteWindow
 end
 
 function LocalCombat.releaseBlock()

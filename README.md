@@ -51,15 +51,20 @@ All numbers live in [src/shared/Config.luau](src/shared/Config.luau). The rules 
   can't re-aim it): slashes 6 wide × 7 deep, finisher 5 × 7.5, thrust 4 × 9, sweep 10 × 8.5, all 6 tall.
 - **Combo and buffering.** Slashes chain Light1 → Light2 → Light3 (a delayed overhead). Inputs up to 0.3 s early are
   buffered, and block or dodge can cancel recovery shortly after impact.
-- **Deflect.** A block press arms a deflect for 0.2 s before impact; the last 0.07 s is a **perfect** deflect. Each press
+- **Deflect.** A block press arms a deflect for 0.2 s before impact; the last 0.09 s is a **perfect** deflect. Each press
   soon after the last shrinks that window (down to 0.067 s), and the penalty clears after 0.5 s or on a successful
-  deflect, so pressing early is safe (it guards) and mashing isn't. Deflecting knocks the attacker into a recoil long
-  enough for one counter-slash (0.5 s, 0.75 s after a perfect) and builds their posture; deflects in quick succession
-  build it harder each time.
+  deflect, so pressing early is safe (it guards) and mashing isn't. Deflecting knocks the attacker into a recoil (0.5 s,
+  0.75 s after a perfect) and builds their posture; deflects in quick succession build it 20% harder each time (up to
+  +60%) and ring higher.
+- **Riposte.** Slash within 0.5 s of a deflect for a fast (0.18 s), uninterruptible counter-cut that chains into Light2.
+  It is sized to land inside the recoil even at 250 ms ping. For 0.35 s after a deflect, swings from anyone else are
+  auto-guarded, so a third party can't trade into it.
 - **Guard.** Holding block stops vitality damage but takes the attack's posture damage, and does nothing against thrusts.
-- **Perilous attacks** (a red brush 危, a red outline and a chime) have hyper armour through their windup. The **thrust**
-  can't be guarded: deflect it, or dash into it for a **Mikiri Counter**. The **sweep** can't be blocked at all: jump it,
-  and land on the sweeper's head for posture damage if you're close.
+- **Perilous attacks** (a red brush 危, a red outline and a chime) only have hyper armour in the last 0.3 s of their
+  windup, so a read one can be interrupted early. Thrust and sweep share one cooldown (7 s, ×1.5 for each reuse within
+  8 s) and cost ~2.5× a slash in stamina. The **thrust** can't be guarded: deflect it (its owner takes +40 posture and a
+  0.8 s recoil), or dash into it for a **Mikiri Counter**. The **sweep** can't be blocked at all: jump it (its owner is
+  stuck in recovery for 0.7 s), and land on the sweeper's head for posture damage if you're close.
 - **Posture.** Builds from deflected swings, guarded hits and taking hits. It recovers after 1.2 s without posture
   damage, faster while guarding, and **slower the lower your vitality**. At 100 you're **broken** for 1.6 s with a red
   deathblow marker; any hit then is a **deathblow** (忍殺).

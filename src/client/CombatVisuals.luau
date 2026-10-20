@@ -462,14 +462,26 @@ end
 
 local alreadyShown: (attacker: Model, defender: Model) -> boolean
 
+-- Deflects chained in quick succession ring a little higher each time, so the rhythm of a
+-- good exchange can be heard. Tracked per defender.
+local chainAt: { [Model]: number } = {}
+local chainCount: { [Model]: number } = {}
+
 local function deflectEffects(attacker: Model, defender: Model, perfect: boolean)
 	Animator.play(defender, "GuardImpact")
 	Animator.play(attacker, "Recoil")
 	hitstop(if perfect then Config.Visual.PerfectHitstop else Config.Visual.Hitstop, attacker, defender)
 
+	local t = os.clock()
+	local chain = if t - (chainAt[defender] or -math.huge) < Config.Deflect.ChainWindow
+		then (chainCount[defender] or 0) + 1
+		else 0
+	chainAt[defender], chainCount[defender] = t, chain
+	local pitch = 1 + math.min(chain, 5) * 0.045 + (math.random() - 0.5) * 0.06
+
 	local point = contactPoint(attacker, defender)
 	local soundAt = rootOf(defender)
-	playSound(if math.random() < 0.5 then SOUNDS.Deflect else SOUNDS.DeflectAlt, soundAt, 0.85)
+	playSound(if math.random() < 0.5 then SOUNDS.Deflect else SOUNDS.DeflectAlt, soundAt, 0.85, pitch)
 	if perfect then
 		-- A perfect deflect has to feel unmistakable: white-gold bloom, a ringing
 		-- second layer of steel, and a heavier freeze and camera kick.
@@ -477,7 +489,10 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 			burst(point, GOLD, 70, 44, 7)
 			flare(point, Color3.fromRGB(255, 244, 214), 16)
 		end
-		playSound(SOUNDS.PerfectDeflect, soundAt, 0.9, 1.1)
+		playSound(SOUNDS.PerfectDeflect, soundAt, 0.9, 1.1 * pitch)
+		if isLocal(defender) then
+			CombatHUD.flashPerfect()
+		end
 	elseif point then
 		burst(point, SPARK, 30, 28, 3.5)
 	end
@@ -486,14 +501,15 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 	end
 end
 
+-- Holding guard is the dullest tier: a short freeze, a low knock, a few grey sparks.
 local function guardEffects(attacker: Model, defender: Model)
 	Animator.play(defender, "GuardImpact")
-	hitstop(Config.Visual.Hitstop * 0.6, attacker, defender)
+	hitstop(Config.Visual.GuardHitstop, attacker, defender)
 	local point = contactPoint(attacker, defender)
 	if point then
-		burst(point, STEEL, 10, 14, 1.8)
+		burst(point, STEEL, 8, 10, 1.2)
 	end
-	playSound(SOUNDS.Guard, rootOf(defender), 0.55)
+	playSound(SOUNDS.Guard, rootOf(defender), 0.5, 0.82 + math.random() * 0.06)
 end
 
 -- Your own deflects are shown the instant the blow lands, predicted from your last block
@@ -596,6 +612,9 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Deflect = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
+		if isLocal(defender) then
+			LocalCombat.deflected() -- opens the riposte (also mirrored by prediction)
+		end
 		if not alreadyShown(attacker, defender) then
 			deflectEffects(attacker, defender, data.perfect)
 		end
@@ -611,14 +630,24 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	Hit = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
 		Animator.play(defender, "HitReact")
-		hitstop(Config.Visual.Hitstop, attacker, defender)
+		-- Hits escalate through a string: a longer freeze, a heavier sound and a camera
+		-- kick on enders and perilous attacks.
+		local kind = data.kind
+		local ender = kind == "Light3" or kind == "Perilous" or kind == "Sweep"
+		hitstop(Config.Visual.HitHitstop[kind] or Config.Visual.Hitstop, attacker, defender)
 		local root = rootOf(defender)
 		if root then
-			bloodSpray(root.Position + Vector3.new(0, 0.8, 0), blowDirection(attacker, defender), 26, 22)
+			bloodSpray(
+				root.Position + Vector3.new(0, 0.8, 0),
+				blowDirection(attacker, defender),
+				if ender then 40 else 26,
+				if ender then 28 else 22
+			)
 		end
-		playSound(if math.random() < 0.5 then SOUNDS.Hit else SOUNDS.HitAlt, root, 0.7)
+		playSound(if math.random() < 0.5 then SOUNDS.Hit else SOUNDS.HitAlt, root, 0.7, if ender then 0.86 else 1)
 		if isLocal(defender) or isLocal(attacker) then
-			shake(if isLocal(defender) then 0.5 else 0.25, 0.2, attacker, defender)
+			local strength = if isLocal(defender) then 0.5 else 0.25
+			shake(if ender then strength * 1.6 else strength, 0.2, attacker, defender)
 		end
 	end,
 
