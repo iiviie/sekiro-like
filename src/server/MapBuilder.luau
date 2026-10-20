@@ -140,7 +140,7 @@ local function wallSegment(parent: Instance, center: CFrame, length: number)
 			Size = Vector3.new(length + 1.2, 0.6, WALL_THICKNESS + 1.6),
 			CFrame = center
 				* CFrame.new(0, WALL_HEIGHT + 0.7, side * (WALL_THICKNESS + 1.6) * 0.42)
-				* CFrame.Angles(math.rad(-side * 26), 0, 0),
+				* CFrame.Angles(math.rad(side * 26), 0, 0), -- outer edge down
 			Material = Enum.Material.ClayRoofTiles,
 			Color = ROOF,
 		}, parent)
@@ -247,7 +247,9 @@ local function shrine(parent: Instance)
 				Name = "Pillar",
 				Size = Vector3.new(1.1, pillarHeight, 1.1),
 				CFrame = CFrame.new(x, deckTop + pillarHeight / 2, z),
-				Material = Enum.Material.Wood,
+				-- Lacquered, so not the grained timber override in MaterialService.
+				Material = Enum.Material.SmoothPlastic,
+				Reflectance = 0.04,
 				Color = VERMILION,
 			}, model)
 		end
@@ -302,7 +304,7 @@ local function shrine(parent: Instance)
 			Size = Vector3.new(width + 6, 0.9, run / math.cos(slope)),
 			CFrame = center
 				* CFrame.new(0, eave + 1 + math.tan(slope) * run / 2, side * run / 2)
-				* CFrame.Angles(-side * slope, 0, 0),
+				* CFrame.Angles(side * slope, 0, 0), -- outer edge down at the eave
 			Material = Enum.Material.ClayRoofTiles,
 			Color = ROOF,
 		}, model)
@@ -314,6 +316,27 @@ local function shrine(parent: Instance)
 		Material = Enum.Material.Slate,
 		Color = ROOF,
 	}, model)
+
+	-- Plaster gable ends close the triangle under each end of the roof. Each is two
+	-- wedges whose high edges meet under the ridge.
+	local gableRise = math.tan(slope) * run - 0.3
+	for _, x in { -width / 2 - 0.2, width / 2 + 0.2 } do
+		for _, side in { -1, 1 } do
+			local wedge = Instance.new("WedgePart")
+			wedge.Name = "Gable"
+			wedge.Anchored = true
+			wedge.CanTouch = false
+			wedge.CanQuery = false
+			wedge.Material = Enum.Material.Plaster
+			wedge.Color = PLASTER
+			wedge.Size = Vector3.new(0.5, gableRise, run)
+			-- A wedge's tall edge is at its +Z end, so face that end toward the ridge.
+			wedge.CFrame = center
+				* CFrame.new(x, eave + 1 + gableRise / 2, side * run / 2)
+				* CFrame.Angles(0, if side > 0 then math.pi else 0, 0)
+			wedge.Parent = model
+		end
+	end
 
 	-- Two paper lanterns under the eaves, the only lights on the building.
 	for _, x in { -10, 10 } do

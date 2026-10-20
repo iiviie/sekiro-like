@@ -87,6 +87,9 @@ practice or automated combat tests.
 - **Map.** [MapBuilder.luau](src/server/MapBuilder.luau) generates the terrain, castle walls, shrine hall, a pale-sand
   duelling circle (so dark-clad fighters read clearly), moss along the walls, crimson nobori banners, braziers and
   drifting maple leaves. World and HUD colours come from [Palette.luau](src/shared/Palette.luau).
+- **Materials.** `MaterialService` overrides re-skin every Plaster, Wood and ClayRoofTiles surface at once with
+  generated materials (aged lime plaster, cedar, kawara tiles), the closest thing Roblox has to one shared shader. They
+  live in the place file, not in git. Lacquered red pillars use SmoothPlastic so the timber override skips them.
 - **Lighting.** Golden hour under a storm-lit sunset sky: `LightingStyle = Realistic` with `PrioritizeLightingQuality`,
   the sun placed where the skybox glows, warm key light against cool violet ambient, and a dense Atmosphere that pushes
   the mountains back. All of it is in `default.project.json` (the deprecated `Technology` property is gone). Props in `Workspace.Props` came from the Creator Store and were
@@ -117,7 +120,8 @@ src/
 
 ## Before publishing
 
-- Save the place in Studio, then run `rojo syncback` so `Workspace.Props` is tracked in git.
+- Save the place in Studio, then run `rojo syncback` so `Workspace.Props` and the `MaterialService` variants are tracked
+  in git.
 - Game Settings: R15 only; Security → enable Studio access to API services to test DataStores.
 - Store page: icon and thumbnails (real gameplay captures work best), description, genre "Fighting".
 - Rename anything that borrows FromSoftware terms ("Shinobi Execution", "Mikiri") if you want to avoid trouble.
