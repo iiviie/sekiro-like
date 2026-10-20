@@ -14,7 +14,9 @@ export type AttackSpec = {
 	range: number, -- studs in front of the attacker
 	width: number,
 	lunge: number, -- forward speed (studs/s) added at the strike
-	unblockable: boolean, -- perilous attacks ignore deflect and guard; dodge them instead
+	unblockable: boolean, -- can't be deflected or guarded at all (sweeps): jump or dodge
+	perilous: boolean?, -- 危: hyper armour through its windup, and a red warning
+	noGuard: boolean?, -- holding guard does nothing; only a timed deflect works (thrusts)
 	thrust: boolean?, -- can be Mikiri-countered by dashing into it
 	low: boolean?, -- a sweep: jump over it
 }
@@ -62,7 +64,9 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		range = 9,
 		width = 4,
 		lunge = 40,
-		unblockable = true,
+		unblockable = false, -- Sekiro lets you deflect a thrust, but not guard it
+		perilous = true,
+		noGuard = true,
 		thrust = true,
 	},
 	Sweep = {
@@ -75,6 +79,7 @@ local attacks: { [AttackKind]: AttackSpec } = {
 		width = 10,
 		lunge = 12,
 		unblockable = true,
+		perilous = true,
 		low = true,
 	},
 }
@@ -125,6 +130,8 @@ local Config = {
 
 	Jump = {
 		EvadeWindow = 0.65, -- a sweep landing this soon after jumping misses
+		KickPosture = 25, -- clearing a sweep at close range lands on their head, as in Sekiro
+		KickRange = 7,
 	},
 
 	-- Spawn protection: you can't be hit and bots ignore you for this long.
@@ -162,20 +169,35 @@ local Config = {
 		GuardRegenMultiplier = 1.5, -- holding guard recovers posture faster, like Sekiro
 		BrokenDuration = 1.6, -- the deathblow window
 		ResetAfterBreak = 0.35, -- fraction of Max left when a break expires unpunished
+		-- As in Sekiro, posture recovers more slowly the more vitality you've lost: at zero
+		-- vitality it recovers at this fraction of the normal rate.
+		VitalityRegenFloor = 0.25,
 	},
 
+	-- Sekiro's model: a press arms a deflect for `Window` seconds before impact (12 frames);
+	-- each press soon after the last shrinks that window (down to MinWindow, 4 frames), and
+	-- the penalty clears after SpamMemory or on a successful deflect. Pressing early still
+	-- guards, so early is safe and mashing is not.
 	Deflect = {
-		Window = 0.22, -- press block within this long before impact to deflect
-		PerfectWindow = 0.08, -- about five frames at 60 fps
+		Window = 0.2,
+		MinWindow = 0.067,
+		PerfectWindow = 0.07, -- the last ~4 frames before impact
+		SpamPenaltyPerPress = 0.045,
+		SpamMemory = 0.5,
 		LateTolerance = 0.03, -- clock-sync slack for presses stamped just after impact
-		SpamLockout = 0.35, -- presses closer together than this don't re-arm the deflect
 		AttackerPosture = 18,
-		PerfectAttackerPosture = 32,
-		DefenderPosture = 6,
+		PerfectAttackerPosture = 30,
+		PerilousPostureMultiplier = 1.4, -- deflecting a perilous thrust hurts its owner more
+		DefenderPosture = 6, -- deflecting still costs a little posture; a perfect one doesn't
+		ChainWindow = 1.2, -- deflects in quick succession each deal more posture damage...
+		ChainBonus = 0.25,
+		ChainMax = 2, -- ...up to double
 		GuardPostureMultiplier = 1,
 		FacingDot = 0.15, -- defender must roughly face the attacker to deflect or guard
-		AttackerRecoil = 0.22, -- a deflected attacker is staggered this long...
-		PerfectAttackerRecoil = 0.42, -- ...and longer after a perfect deflect, opening a punish
+		-- A deflected attacker stays open long enough for one counter-slash (windup 0.40-0.42 s
+		-- plus resolve) to land, as in Sekiro; a perfect deflect leaves a bigger window.
+		AttackerRecoil = 0.5,
+		PerfectAttackerRecoil = 0.75,
 	},
 
 	Feint = {
@@ -239,7 +261,7 @@ local Config = {
 		AttackInterval = { 0.6, 1.6 },
 		ComboContinueChance = 0.6, -- chance to chain each next slash
 		PerilousChance = 0.15,
-		PunishChance = 0.7, -- chance to counter-attack right after a perfect deflect
+		PunishChance = 0.9, -- chance to counter-attack right after a perfect deflect
 		-- Defense rolls, cumulative: perfect, then normal deflect, then hold guard, else eat the hit.
 		PerfectChance = 0.15,
 		DeflectChance = 0.45,
@@ -248,6 +270,17 @@ local Config = {
 		MikiriChance = 0.4, -- of the dodges against a thrust, how many dash in for a Mikiri
 		HealBelow = 0.4, -- sip the gourd when vitality drops under this fraction
 		FeintChance = 0.2, -- when a defence roll lands mid-windup, how often to feint instead of committing
+		-- Reading spam: each swing from the same attacker within StreakMemory makes the bot
+		-- likelier to deflect the next one.
+		StreakMemory = 1.6,
+		ReadAfter = 2, -- from the second swing in a streak, the bot stops attacking and waits to deflect
+		StreakDeflectBonus = 0.22,
+		StreakPerfectBonus = 0.15,
+		MaxDeflectChance = 0.92,
+		MaxPerfectChance = 0.6,
+		-- Openings: attack a target stuck in recovery, recoil or a sip.
+		OpeningChance = 0.75,
+		OpeningCooldown = 0.6,
 	},
 }
 

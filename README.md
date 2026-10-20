@@ -43,22 +43,38 @@ Pressing block during your own windup **feints** it.
 
 ## Combat rules
 
-All numbers live in [src/shared/Config.luau](src/shared/Config.luau).
+All numbers live in [src/shared/Config.luau](src/shared/Config.luau). The rules follow Sekiro's.
 
 - **Timing.** Every attack has a windup, an impact time `hitAt` fixed on the server clock, and recovery. Your own swing
   starts animating the moment you click; the server confirms it and decides every outcome.
-- **Combo and buffering.** Slashes chain Light1 → Light2 → Light3. Inputs up to 0.3 s early are buffered, and block or
-  dodge can cancel recovery shortly after impact.
-- **Deflect.** Press block within 0.25 s before impact: the attacker recoils and takes posture damage. Within 0.1 s it is
-  a **perfect** deflect with a recoil long enough to punish. Holding block outside the window **guards**, which costs your
-  own posture. Mashing doesn't re-arm the deflect.
-- **Perilous attacks** (red glow and 危) can't be blocked. Dodge the **thrust**, or dash into it for a **Mikiri Counter**
-  (heavy posture damage, long stagger). Jump the **sweep**.
-- **Posture.** At 100 you are **broken** for 1.6 s and marked with a red dot; any hit then is a **deathblow** (忍殺).
-- **Healing gourd.** A 0.9 s sip that slows you; a hit mid-sip wastes it.
+- **Hit area.** A box in front of where the attacker stood and faced at the moment of the strike (turning afterwards
+  can't re-aim it): slashes 6 wide × 7 deep, finisher 5 × 7.5, thrust 4 × 9, sweep 10 × 8.5, all 6 tall.
+- **Combo and buffering.** Slashes chain Light1 → Light2 → Light3 (a delayed overhead). Inputs up to 0.3 s early are
+  buffered, and block or dodge can cancel recovery shortly after impact.
+- **Deflect.** A block press arms a deflect for 0.2 s before impact; the last 0.07 s is a **perfect** deflect. Each press
+  soon after the last shrinks that window (down to 0.067 s), and the penalty clears after 0.5 s or on a successful
+  deflect, so pressing early is safe (it guards) and mashing isn't. Deflecting knocks the attacker into a recoil long
+  enough for one counter-slash (0.5 s, 0.75 s after a perfect) and builds their posture; deflects in quick succession
+  build it harder each time.
+- **Guard.** Holding block stops vitality damage but takes the attack's posture damage, and does nothing against thrusts.
+- **Perilous attacks** (a red brush 危, a red outline and a chime) have hyper armour through their windup. The **thrust**
+  can't be guarded: deflect it, or dash into it for a **Mikiri Counter**. The **sweep** can't be blocked at all: jump it,
+  and land on the sweeper's head for posture damage if you're close.
+- **Posture.** Builds from deflected swings, guarded hits and taking hits. It recovers after 1.2 s without posture
+  damage, faster while guarding, and **slower the lower your vitality**. At 100 you're **broken** for 1.6 s with a red
+  deathblow marker; any hit then is a **deathblow** (忍殺).
+- **Stamina.** Slashes, perilous attacks and dodges cost stamina; deflecting is free.
+- **Healing gourd.** A 0.9 s sip that slows you; a hit mid-sip wastes it. There is no passive regeneration.
+- **Bots** read rhythm: from the second swing of a mashed string they stop attacking, hold their ground, deflect, and
+  counter. They exploit recovery and sips, and always go for the deathblow on a broken posture.
 - **Netcode.** Clients send intents stamped with `workspace:GetServerTimeNow()`. The server clamps stamps to 0.25 s in the
-  past and resolves 0.15 s after impact, so a deflect pressed on time on your screen counts. Players are protected until
-  their client is past the title screen.
+  past and resolves 0.12 s after impact, so a deflect pressed on time on your screen counts; your screen shows the
+  deflect the instant the blow lands. Fighters don't collide with each other, and pushes are force-capped.
+
+### Testing
+
+Set the workspace attribute `HoldIntermission` to `true` from the Studio command bar to stay in intermission for
+practice or automated combat tests.
 
 ## Presentation
 

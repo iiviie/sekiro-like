@@ -25,6 +25,8 @@ type Brain = {
 	target: Combatant?,
 	nextAttackAt: number,
 	comboLeft: number,
+	lastOpeningAt: number,
+	readUntil: number, -- while set, the bot has read a spammer: hold guard, deflect, punish
 	strafeSign: number,
 	strafeSwitchAt: number,
 }
@@ -135,6 +137,12 @@ local function think(brain: Brain)
 		return
 	end
 
+	-- Safety net against physics launches.
+	local velocity = root.AssemblyLinearVelocity
+	if velocity.Y > 70 then
+		root.AssemblyLinearVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+	end
+
 	local toTarget = flat(target.root.Position - root.Position)
 	local distance = toTarget.Magnitude
 	local forward = if distance > 0.01 then toTarget.Unit else flat(root.CFrame.LookVector).Unit
@@ -171,6 +179,28 @@ local function think(brain: Brain)
 		end
 	elseif postureRatio > Config.Bots.RetreatPosture or hurt then
 		move = -forward + right * brain.strafeSign * 0.6
+	elseif target.state == "Broken" and distance <= Config.Bots.AttackDistance + 2 then
+		-- A broken posture is the opening that matters most: go for the deathblow.
+		move = if distance > Config.Bots.AttackDistance then forward else Vector3.zero
+		if c.state == "Idle" and not c.blocking then
+			CombatService.perform(c, "Attack", t)
+		end
+	elseif t < brain.readUntil then
+		-- Read a spammer: stop swinging into their rhythm, hold ground and wait to deflect.
+		-- The punish comes from onDeflect.
+		move = right * brain.strafeSign * 0.25
+	elseif
+		(target.state == "Recovery" or target.state == "Staggered" or target.state == "Drinking")
+		and distance <= Config.Bots.AttackDistance + 1.5
+		and c.state == "Idle"
+		and not c.blocking
+		and t - brain.lastOpeningAt > Config.Bots.OpeningCooldown
+	then
+		-- The target is stuck in recovery, recoil or a sip: that's the opening.
+		brain.lastOpeningAt = t
+		if math.random() < Config.Bots.OpeningChance then
+			startCombo(brain, t)
+		end
 	elseif t >= brain.nextAttackAt then
 		if distance > Config.Bots.AttackDistance then
 			move = forward
@@ -246,45 +276,87 @@ local function tapBlock(bot: Combatant, pressAt: number, releaseAt: number)
 end
 
 -- Bots are omniscient about hitAt, so their skill comes purely from these dice rolls.
+-- Swings each bot has taken from each attacker in quick succession: mashing builds a
+-- streak, and a bot that has read the rhythm deflects almost everything.
+local streaks: { [Combatant]: { [Combatant]: { count: number, last: number } } } = {}
+
+local function streakOf(bot: Combatant, attacker: Combatant): number
+	local byAttacker = streaks[bot]
+	if not byAttacker then
+		byAttacker = {}
+		streaks[bot] = byAttacker
+	end
+	local t = now()
+	local streak = byAttacker[attacker]
+	if streak and t - streak.last <= Config.Bots.StreakMemory then
+		streak.count += 1
+		streak.last = t
+	else
+		streak = { count = 1, last = t }
+		byAttacker[attacker] = streak
+	end
+	return streak.count
+end
+
+-- Bots are omniscient about hitAt, so their skill comes purely from these dice rolls,
+-- weighted up the more predictable (spammy) the attacker is being.
 local function react(bot: Combatant, attacker: Combatant, spec: AttackSpec, hitAt: number)
 	local skill = Config.Bots
+	local streak = streakOf(bot, attacker)
+	local read = math.max(0, streak - 1)
+	local brain = brains[bot]
+	if brain and streak >= skill.ReadAfter then
+		brain.readUntil = now() + skill.StreakMemory
+		brain.comboLeft = 0
+	end
+	local perfectChance = math.min(skill.MaxPerfectChance, skill.PerfectChance + skill.StreakPerfectBonus * read)
+	local deflectChance = math.min(skill.MaxDeflectChance, skill.DeflectChance + skill.StreakDeflectBonus * read)
 	local roll = math.random()
+	local perfect = Config.Deflect.PerfectWindow
 
-	if spec.unblockable then
-		if roll >= skill.DodgePerilousChance then
-			return -- reads it wrong and eats the perilous attack
-		end
-		if spec.low then
+	local function deflectAt(lead: number, hold: number)
+		tapBlock(bot, hitAt - lead, hitAt + hold)
+	end
+
+	if spec.low then
+		-- Sweeps can only be jumped (or dodged).
+		if roll < skill.DodgePerilousChance then
 			at(hitAt - randomRange({ 0.15, 0.4 }), function()
 				if alive(bot) then
 					jumpOver(bot)
 				end
 			end)
-			return
 		end
-		local mikiri = spec.thrust and math.random() < skill.MikiriChance
-		local lead = randomRange({ 0.08, Config.Dodge.IFrames - 0.05 })
-		at(hitAt - lead, function()
-			if not alive(bot) then
-				return
-			end
-			if mikiri then
-				dashInto(bot, attacker)
-			else
-				dodgeAway(bot)
-			end
-		end)
 		return
 	end
 
-	local perfect = Config.Deflect.PerfectWindow
-	if roll < skill.PerfectChance then
-		tapBlock(bot, hitAt - randomRange({ 0.02, perfect - 0.02 }), hitAt + 0.15)
-	elseif roll < skill.DeflectChance then
-		tapBlock(bot, hitAt - randomRange({ perfect + 0.02, Config.Deflect.Window - 0.03 }), hitAt + 0.15)
-	elseif roll < skill.DeflectChance + skill.GuardChance then
+	if spec.thrust then
+		-- A thrust: Mikiri it, deflect it, or sidestep it. Guarding does nothing.
+		if roll < skill.DodgePerilousChance * skill.MikiriChance then
+			at(hitAt - randomRange({ 0.08, Config.Dodge.IFrames - 0.05 }), function()
+				if alive(bot) then
+					dashInto(bot, attacker)
+				end
+			end)
+		elseif roll < skill.DodgePerilousChance then
+			deflectAt(randomRange({ perfect + 0.01, Config.Deflect.Window - 0.03 }), 0.15)
+		elseif roll < skill.DodgePerilousChance + 0.2 then
+			at(hitAt - randomRange({ 0.08, Config.Dodge.IFrames - 0.05 }), function()
+				if alive(bot) then
+					dodgeAway(bot)
+				end
+			end)
+		end
+		return
+	end
+
+	if roll < perfectChance then
+		deflectAt(randomRange({ 0.015, perfect - 0.015 }), 0.15)
+	elseif roll < deflectChance then
+		deflectAt(randomRange({ perfect + 0.01, Config.Deflect.Window - 0.03 }), 0.15)
+	elseif roll < deflectChance + skill.GuardChance then
 		-- Raise guard well before the deflect window so it only guards.
-		tapBlock(bot, hitAt - 0.5, hitAt + 0.3)
+		deflectAt(0.5, 0.3)
 	end
 end
 
@@ -305,7 +377,8 @@ local function onDeflect(_attacker: Combatant, defender: Combatant, perfect: boo
 	if not brain then
 		return
 	end
-	local chance = if perfect then Config.Bots.PunishChance else Config.Bots.PunishChance * 0.4
+	-- A deflected attacker is open; Sekiro enemies make you pay for it.
+	local chance = if perfect then Config.Bots.PunishChance else Config.Bots.PunishChance * 0.65
 	if math.random() < chance then
 		task.delay(0.05, function()
 			if alive(defender) then
@@ -355,6 +428,8 @@ local function spawnBot(index: number)
 		target = nil,
 		nextAttackAt = now() + 1,
 		comboLeft = 0,
+		lastOpeningAt = 0,
+		readUntil = 0,
 		strafeSign = 1,
 		strafeSwitchAt = 0,
 	}

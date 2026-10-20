@@ -8,7 +8,6 @@
 -- front of the camera (a soft lock), instead of snapping.
 
 local ContextActionService = game:GetService("ContextActionService")
-local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -17,6 +16,7 @@ local CombatVisuals = require(script.Parent.CombatVisuals)
 local Config = require(ReplicatedStorage.Shared.Config)
 local LocalCombat = require(script.Parent.LocalCombat)
 local LockOn = require(script.Parent.LockOn)
+local Motion = require(script.Parent.Motion)
 local Types = require(ReplicatedStorage.Shared.Types)
 
 local combatAction = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatAction") :: RemoteEvent
@@ -144,15 +144,20 @@ local function dash()
 		return
 	end
 	-- Mirror the server's checks so the dash movement and the i-frames line up.
+	-- Recovery can only be dodge-cancelled once the swing has resolved, exactly as on the
+	-- server; otherwise the dash would move you without any i-frames.
 	local state = character:GetAttribute("CombatState")
-	if (state ~= "Idle" and state ~= "Recovery") or os.clock() < nextDashAt or not canAfford(character, "Dodge") then
-		return
-	end
-	local attachment = root:FindFirstChild("RootAttachment") :: Attachment?
-	if not attachment then
+	local cancelableAt = CombatVisuals.lastOwnHitAt + Config.Net.ResolveGrace + Config.Combo.RecoveryCancel
+	local free = state == "Idle" or (state == "Recovery" and workspace:GetServerTimeNow() >= cancelableAt)
+	if not free or os.clock() < nextDashAt or not canAfford(character, "Dodge") then
 		return
 	end
 	nextDashAt = os.clock() + Config.Dodge.Cooldown
+	-- The server drops guard when you dodge; forget the held key so the next press re-arms.
+	if blockHeld then
+		blockHeld = false
+		LocalCombat.releaseBlock()
+	end
 
 	local direction = humanoid.MoveDirection
 	-- Dashing toward the way you face is what turns a dodge into a Mikiri Counter.
@@ -162,16 +167,7 @@ local function dash()
 	end
 	direction = Vector3.new(direction.X, 0, direction.Z).Unit
 
-	local velocity = Instance.new("LinearVelocity")
-	velocity.Attachment0 = attachment
-	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
-	velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
-	velocity.PrimaryTangentAxis = Vector3.xAxis
-	velocity.SecondaryTangentAxis = Vector3.zAxis
-	velocity.PlaneVelocity = Vector2.new(direction.X, direction.Z) * Config.Dodge.Speed
-	velocity.MaxForce = math.huge
-	velocity.Parent = root
-	Debris:AddItem(velocity, Config.Dodge.DashDuration)
+	Motion.push(direction * Config.Dodge.Speed, Config.Dodge.DashDuration)
 
 	CombatVisuals.dash(character)
 	send("Dodge", forward)
@@ -218,6 +214,11 @@ function CombatInput.start()
 	end, nil, Enum.KeyCode.C, Enum.KeyCode.ButtonX)
 
 	bind("Heal", "Heal", UDim2.new(1, -310, 1, -70), function()
+		-- Drinking drops guard on the server too.
+		if blockHeld then
+			blockHeld = false
+			LocalCombat.releaseBlock()
+		end
 		send("Heal")
 	end, nil, Enum.KeyCode.G, Enum.KeyCode.DPadUp)
 

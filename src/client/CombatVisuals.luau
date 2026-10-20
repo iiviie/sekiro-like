@@ -15,6 +15,7 @@ local TweenService = game:GetService("TweenService")
 local Animator = require(script.Parent.Animator)
 local CombatHUD = require(script.Parent.CombatHUD)
 local LocalCombat = require(script.Parent.LocalCombat)
+local Motion = require(script.Parent.Motion)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Types = require(ReplicatedStorage.Shared.Types)
@@ -28,7 +29,9 @@ local SPARK = Color3.fromRGB(255, 185, 90)
 local BLOOD = Color3.fromRGB(170, 10, 20)
 local STEEL = Color3.fromRGB(200, 205, 215)
 
-local CombatVisuals = {}
+local CombatVisuals = {
+	lastOwnHitAt = -math.huge, -- server time your latest swing lands (for dodge-cancel timing)
+}
 
 -- Your own swings start animating the moment you click (see predictAttack); the
 -- server's Windup for that swing then only needs to add sounds and telegraphs.
@@ -223,23 +226,29 @@ local function shake(intensity: number, duration: number)
 end
 
 -- Pushes the local character forward during its own strike (players own their physics).
+-- Fighters don't collide, so the lunge stops short of anyone already within reach
+-- instead of carrying you through them.
+local LUNGE_STOP_DISTANCE = 3.5
+
 local function lunge(speed: number)
-	local root = rootOf(player.Character)
-	local attachment = root and root:FindFirstChild("RootAttachment")
-	if not root or not attachment or not attachment:IsA("Attachment") or speed <= 0 then
+	local character = player.Character
+	local root = rootOf(character)
+	if not root or speed <= 0 then
 		return
 	end
 	local look = root.CFrame.LookVector
-	local velocity = Instance.new("LinearVelocity")
-	velocity.Attachment0 = attachment
-	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
-	velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
-	velocity.PrimaryTangentAxis = Vector3.xAxis
-	velocity.SecondaryTangentAxis = Vector3.zAxis
-	velocity.PlaneVelocity = Vector2.new(look.X, look.Z).Unit * speed
-	velocity.MaxForce = 4e4
-	velocity.Parent = root
-	Debris:AddItem(velocity, 0.12)
+	local forward = Vector3.new(look.X, 0, look.Z).Unit
+	for _, instance in CollectionService:GetTagged(Types.Tag) do
+		local other = if instance ~= character and instance:IsA("Model") then rootOf(instance) else nil
+		if other then
+			local offset = other.Position - root.Position
+			local flat = Vector3.new(offset.X, 0, offset.Z)
+			if flat.Magnitude < LUNGE_STOP_DISTANCE + 2 and flat.Unit:Dot(forward) > 0.5 then
+				return -- someone is right in front of us already
+			end
+		end
+	end
+	Motion.push(forward * speed, 0.12)
 end
 
 local function hitstop(duration: number, ...: Model?)
@@ -394,8 +403,9 @@ local function predictIncoming(attacker: Model, kind: Config.AttackKind, hitAt: 
 		local defence = LocalCombat.predictDefence(hitAt)
 		if defence == "Perfect" or defence == "Deflect" then
 			predictedDefences[attacker] = os.clock()
+			LocalCombat.deflected()
 			deflectEffects(attacker, character :: Model, defence == "Perfect")
-		elseif defence == "Guard" then
+		elseif defence == "Guard" and not spec.noGuard then
 			predictedDefences[attacker] = os.clock()
 			guardEffects(attacker, character :: Model)
 		end
@@ -427,6 +437,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			and os.clock() - guess.at < PREDICTION_MATCH_WINDOW
 		if isLocal(model) then
 			predicted = nil
+			CombatVisuals.lastOwnHitAt = data.hitAt
 		end
 		if not alreadyPlaying then
 			Animator.play(model, kind, remaining)
@@ -436,7 +447,8 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		local heavy = kind == "Light3" or perilous
 		if perilous then
 			telegraphPerilous(model, remaining)
-		elseif not isLocal(model) then
+		end
+		if not isLocal(model) then
 			predictIncoming(model, kind, data.hitAt)
 		end
 		task.delay(math.max(remaining - 0.05, 0), function()
@@ -526,6 +538,15 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	end,
 
 	Jumped = function(data)
+		if data.kick then
+			-- Landed on the sweeper's head: a heavy posture hit.
+			local root = rootOf(data.attacker)
+			if root then
+				burst(root.Position + Vector3.new(0, 2.6, 0), GOLD, 26, 18, 4)
+			end
+			playSound(SOUNDS.Guard, root, 0.8, 0.8)
+			hitstop(Config.Visual.Hitstop, data.attacker, data.defender)
+		end
 		-- A clean evade: a soft puff of dust where the blow passed, no text.
 		local root = rootOf(data.defender)
 		if root then

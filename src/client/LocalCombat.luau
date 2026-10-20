@@ -11,17 +11,28 @@ export type Defence = "Perfect" | "Deflect" | "Guard"
 
 local LocalCombat = {
 	deflectStamp = -math.huge, -- server-clock time of the last press that armed a deflect
+	deflectWindow = Config.Deflect.Window,
 	lastPressAt = -math.huge,
+	spamStacks = 0,
 	blocking = false,
 }
 
 function LocalCombat.pressBlock(stamp: number)
-	-- Same spam lockout as the server: mashing doesn't re-arm the deflect.
-	if stamp - LocalCombat.lastPressAt >= Config.Deflect.SpamLockout then
-		LocalCombat.deflectStamp = stamp
-	end
+	-- Same mashing penalty as the server: each quick re-press shrinks the window.
+	local rules = Config.Deflect
+	LocalCombat.spamStacks = if stamp - LocalCombat.lastPressAt <= rules.SpamMemory
+		then LocalCombat.spamStacks + 1
+		else 0
 	LocalCombat.lastPressAt = stamp
+	LocalCombat.deflectStamp = stamp
+	LocalCombat.deflectWindow =
+		math.max(rules.MinWindow, rules.Window - LocalCombat.spamStacks * rules.SpamPenaltyPerPress)
 	LocalCombat.blocking = true
+end
+
+-- A successful deflect clears the mashing penalty (mirrors the server).
+function LocalCombat.deflected()
+	LocalCombat.spamStacks = 0
 end
 
 function LocalCombat.releaseBlock()
@@ -31,12 +42,9 @@ end
 -- How a blockable swing landing at `hitAt` would be met, or nil for a clean hit.
 function LocalCombat.predictDefence(hitAt: number): Defence?
 	local since = hitAt - LocalCombat.deflectStamp
-	if since >= -Config.Deflect.LateTolerance then
-		if since <= Config.Deflect.PerfectWindow then
-			return "Perfect"
-		elseif since <= Config.Deflect.Window then
-			return "Deflect"
-		end
+	local window = LocalCombat.deflectWindow
+	if since >= -Config.Deflect.LateTolerance and since <= window then
+		return if since <= math.min(Config.Deflect.PerfectWindow, window) then "Perfect" else "Deflect"
 	end
 	return if LocalCombat.blocking then "Guard" else nil
 end

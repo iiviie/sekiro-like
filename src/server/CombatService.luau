@@ -17,6 +17,7 @@
 --   eaten. A deflected attacker recoils; after a perfect deflect, long enough to punish.
 
 local CollectionService = game:GetService("CollectionService")
+local PhysicsService = game:GetService("PhysicsService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -60,7 +61,12 @@ export type Combatant = {
 
 	blocking: boolean,
 	deflectStamp: number, -- clamped stamp of the last press that armed a deflect
+	deflectWindow: number, -- how long that press stays armed (shrinks when mashing)
 	lastBlockPressAt: number,
+	spamStacks: number,
+	deflectChain: number, -- deflects in quick succession, for the chain bonus
+	lastDeflectAt: number,
+	windupKind: AttackKind?, -- what this fighter is winding up, for hyper armour
 
 	dodgeStamp: number,
 	dodgeForward: boolean, -- dashed toward the attacker (for Mikiri)
@@ -86,6 +92,7 @@ local deflectListeners: { DeflectListener } = {}
 local diedListeners: { DiedListener } = {}
 
 local KILL_CREDIT_WINDOW = 12 -- seconds a hit still counts toward a later death
+local FIGHTERS = "Fighters" -- collision group shared by every combatant
 local actionBudgets: { [Player]: { windowStart: number, count: number } } = {}
 
 local validActions: { [string]: boolean } = {}
@@ -185,6 +192,11 @@ local function stagger(c: Combatant, duration: number)
 	if c.state == "Broken" or c.state == "Dead" then
 		return
 	end
+	-- Perilous attacks have hyper armour: hits hurt, but don't stop the swing.
+	local kind = c.windupKind
+	if c.state == "Windup" and kind and Config.Attacks[kind].perilous then
+		return
+	end
 	if c.state == "Windup" then
 		broadcast("Interrupted", { model = c.model })
 	end
@@ -203,12 +215,14 @@ local function isFacing(defender: Combatant, attacker: Combatant): boolean
 	return defender.root.CFrame.LookVector:Dot(flat.Unit) >= Config.Deflect.FacingDot
 end
 
-local function findTargets(attacker: Combatant, spec: AttackSpec): { Combatant }
+-- The hit area is a box in front of where the attacker stood and faced at the moment of
+-- the strike (`strike`), so turning afterwards can't re-aim a committed swing.
+local function findTargets(attacker: Combatant, spec: AttackSpec, strike: CFrame): { Combatant }
 	local params = OverlapParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { attacker.model }
 
-	local box = attacker.root.CFrame * CFrame.new(0, 0, -spec.range / 2)
+	local box = strike * CFrame.new(0, 0, -spec.range / 2)
 	local parts = workspace:GetPartBoundsInBox(box, Vector3.new(spec.width, 6, spec.range), params)
 
 	local seen: { [Combatant]: boolean } = {}
@@ -239,7 +253,12 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 	end
 
 	if spec.low and hitAt >= target.jumpStamp and hitAt <= target.jumpStamp + Config.Jump.EvadeWindow then
-		broadcast("Jumped", { attacker = attacker.model, defender = target.model })
+		-- Clearing a sweep up close means landing on the attacker's head, as in Sekiro.
+		local close = (attacker.root.Position - target.root.Position).Magnitude <= Config.Jump.KickRange
+		if close then
+			addPosture(attacker, Config.Jump.KickPosture)
+		end
+		broadcast("Jumped", { attacker = attacker.model, defender = target.model, kick = close })
 		return
 	end
 
@@ -257,18 +276,29 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		return
 	end
 
-	local canDefend = not spec.unblockable and isFacing(target, attacker)
+	local deflectRules = Config.Deflect
+	local canDeflect = not spec.unblockable and isFacing(target, attacker)
+	local canGuard = canDeflect and not spec.noGuard
 	local sinceDeflect = hitAt - target.deflectStamp
-	local deflectArmed = sinceDeflect >= -Config.Deflect.LateTolerance
+	local deflectArmed = sinceDeflect >= -deflectRules.LateTolerance and sinceDeflect <= target.deflectWindow
 
-	if canDefend and deflectArmed and sinceDeflect <= Config.Deflect.Window then
-		local perfect = sinceDeflect <= Config.Deflect.PerfectWindow
-		local recoil = if perfect then Config.Deflect.PerfectAttackerRecoil else Config.Deflect.AttackerRecoil
+	if canDeflect and deflectArmed then
+		local perfect = sinceDeflect <= math.min(deflectRules.PerfectWindow, target.deflectWindow)
+		local recoil = if perfect then deflectRules.PerfectAttackerRecoil else deflectRules.AttackerRecoil
+		-- Deflects in quick succession hit the attacker's posture harder each time.
+		local t = now()
+		target.deflectChain = if t - target.lastDeflectAt < deflectRules.ChainWindow then target.deflectChain + 1 else 0
+		target.lastDeflectAt = t
+		target.spamStacks = 0 -- a successful deflect clears the mashing penalty
+		local multiplier = math.min(deflectRules.ChainMax, 1 + deflectRules.ChainBonus * target.deflectChain)
+		if spec.perilous then
+			multiplier *= deflectRules.PerilousPostureMultiplier
+		end
 		if perfect then
-			addPosture(attacker, Config.Deflect.PerfectAttackerPosture)
+			addPosture(attacker, deflectRules.PerfectAttackerPosture * multiplier)
 		else
-			addPosture(attacker, Config.Deflect.AttackerPosture)
-			addPosture(target, Config.Deflect.DefenderPosture)
+			addPosture(attacker, deflectRules.AttackerPosture * multiplier)
+			addPosture(target, deflectRules.DefenderPosture)
 		end
 		if attacker.state ~= "Broken" then
 			stagger(attacker, recoil)
@@ -277,7 +307,7 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		for _, listener in deflectListeners do
 			task.spawn(listener, attacker, target, perfect)
 		end
-	elseif canDefend and target.blocking then
+	elseif canGuard and target.blocking then
 		addPosture(target, spec.postureDamage * Config.Deflect.GuardPostureMultiplier)
 		broadcast("Guard", { attacker = attacker.model, defender = target.model })
 	else
@@ -290,8 +320,8 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 	end
 end
 
-local function resolveAttack(attacker: Combatant, spec: AttackSpec, hitAt: number)
-	local targets = findTargets(attacker, spec)
+local function resolveAttack(attacker: Combatant, spec: AttackSpec, hitAt: number, strike: CFrame)
+	local targets = findTargets(attacker, spec, strike)
 	if #targets == 0 then
 		broadcast("Whiff", { attacker = attacker.model })
 		return
@@ -310,6 +340,19 @@ local function nextComboKind(c: Combatant, t: number): AttackKind
 	return sequence[c.comboIndex]
 end
 
+local function enemyWithinReach(c: Combatant, strike: CFrame): boolean
+	for _, other in combatants do
+		if other ~= c and other.state ~= "Dead" then
+			local offset = other.root.Position - strike.Position
+			local flat = Vector3.new(offset.X, 0, offset.Z)
+			if flat.Magnitude < 5.5 and flat.Unit:Dot(strike.LookVector) > 0.5 then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 local function startAttack(c: Combatant, kind: AttackKind): boolean
 	local spec = Config.Attacks[kind]
 	local t = now()
@@ -326,6 +369,7 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 	local token = c.attackToken
 	local hitAt = t + spec.windup
 	c.windupHitAt = hitAt
+	c.windupKind = kind
 	c.cancelableAt = hitAt + Config.Net.ResolveGrace + Config.Combo.RecoveryCancel
 	c.nextAttackAt[kind] = t + spec.cooldown
 	c.comboUntil = hitAt + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
@@ -341,15 +385,18 @@ local function startAttack(c: Combatant, kind: AttackKind): boolean
 			return -- interrupted, feinted or broken during the windup
 		end
 		-- The swing has landed visually; from here it is committed and can't be interrupted.
+		c.windupKind = nil
+		local look = c.root.CFrame.LookVector
+		local strike = CFrame.lookAt(c.root.Position, c.root.Position + Vector3.new(look.X, 0, look.Z))
 		setState(c, "Recovery", Config.Net.ResolveGrace + spec.recovery)
-		if not c.player then
-			-- Bots are simulated here; players lunge on their own client.
-			local look = c.root.CFrame.LookVector
-			c.root.AssemblyLinearVelocity += Vector3.new(look.X, 0, look.Z).Unit * spec.lunge
+		if not c.player and not enemyWithinReach(c, strike) then
+			-- Bots are simulated here; players lunge on their own client. Fighters don't
+			-- collide, so don't lunge through someone already within reach.
+			c.root.AssemblyLinearVelocity += strike.LookVector * spec.lunge
 		end
 		task.delay(Config.Net.ResolveGrace, function()
 			if isAlive(c) then
-				resolveAttack(c, spec, hitAt)
+				resolveAttack(c, spec, hitAt, strike)
 			end
 		end)
 	end)
@@ -409,11 +456,13 @@ local function pressBlock(c: Combatant, stamp: number): boolean
 	c.buffered = nil
 	c.protectedUntil = 0
 	setBlocking(c, true)
-	-- Mashing keeps resetting the lockout, so spam never re-arms the deflect.
-	if t - c.lastBlockPressAt >= Config.Deflect.SpamLockout then
-		c.deflectStamp = stamp
-	end
+	-- Every press arms a deflect, but pressing again soon after the last one shrinks the
+	-- window (Sekiro's mashing penalty), down to a floor. It clears with time or a deflect.
+	local rules = Config.Deflect
+	c.spamStacks = if t - c.lastBlockPressAt <= rules.SpamMemory then c.spamStacks + 1 else 0
 	c.lastBlockPressAt = t
+	c.deflectStamp = stamp
+	c.deflectWindow = math.max(rules.MinWindow, rules.Window - c.spamStacks * rules.SpamPenaltyPerPress)
 	return true
 end
 
@@ -588,7 +637,12 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		lastStaminaSpendAt = 0,
 		blocking = false,
 		deflectStamp = -math.huge,
+		deflectWindow = Config.Deflect.Window,
 		lastBlockPressAt = -math.huge,
+		spamStacks = 0,
+		deflectChain = 0,
+		lastDeflectAt = -math.huge,
+		windupKind = nil,
 		dodgeStamp = -math.huge,
 		dodgeForward = false,
 		nextDodgeAt = 0,
@@ -600,6 +654,26 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		executed = false,
 	}
 	combatants[model] = c
+
+	-- Fighters pass through each other: no body-blocking, and no collisions for the
+	-- physics solver to "resolve" by launching someone into the sky.
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.CollisionGroup = FIGHTERS
+		end
+	end
+	model.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("BasePart") then
+			descendant.CollisionGroup = FIGHTERS
+		end
+	end)
+
+	-- No passive regeneration: Roblox's default "Health" script would quietly undercut the
+	-- healing gourd. Vitality comes back only by drinking.
+	local regen = model:FindFirstChild("Health")
+	if regen and regen:IsA("Script") then
+		regen:Destroy()
+	end
 
 	-- Keep the body together on death so the client can play the collapse.
 	humanoid.BreakJointsOnDeath = false
@@ -693,8 +767,11 @@ local function step(dt: number)
 		end
 
 		if c.posture > 0 and c.state ~= "Broken" and t - c.lastPostureDamageAt >= Config.Posture.RegenDelay then
-			local multiplier = if c.blocking then Config.Posture.GuardRegenMultiplier else 1
-			c.posture = math.max(0, c.posture - Config.Posture.RegenPerSecond * multiplier * dt)
+			local rules = Config.Posture
+			local vitality = math.clamp(c.humanoid.Health / math.max(c.humanoid.MaxHealth, 1), 0, 1)
+			local multiplier = (if c.blocking then rules.GuardRegenMultiplier else 1)
+				* (rules.VitalityRegenFloor + (1 - rules.VitalityRegenFloor) * vitality)
+			c.posture = math.max(0, c.posture - rules.RegenPerSecond * multiplier * dt)
 		end
 		publishPosture(c)
 
@@ -708,6 +785,11 @@ local function step(dt: number)
 end
 
 function CombatService.start()
+	pcall(function()
+		PhysicsService:RegisterCollisionGroup(FIGHTERS)
+	end)
+	PhysicsService:CollisionGroupSetCollidable(FIGHTERS, FIGHTERS, false)
+
 	combatAction.OnServerEvent:Connect(function(player: Player, action: unknown, stamp: unknown, flag: unknown)
 		if typeof(action) ~= "string" or not validActions[action :: string] then
 			return

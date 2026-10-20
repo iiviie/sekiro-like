@@ -119,6 +119,12 @@ local function intermission()
 		end
 	end
 	waitUntil(Round.endsAt())
+	-- Testing aid: set workspace attribute HoldIntermission = true (Studio command bar)
+	-- to stay in intermission for practice or automated combat tests.
+	while workspace:GetAttribute("HoldIntermission") do
+		state:SetAttribute("EndsAt", now() + 5)
+		task.wait(0.5)
+	end
 end
 
 local function match()
