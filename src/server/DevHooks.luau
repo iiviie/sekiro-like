@@ -23,6 +23,7 @@ function DevHooks.start()
 	-- perform(name, action, stampOffset?, flag?): CombatService.perform at now + offset.
 	-- get(name): a snapshot of that fighter's combat state.
 	-- grant(field, amount): adds to the first player's data, e.g. grant("Coins", 500).
+	-- posture(name, value): sets a dummy's posture.
 	-- clear(): removes every dummy.
 	hook.OnInvoke = function(command: string, ...: any): any
 		local args = { ... }
@@ -68,6 +69,8 @@ function DevHooks.start()
 				windupIn = c.windupHitAt - workspace:GetServerTimeNow(),
 				comboIndex = c.comboIndex,
 				trickUsed = c.stringTrickUsed,
+				resolve = c.resolve,
+				brokenBy = c.brokenBy and c.brokenBy.model.Name,
 			}
 		elseif command == "grant" then
 			-- grant(field, amount): adds to the first player's saved data (coins, gems...).
@@ -76,6 +79,14 @@ function DevHooks.start()
 				StatsService.add(target, args[1] :: string, args[2] :: number)
 			end
 			return target and target:GetAttribute(args[1] :: string)
+		elseif command == "posture" then
+			-- posture(name, value): set a dummy's posture directly.
+			local model = dummies[args[1] :: string]
+			local c = model and CombatService.get(model)
+			if c then
+				c.posture = args[2] :: number
+			end
+			return c ~= nil
 		elseif command == "clear" then
 			for _, model in dummies do
 				model:Destroy()

@@ -82,6 +82,9 @@ All numbers live in [src/shared/Config.luau](src/shared/Config.luau). The rules 
   8 s) and cost ~2.5× a slash in stamina. The **thrust** can't be guarded: deflect it (its owner takes +40 posture and a
   0.8 s recoil), or dash into it for a **Mikiri Counter**. The **sweep** can't be blocked at all: jump it (its owner is
   stuck in recovery for 0.7 s), and land on the sweeper's head for posture damage if you're close.
+- **Free-for-all rules.** When two or more different fighters have struck you within 3 s you gain **Resolve**: posture
+  recovers twice as fast and hit stun is halved. It never applies in a 1v1. For 1.5 s after a posture break, only the
+  fighter who broke it can deathblow; anyone else's hit just chips vitality.
 - **Posture.** Builds from deflected swings, guarded hits and taking hits. It recovers after 1.2 s without posture
   damage, faster while guarding, and **slower the lower your vitality**. At 100 you're **broken** for 1.6 s with a red
   deathblow marker; any hit then is a **deathblow** (忍殺).
@@ -90,7 +93,7 @@ All numbers live in [src/shared/Config.luau](src/shared/Config.luau). The rules 
 - **Bots** read rhythm: from the second swing of a mashed string they stop attacking, hold their ground, deflect, and
   counter. They exploit recovery and sips, and always go for the deathblow on a broken posture.
 - **Netcode.** Clients send intents stamped with `workspace:GetServerTimeNow()`. The server clamps stamps to 0.25 s in the
-  past and resolves 0.12 s after impact, so a deflect pressed on time on your screen counts; your screen shows the
+  past and resolves shortly after impact (half the slowest nearby defender's ping plus 50 ms, between 0.06 and 0.2 s), so a deflect pressed on time on your screen counts; your screen shows the
   deflect the instant the blow lands. Fighters don't collide with each other, and pushes are force-capped.
 
 ### Testing
@@ -144,6 +147,14 @@ order: naginata (reach), then dual blades; kusarigama last.
   rather than jittering at random.
 - **Sound.** Licensed ProSoundEffects and APM library audio. Every asset id is in [Assets.luau](src/shared/Assets.luau).
 
+## Balance telemetry
+
+[Telemetry.luau](src/server/Telemetry.luau) counts every move started and how it resolved (hit, guarded, deflected,
+perfect, Mikiri, jumped, dodged, whiffed, deathblow), the move behind each kill and how many attackers each victim had,
+humans and bots separately. After each match the server prints running totals to the output and raises alarms once the
+sample is large enough: perilous above 20% of human attacks, perilous countered under 40% of the time, or one move
+landing over 35% of kills. Tune numbers in `Config` and `Weapons`, then watch the alarms.
+
 ## Performance
 
 - The scene is about 450 parts, 6 lights and one terrain mesh. Decorative props don't collide, query or touch, and small
@@ -158,7 +169,7 @@ order: naginata (reach), then dual blades; kusarigama last.
 src/
   shared/   Config, Weapons, Ranks, Types, Assets, Palette, Poses, Clips, Round
   server/   init, CombatService, BotService, RoundService, StatsService, LobbyService, LobbyBuilder,
-            LeaderboardService, MapBuilder, Outfit, Locomotion, SwordRig, DevHooks
+            LeaderboardService, Telemetry, MapBuilder, Outfit, Locomotion, SwordRig, DevHooks
   client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, LobbyHUD, Panels, UI,
             TrainerReadout, TitleScreen, Ambience
 ```

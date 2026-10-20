@@ -89,6 +89,10 @@ export type Combatant = {
 	protectedUntil: number,
 
 	lastAttacker: Combatant?, -- for kill credit
+	brokenBy: Combatant?, -- who broke this fighter's posture (for the deathblow right)
+	brokenAt: number,
+	recentAttackers: { [Combatant]: number }, -- distinct strikers and when, for Resolve
+	resolve: boolean, -- outnumbered right now
 	lastAttackedAt: number,
 	executed: boolean, -- killed by a deathblow
 }
@@ -188,13 +192,15 @@ local function cancelAttack(c: Combatant)
 	c.attackToken += 1
 end
 
-local function addPosture(c: Combatant, amount: number)
+local function addPosture(c: Combatant, amount: number, by: Combatant?)
 	if c.state == "Broken" or c.state == "Dead" then
 		return
 	end
 	c.posture = math.min(Config.Posture.Max, c.posture + amount)
 	c.lastPostureDamageAt = now()
 	if c.posture >= Config.Posture.Max then
+		c.brokenBy = by
+		c.brokenAt = now()
 		cancelAttack(c)
 		setBlocking(c, false)
 		c.buffered = nil
@@ -256,6 +262,38 @@ local function findTargets(attacker: Combatant, spec: AttackSpec, strike: CFrame
 	return targets
 end
 
+-- Balance telemetry: every resolved strike reports (move, outcome). See Telemetry.
+type OutcomeListener = (kind: string, outcome: string, attacker: Combatant, target: Combatant?) -> ()
+local outcomeListeners: { OutcomeListener } = {}
+local function report(spec: AttackSpec, outcome: string, attacker: Combatant, target: Combatant?)
+	local kind = spec.kind or "?"
+	for _, listener in outcomeListeners do
+		task.spawn(listener, kind, outcome, attacker, target)
+	end
+end
+function CombatService.onOutcome(listener: OutcomeListener)
+	table.insert(outcomeListeners, listener)
+end
+
+-- How long to wait past impact before resolving: long enough for the slowest nearby
+-- defender's block press to arrive, and no longer.
+local function resolveGrace(attacker: Combatant, spec: AttackSpec, strike: CFrame): number
+	local net = Config.Net
+	local worstPing = 0
+	for _, other in combatants do
+		local player = other.player
+		if other ~= attacker and player and (other.root.Position - strike.Position).Magnitude <= spec.range + 8 then
+			local ok, ping = pcall(function()
+				return player:GetNetworkPing()
+			end)
+			if ok and typeof(ping) == "number" then
+				worstPing = math.max(worstPing, ping)
+			end
+		end
+	end
+	return math.clamp(worstPing / 2 + net.GraceBase, net.GraceMin, net.GraceMax)
+end
+
 local hitAllowed: (attacker: Combatant, target: Combatant) -> boolean = function(_attacker, _target)
 	return true
 end
@@ -270,7 +308,15 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		spec.damage = 0
 	end
 
-	if target.state == "Broken" and not attacker.model:GetAttribute("Trainer") then
+	-- Every strike that reaches a target counts toward its Resolve, whatever the outcome.
+	target.recentAttackers[attacker] = now()
+
+	local breakerOnly = target.brokenBy ~= nil
+		and target.brokenBy ~= attacker
+		and isAlive(target.brokenBy :: Combatant)
+		and now() - target.brokenAt < Config.BreakerOnlyDeathblow
+	if target.state == "Broken" and not attacker.model:GetAttribute("Trainer") and not breakerOnly then
+		report(spec, "Deathblow", attacker, target)
 		target.lastAttacker = attacker
 		target.lastAttackedAt = now()
 		target.executed = true
@@ -283,13 +329,14 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		-- Clearing a sweep up close means landing on the attacker's head, as in Sekiro.
 		local close = (attacker.root.Position - target.root.Position).Magnitude <= Config.Jump.KickRange
 		if close then
-			addPosture(attacker, Config.Jump.KickPosture)
+			addPosture(attacker, Config.Jump.KickPosture, target)
 		end
 		-- A jumped sweep leaves its owner stuck in a long recovery: the read is rewarded.
 		if attacker.state == "Recovery" then
 			attacker.stateEndsAt = math.max(attacker.stateEndsAt, now() + Config.PerilousCounter.JumpedRecovery)
 			attacker.cancelableAt = attacker.stateEndsAt
 		end
+		report(spec, "Jumped", attacker, target)
 		broadcast("Jumped", { attacker = attacker.model, defender = target.model, kick = close })
 		return
 	end
@@ -297,12 +344,14 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 	if hitAt >= target.dodgeStamp and hitAt <= target.dodgeStamp + Config.Dodge.IFrames then
 		if spec.thrust and target.dodgeForward and isFacing(target, attacker) then
 			-- Mikiri Counter: dashing into a thrust pins the blade underfoot.
-			addPosture(attacker, Config.Mikiri.AttackerPosture)
+			addPosture(attacker, Config.Mikiri.AttackerPosture, target)
 			if attacker.state ~= "Broken" then
 				stagger(attacker, Config.Mikiri.AttackerStagger)
 			end
+			report(spec, "Mikiri", attacker, target)
 			broadcast("Mikiri", { attacker = attacker.model, defender = target.model })
 		else
+			report(spec, "Dodged", attacker, target)
 			broadcast("Dodged", { attacker = attacker.model, defender = target.model })
 		end
 		return
@@ -316,7 +365,7 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		and target.lastDeflected ~= attacker
 		and hitAt - target.lastDeflectAt <= deflectRules.ThirdPartyGuard
 	if thirdParty and not spec.unblockable then
-		addPosture(target, spec.postureDamage * Config.Deflect.GuardPostureMultiplier * 0.5)
+		addPosture(target, spec.postureDamage * Config.Deflect.GuardPostureMultiplier * 0.5, attacker)
 		broadcast("Guard", { attacker = attacker.model, defender = target.model })
 		return
 	end
@@ -336,13 +385,13 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 			-- A deflected perilous thrust is a big read: it costs its owner a posture chunk
 			-- and a long recoil.
 			recoil = math.max(recoil, Config.PerilousCounter.DeflectRecoil)
-			addPosture(attacker, Config.PerilousCounter.DeflectPosture)
+			addPosture(attacker, Config.PerilousCounter.DeflectPosture, target)
 		end
 		if perfect then
-			addPosture(attacker, deflectRules.PerfectAttackerPosture * multiplier)
+			addPosture(attacker, deflectRules.PerfectAttackerPosture * multiplier, target)
 		else
-			addPosture(attacker, deflectRules.AttackerPosture * multiplier)
-			addPosture(target, deflectRules.DefenderPosture)
+			addPosture(attacker, deflectRules.AttackerPosture * multiplier, target)
+			addPosture(target, deflectRules.DefenderPosture, attacker)
 		end
 		-- The payoff: a fast, uninterruptible counter-cut is available for a moment.
 		target.riposteUntil = t + deflectRules.RiposteWindow
@@ -350,6 +399,7 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 		if attacker.state ~= "Broken" then
 			stagger(attacker, recoil)
 		end
+		report(spec, if perfect then "PerfectDeflect" else "Deflect", attacker, target)
 		broadcast("Deflect", {
 			attacker = attacker.model,
 			defender = target.model,
@@ -360,15 +410,17 @@ local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSp
 			task.spawn(listener, attacker, target, perfect)
 		end
 	elseif canGuard and target.blocking then
-		addPosture(target, spec.postureDamage * Config.Deflect.GuardPostureMultiplier)
+		addPosture(target, spec.postureDamage * Config.Deflect.GuardPostureMultiplier, attacker)
+		report(spec, "Guarded", attacker, target)
 		broadcast("Guard", { attacker = attacker.model, defender = target.model })
 	else
+		report(spec, "Hit", attacker, target)
 		target.lastAttacker = attacker
 		target.lastAttackedAt = now()
 		attacker.lastSlashLanded = true
 		target.humanoid:TakeDamage(spec.damage)
-		addPosture(target, spec.postureDamage * Config.HitPostureMultiplier)
-		stagger(target, Config.HitStagger)
+		addPosture(target, spec.postureDamage * Config.HitPostureMultiplier, attacker)
+		stagger(target, Config.HitStagger * (if target.resolve then Config.Resolve.StaggerMultiplier else 1))
 		broadcast("Hit", { attacker = attacker.model, defender = target.model, damage = spec.damage, kind = spec.kind })
 	end
 end
@@ -376,6 +428,7 @@ end
 local function resolveAttack(attacker: Combatant, spec: AttackSpec, hitAt: number, strike: CFrame)
 	local targets = findTargets(attacker, spec, strike)
 	if #targets == 0 then
+		report(spec, "Whiff", attacker, nil)
 		broadcast("Whiff", { attacker = attacker.model })
 		return
 	end
@@ -486,7 +539,7 @@ local function startAttack(c: Combatant, kind: AttackKind, windupOverride: numbe
 			-- collide, so don't lunge through someone already within reach.
 			c.root.AssemblyLinearVelocity += strike.LookVector * spec.lunge
 		end
-		task.delay(Config.Net.ResolveGrace, function()
+		task.delay(resolveGrace(c, spec, strike), function()
 			if isAlive(c) then
 				resolveAttack(c, spec, hitAt, strike)
 			end
@@ -801,6 +854,10 @@ function CombatService.register(model: Model, player: Player?): Combatant?
 		deflectChain = 0,
 		lastDeflectAt = -math.huge,
 		windupKind = nil,
+		brokenBy = nil,
+		brokenAt = 0,
+		recentAttackers = {},
+		resolve = false,
 		riposteUntil = 0,
 		lastDeflected = nil,
 		groupReadyAt = {},
@@ -934,11 +991,27 @@ local function step(dt: number)
 			end
 		end
 
+		-- Resolve: outnumbered by distinct recent attackers.
+		local strikers = 0
+		for attacker, at in c.recentAttackers do
+			if t - at > Config.Resolve.Window or not isAlive(attacker) then
+				c.recentAttackers[attacker] = nil
+			else
+				strikers += 1
+			end
+		end
+		local outnumbered = strikers >= Config.Resolve.Attackers
+		if outnumbered ~= c.resolve then
+			c.resolve = outnumbered
+			c.model:SetAttribute("Resolve", outnumbered)
+		end
+
 		if c.posture > 0 and c.state ~= "Broken" and t - c.lastPostureDamageAt >= Config.Posture.RegenDelay then
 			local rules = Config.Posture
 			local vitality = math.clamp(c.humanoid.Health / math.max(c.humanoid.MaxHealth, 1), 0, 1)
 			local multiplier = (if c.blocking then rules.GuardRegenMultiplier else 1)
 				* (rules.VitalityRegenFloor + (1 - rules.VitalityRegenFloor) * vitality)
+				* (if c.resolve then Config.Resolve.PostureRegenMultiplier else 1)
 			c.posture = math.max(0, c.posture - rules.RegenPerSecond * multiplier * dt)
 		end
 		publishPosture(c)

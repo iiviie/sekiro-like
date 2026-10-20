@@ -323,11 +323,31 @@ local Config = {
 
 	Net = {
 		CompensationCap = 0.25, -- how far in the past a client stamp may claim to be
-		ResolveGrace = 0.12, -- wait this long past impact for late defender packets
+		-- Nominal wait past impact for late defender packets; the timeline (recovery, cancels)
+		-- is built on this. The actual wait scales with the defenders' ping:
+		-- clamp(ping / 2 + GraceBase, GraceMin, GraceMax), so a 50 ms player isn't held to a
+		-- 250 ms player's delay and a 250 ms player still gets a fair deflect.
+		ResolveGrace = 0.12,
+		GraceBase = 0.05,
+		GraceMin = 0.06,
+		GraceMax = 0.2,
 		MaxActionsPerSecond = 20,
 	},
 
 	HitStagger = 0.25, -- ends before the next chained hit lands, so strings are never true combos
+
+	-- Free-for-all fairness. "Resolve" (For Honor's lesson: an "I'm outnumbered" tool, never
+	-- an "I'm losing" tool) switches on only while two or more different fighters have struck
+	-- you recently, and does nothing in a 1v1.
+	Resolve = {
+		Window = 3, -- strikes from distinct attackers within this many seconds count
+		Attackers = 2,
+		PostureRegenMultiplier = 2,
+		StaggerMultiplier = 0.5, -- hit stun is shorter while outnumbered
+	},
+	-- Only the fighter who broke a posture may deathblow it for this long, so a third party
+	-- can't steal the kill someone else earned. Others still land normal hits.
+	BreakerOnlyDeathblow = 1.5,
 	HitPostureMultiplier = 0.5, -- unguarded hits still build some posture
 	DeathblowDamage = 1000,
 
