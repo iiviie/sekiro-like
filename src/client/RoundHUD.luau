@@ -26,7 +26,11 @@ local GOLD = Color3.fromRGB(240, 200, 110)
 local CRIMSON = Color3.fromRGB(200, 40, 34)
 local FEED_LIFETIME = 6
 local FEED_MAX = 4
-local RING_HEIGHT = 80
+-- The mist wall is a ring of vertical, camera-facing beams: double-sided, unlike a
+-- cylinder part, whose inside faces are culled so it vanishes once you're within it.
+local MIST_COLUMNS = 72
+local MIST_HEIGHT = 28
+local MIST_BASE_Y = 1 -- just under the courtyard floor, so the mist rises out of the ground
 
 local RoundHUD = {}
 
@@ -37,6 +41,12 @@ local feed: Frame
 local spectateLabel: TextLabel
 local warning: Frame
 local ring: Part
+local mistBottoms: { Attachment } = {}
+local mistTops: { Attachment } = {}
+local mistBeams: { Beam } = {}
+local mistWidth = 0
+local ringShown = false
+local mistGrade: ColorCorrectionEffect
 local spectating: Model? = nil
 
 local function now(): number
@@ -167,34 +177,86 @@ end
 local function buildRing()
 	ring = Instance.new("Part")
 	ring.Name = "MistRing"
-	ring.Shape = Enum.PartType.Cylinder
 	ring.Anchored = true
 	ring.CanCollide = false
 	ring.CanQuery = false
 	ring.CanTouch = false
 	ring.CastShadow = false
-	ring.Material = Enum.Material.ForceField
-	ring.Color = Color3.fromRGB(170, 30, 26)
 	ring.Transparency = 1
+	ring.Size = Vector3.one
+	ring.CFrame = CFrame.identity
+	for i = 1, MIST_COLUMNS do
+		local bottom = Instance.new("Attachment")
+		bottom.Parent = ring
+		local top = Instance.new("Attachment")
+		top.Parent = ring
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = bottom
+		beam.Attachment1 = top
+		beam.FaceCamera = true
+		beam.Segments = 1
+		beam.Color = ColorSequence.new(Color3.fromRGB(210, 36, 28), Color3.fromRGB(110, 12, 12))
+		beam.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.45),
+			NumberSequenceKeypoint.new(0.3, 0.75),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		beam.LightEmission = 0.5
+		beam.LightInfluence = 0.3
+		beam.Enabled = false
+		beam.Parent = ring
+		mistBottoms[i], mistTops[i], mistBeams[i] = bottom, top, beam
+	end
 	ring.Parent = workspace
+
+	-- Per-player grade (under the camera, not Lighting) while you stand in the mist.
+	mistGrade = Instance.new("ColorCorrectionEffect")
+	mistGrade.Name = "MistGrade"
+	mistGrade.Enabled = false
+	mistGrade.Parent = workspace.CurrentCamera
+end
+
+local function showRing(visible: boolean)
+	if visible ~= ringShown then
+		ringShown = visible
+		for _, beam in mistBeams do
+			beam.Enabled = visible
+		end
+	end
+end
+
+local function placeRing(center: Vector3, radius: number)
+	for i = 1, MIST_COLUMNS do
+		local angle = (i / MIST_COLUMNS) * math.pi * 2
+		local base = Vector3.new(center.X + math.cos(angle) * radius, MIST_BASE_Y, center.Z + math.sin(angle) * radius)
+		mistBottoms[i].Position = base
+		mistTops[i].Position = base + Vector3.new(0, MIST_HEIGHT, 0)
+	end
+	-- Each column a little wider than the gap to its neighbour, so the wall has no holes.
+	local width = 2 * math.pi * radius / MIST_COLUMNS + 0.4
+	if math.abs(width - mistWidth) > 0.05 then
+		mistWidth = width
+		for _, beam in mistBeams do
+			beam.Width0 = width
+			beam.Width1 = width
+		end
+	end
 end
 
 local inMist = false
 local function updateRing()
 	if Round.phase() ~= "Match" then
-		if ring.Transparency < 1 then
-			ring.Transparency = 1
-		end
+		showRing(false)
 		if inMist then
 			inMist = false
 			warning.BackgroundTransparency = 1
+			mistGrade.Enabled = false
 		end
 		return
 	end
 	local center, radius = Round.zone(now())
-	ring.Transparency = 0
-	ring.Size = Vector3.new(RING_HEIGHT, radius * 2, radius * 2)
-	ring.CFrame = CFrame.new(center + Vector3.new(0, RING_HEIGHT / 2 - 4, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	placeRing(center, radius)
+	showRing(true)
 
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -207,6 +269,11 @@ local function updateRing()
 		inMist = outside
 		TweenService:Create(warning, TweenInfo.new(0.4), { BackgroundTransparency = if outside then 0.55 else 1 })
 			:Play()
+		mistGrade.Enabled = true
+		TweenService:Create(mistGrade, TweenInfo.new(0.5), {
+			TintColor = if outside then Color3.fromRGB(255, 196, 190) else Color3.new(1, 1, 1),
+			Saturation = if outside then -0.35 else 0,
+		}):Play()
 	end
 end
 

@@ -83,7 +83,8 @@ practice or automated combat tests.
   [Animator.luau](src/client/Animator.luau) layers them over the locomotion with eased keyframes from [Clips.luau](src/shared/Clips.luau).
 - **HUD.** Sekiro / Dark Souls style: a crimson vitality bar with a damage trail, a posture bar that grows from the centre
   and hides when empty, gourd count, enemy bars only for your target and recent opponents, a red deathblow marker, kanji
-  splashes, a phase banner, a kill feed and spectating.
+  splashes, a phase banner, a kill feed and spectating. The closing mist is a wall of camera-facing beams (a cylinder
+  part culls its inside faces, so it vanished once you were inside it), and standing in it tints your screen red.
 - **Map.** [MapBuilder.luau](src/server/MapBuilder.luau) generates the terrain, castle walls, shrine hall, a pale-sand
   duelling circle (so dark-clad fighters read clearly), moss along the walls, crimson nobori banners, braziers and
   drifting maple leaves. World and HUD colours come from [Palette.luau](src/shared/Palette.luau).
