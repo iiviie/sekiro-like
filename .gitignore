@@ -16,3 +16,4 @@ roblox.yml
 
 # Art tooling
 art/**/__pycache__/
+*.blend1
