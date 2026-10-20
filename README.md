@@ -112,9 +112,8 @@ actions with exact timing, reads their state and grants currency, for automated 
 ## Movement
 
 [Movement.luau](src/client/Movement.luau) sets your WalkSpeed on your own client every frame, so slowing for a swing or
-guard is instant instead of a round trip late: you push off from 45% of full speed and reach it in ~0.15 s, and state
-changes blend. When nothing is targeted you turn toward where you walk at a capped rate (620°/s, 360°/s mid-swing or
-guarding) instead of snapping. Dashes burst at 78 studs/s and ease out to walking pace over 0.26 s (~9.5 studs) with a
+guard is instant instead of a round trip late: you push off from 75% of full speed and reach it in ~0.1 s, and state
+changes blend. Turning is Roblox's own rotation unless you're locked on or striking. Dashes burst at 78 studs/s and ease out to walking pace over 0.26 s (~9.5 studs) with a
 small FOV kick; attack lunges ease out too. Research: `research_notes/Sword combat design and lobby/movement_feel.md`.
 
 ## Weapons
@@ -135,7 +134,9 @@ order: naginata (reach), then dual blades; kusarigama last.
 
 ## Presentation
 
-- **Animation.** Locomotion uses Roblox's Ninja Animation Package. Combat motion is procedural: [Poses.luau](src/shared/Poses.luau)
+- **Animation.** Locomotion uses Roblox's standard R15 animations (upright and natural; the Ninja pack's low stances
+  made everyone look crouched). Out of combat the sword is carried low at the side; locked on, or within 4 s of an
+  exchange, fighters raise a low guard. Combat motion is procedural: [Poses.luau](src/shared/Poses.luau)
   describes each pose as directions (where the arm, forearm and blade point), solves them into joint rotations, and
   [Animator.luau](src/client/Animator.luau) layers them over the locomotion with eased keyframes from [Clips.luau](src/shared/Clips.luau).
 - **Swords.** The katana is 4.4 studs (the odachi 5.85) and much broader than the source mesh, with a thin ink outline (a Highlight) so it

@@ -11,7 +11,6 @@ local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local CombatVisuals = require(script.Parent.CombatVisuals)
@@ -79,42 +78,23 @@ local function facingGoal(root: BasePart): Vector3?
 	return nil
 end
 
-local function yawOf(v: Vector3): number
-	return math.atan2(-v.X, -v.Z)
-end
-
 -- Facing. With a target (lock-on, a soft target while attacking or guarding) the body
--- tracks it smoothly. Otherwise it turns toward where you're walking at a capped rate,
--- slower mid-swing, so a sword fighter pivots with weight instead of snapping around.
+-- tracks it smoothly; otherwise Roblox's own rotation turns you toward where you walk,
+-- which stays in step with the physics and feels the most natural.
 local function updateFacing(dt: number)
-	local character, root, humanoid = getCharacter()
-	if not character or not root or not humanoid or humanoid.Health <= 0 then
+	local _, root, humanoid = getCharacter()
+	if not root or not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	local goal = facingGoal(root)
+	if not goal or goal.Magnitude < 0.1 then
+		humanoid.AutoRotate = true
 		return
 	end
 	humanoid.AutoRotate = false
-	local goal = facingGoal(root)
-	if goal and goal.Magnitude >= 0.1 then
-		local target = CFrame.lookAt(root.Position, root.Position + goal)
-		local alpha = 1 - math.exp(-dt * Config.LockOn.TurnRate)
-		root.CFrame = root.CFrame:Lerp(target, alpha)
-		return
-	end
-	local want: Vector3? = nil
-	if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
-		want = cameraFlatLook() -- shift-lock: face the camera
-	elseif humanoid.MoveDirection.Magnitude > 0.1 then
-		want = humanoid.MoveDirection
-	end
-	if not want then
-		return
-	end
-	local state = character:GetAttribute("CombatState")
-	local combat = blockHeld or state == "Windup" or state == "Recovery" or state == "Broken"
-	local rate = math.rad(if combat then Config.Movement.CombatTurnRate else Config.Movement.TurnRate)
-	local current = yawOf(root.CFrame.LookVector)
-	local diff = (yawOf(want) - current + math.pi) % (math.pi * 2) - math.pi
-	local step = math.clamp(diff, -rate * dt, rate * dt)
-	root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, current + step, 0)
+	local target = CFrame.lookAt(root.Position, root.Position + goal)
+	local alpha = 1 - math.exp(-dt * Config.LockOn.TurnRate)
+	root.CFrame = root.CFrame:Lerp(target, alpha)
 end
 
 local function canAfford(character: Model, action: string): boolean

@@ -330,11 +330,9 @@ local Config = {
 
 	-- Client-side locomotion feel (see client/Movement). Speeds are studs/s.
 	Movement = {
-		StartFraction = 0.45, -- from standstill you start at this share of full speed...
-		Acceleration = 14, -- ...and close the gap at this rate (~0.15 s to full)
+		StartFraction = 0.75, -- from standstill you start at this share of full speed...
+		Acceleration = 22, -- ...and close the gap at this rate (~0.1 s to full)
 		SpeedBlend = 12, -- how quickly speed follows a state change (attack, guard)
-		TurnRate = 620, -- degrees/s while moving freely
-		CombatTurnRate = 360, -- while swinging, guarding or broken
 	},
 
 	Net = {

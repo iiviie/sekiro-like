@@ -15,14 +15,16 @@ local Assets = {
 	-- Weapon meshes and their sizes live with each weapon in Shared/Weapons.
 
 	-- Roblox Ninja Animation Package.
+	-- Roblox's standard R15 animations: an upright, natural walk. (The Ninja pack's low,
+	-- hunched stances made every character look like it was crouching.)
 	Locomotion = {
-		Idle = "rbxassetid://656117400",
-		IdleAlt = "rbxassetid://656118341",
-		Walk = "rbxassetid://656121766",
-		Run = "rbxassetid://656118852",
-		Jump = "rbxassetid://656117878",
-		Fall = "rbxassetid://656115606",
-		Climb = "rbxassetid://656114359",
+		Idle = "rbxassetid://507766388",
+		IdleAlt = "rbxassetid://507766666",
+		Walk = "rbxassetid://507777826",
+		Run = "rbxassetid://507767714",
+		Jump = "rbxassetid://507765000",
+		Fall = "rbxassetid://507767968",
+		Climb = "rbxassetid://507765644",
 	},
 
 	Sounds = {

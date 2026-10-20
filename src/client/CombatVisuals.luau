@@ -15,6 +15,7 @@ local TweenService = game:GetService("TweenService")
 local Animator = require(script.Parent.Animator)
 local CombatHUD = require(script.Parent.CombatHUD)
 local LocalCombat = require(script.Parent.LocalCombat)
+local LockOn = require(script.Parent.LockOn)
 local Motion = require(script.Parent.Motion)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -629,6 +630,18 @@ local function predictIncoming(attacker: Model, kind: Config.AttackKind, hitAt: 
 	end)
 end
 
+-- Fighters relax (sword low at the side) out of combat and raise a guard stance once
+-- they're in a fight: locked on, or within COMBAT_LINGER seconds of any exchange.
+local COMBAT_LINGER = 4
+local lastCombatAt: { [Model]: number } = {}
+
+local function inCombat(model: Model): boolean
+	if isLocal(model) and LockOn.target() ~= nil then
+		return true
+	end
+	return os.clock() - (lastCombatAt[model] or -math.huge) < COMBAT_LINGER
+end
+
 local function refreshBase(model: Model)
 	local state = model:GetAttribute("CombatState")
 	if state == "Dead" then
@@ -637,8 +650,10 @@ local function refreshBase(model: Model)
 		Animator.setBase(model, "Broken")
 	elseif model:GetAttribute("Blocking") then
 		Animator.setBase(model, "Guard")
-	else
+	elseif inCombat(model) then
 		Animator.setBase(model, "Ready")
+	else
+		Animator.setBase(model, "Relaxed")
 	end
 end
 
@@ -893,9 +908,32 @@ function CombatVisuals.start()
 	Animator.start()
 
 	combatEvent.OnClientEvent:Connect(function(kind: string, data: { [string]: any })
+		-- Anyone swinging or being swung at is in combat for a few seconds.
+		for _, key in { "attacker", "defender", "model" } do
+			local model = data[key]
+			if typeof(model) == "Instance" and model:IsA("Model") then
+				local wasInCombat = inCombat(model)
+				lastCombatAt[model] = os.clock()
+				if not wasInCombat then
+					refreshBase(model)
+				end
+			end
+		end
 		local handler = handlers[kind]
 		if handler then
 			handler(data)
+		end
+	end)
+
+	-- Drop back to the relaxed stance once a fight has gone quiet.
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			for _, instance in CollectionService:GetTagged(Types.Tag) do
+				if instance:IsA("Model") then
+					refreshBase(instance)
+				end
+			end
 		end
 	end)
 

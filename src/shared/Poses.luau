@@ -82,11 +82,19 @@ local function compile(spec: PoseSpec): Pose
 end
 
 local specs: { [string]: PoseSpec } = {
-	-- Low guard: blade forward and up toward the opponent's throat, edge down.
+	-- Out of combat: the sword carried low at the right side, tip forward and down, so the
+	-- walk reads upright and natural. Only the sword arm is posed; the left arm swings
+	-- with the locomotion animation.
+	Relaxed = {
+		RightArm = { upper = v(0.12, -1, 0.05), fore = v(0.05, -0.75, -0.65), blade = v(0.12, -0.4, -1), edge = DOWN },
+	},
+
+	-- In combat: a low guard, blade forward toward the opponent, edge down; both hands near
+	-- the hilt, torso square (not twisted) so the stance stays upright.
 	Ready = {
-		RightArm = { upper = v(0.25, -0.85, -0.45), fore = v(0.05, -0.2, -1), blade = v(-0.25, 0.45, -1), edge = DOWN },
-		LeftArm = { upper = v(-0.15, -1, -0.15), fore = v(-0.05, -0.7, -0.7) },
-		Waist = { 0, 15, 0 },
+		RightArm = { upper = v(0.2, -0.9, -0.35), fore = v(0.05, -0.35, -1), blade = v(-0.2, 0.3, -1), edge = DOWN },
+		LeftArm = { upper = v(-0.15, -1, -0.2), fore = v(0.15, -0.6, -0.8) },
+		Waist = { 0, 6, 0 },
 	},
 
 	-- Blade raised across the body, edge out, to catch strikes.
