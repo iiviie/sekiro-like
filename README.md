@@ -19,7 +19,7 @@ Tools (installed with Homebrew): `rojo` 7.7, `selene`, `stylua`. The Rojo Studio
 
 ## Playing
 
-Press Play. A title card shows first; click or press any key to enter.
+Press Play. A letterboxed title card (a slow dolly toward the shrine) shows first; click or press any key to enter.
 
 - **Intermission (15 s):** spar with two practice bots. You respawn instantly.
 - **Match:** everyone, plus bots filling up to six fighters, starts on a circle around the courtyard. After 20 s a ring of

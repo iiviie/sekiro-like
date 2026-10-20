@@ -1,7 +1,7 @@
 --!strict
--- Title card shown on join: the camera drifts around the courtyard behind the game's
--- name until the player clicks or presses a key. Cheap: one ScreenGui and a camera
--- orbit that stops the moment you enter.
+-- Title card shown on join: a slow, low dolly across the courtyard toward the shrine and
+-- pagoda against the sunset, letterboxed, behind the game's name, until the player clicks
+-- or presses a key. Cheap: one ScreenGui and a camera path that stops the moment you enter.
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -11,18 +11,22 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Palette = require(ReplicatedStorage.Shared.Palette)
 
 local player = Players.LocalPlayer
 
 local FONT = Enum.Font.Garamond
-local PARCHMENT = Color3.fromRGB(232, 222, 200)
-local BRONZE = Color3.fromRGB(150, 122, 82)
-local CRIMSON = Color3.fromRGB(190, 34, 30)
+local PARCHMENT = Palette.Parchment
+local BRONZE = Palette.Bronze
+local CRIMSON = Palette.Crimson
 
-local ORBIT_CENTER = Vector3.new(0, 6, 0)
-local ORBIT_RADIUS = 95
-local ORBIT_HEIGHT = 34
-local ORBIT_SPEED = 0.05 -- radians per second
+-- The camera sways slowly side to side at about head height in front of the duelling
+-- circle, always framing the shrine hall with the pagoda rising behind it.
+local DOLLY_FROM = Vector3.new(-22, 6.5, 40)
+local DOLLY_TO = Vector3.new(22, 9, 26)
+local DOLLY_PERIOD = 40 -- seconds for one full sway
+local LOOK_AT = Vector3.new(0, 11, -60)
+local LETTERBOX = 0.1 -- each bar's share of the screen height
 
 local TitleScreen = {}
 
@@ -51,34 +55,48 @@ function TitleScreen.show()
 
 	local group = Instance.new("CanvasGroup")
 	group.Size = UDim2.fromScale(1, 1)
-	group.BackgroundColor3 = Color3.new(0, 0, 0)
-	group.BackgroundTransparency = 0.45
+	group.BackgroundColor3 = Palette.Ink
+	group.BackgroundTransparency = 0.6
 	group.Parent = screen
 
-	-- Darker at the edges, so the title sits in a pool of light.
+	-- Darkest behind the text in the middle, fading out to the sides so the scene stays
+	-- visible around the title.
 	local vignette = Instance.new("UIGradient")
 	vignette.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0),
-		NumberSequenceKeypoint.new(0.3, 0.55),
-		NumberSequenceKeypoint.new(0.7, 0.55),
-		NumberSequenceKeypoint.new(1, 0),
+		NumberSequenceKeypoint.new(0, 0.5),
+		NumberSequenceKeypoint.new(0.35, 0.1),
+		NumberSequenceKeypoint.new(0.65, 0.1),
+		NumberSequenceKeypoint.new(1, 0.5),
 	})
 	vignette.Parent = group
 
-	text(group, Config.Title.Kanji, 46, CRIMSON, -118)
-	text(group, Config.Title.Name, 88, PARCHMENT, -46)
+	-- Cinema letterbox; inside the group so it fades out with the title.
+	for _, top in { true, false } do
+		local bar = Instance.new("Frame")
+		bar.AnchorPoint = Vector2.new(0, if top then 0 else 1)
+		bar.Position = UDim2.fromScale(0, if top then 0 else 1)
+		bar.Size = UDim2.fromScale(1, LETTERBOX)
+		bar.BackgroundColor3 = Color3.new(0, 0, 0)
+		bar.BorderSizePixel = 0
+		bar.Parent = group
+	end
+
+	-- The text sits in the sky, above the shrine roof.
+	local TOP = -130
+	text(group, Config.Title.Kanji, 46, CRIMSON, TOP - 118)
+	text(group, Config.Title.Name, 88, PARCHMENT, TOP - 46)
 	for _, side in { -1, 1 } do
 		local rule = Instance.new("Frame")
 		rule.AnchorPoint = Vector2.new(0.5, 0.5)
-		rule.Position = UDim2.new(0.5, side * 210, 0.5, 18)
+		rule.Position = UDim2.new(0.5, side * 210, 0.5, TOP + 18)
 		rule.Size = UDim2.fromOffset(240, 1)
 		rule.BackgroundColor3 = BRONZE
 		rule.BorderSizePixel = 0
 		rule.Parent = group
 	end
-	local tagline = text(group, Config.Title.Tagline, 22, PARCHMENT, 46)
+	local tagline = text(group, Config.Title.Tagline, 22, PARCHMENT, TOP + 46)
 	tagline.TextTransparency = 0.2
-	local prompt = text(group, "Click or press any key to enter", 20, PARCHMENT, 170)
+	local prompt = text(group, "Click or press any key to enter", 20, PARCHMENT, 300)
 	TweenService:Create(
 		prompt,
 		TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
@@ -107,12 +125,12 @@ function TitleScreen.show()
 
 	local camera = workspace.CurrentCamera
 	camera.CameraType = Enum.CameraType.Scriptable
-	local angle = math.pi * 0.5
-	RunService:BindToRenderStep("TitleOrbit", Enum.RenderPriority.Camera.Value + 2, function(dt)
-		angle += ORBIT_SPEED * dt
-		local eye = ORBIT_CENTER
-			+ Vector3.new(math.cos(angle) * ORBIT_RADIUS, ORBIT_HEIGHT, math.sin(angle) * ORBIT_RADIUS)
-		camera.CFrame = CFrame.lookAt(eye, ORBIT_CENTER)
+	local startedAt = os.clock()
+	camera.FieldOfView = 50 -- a longer lens flattens the layers of wall, shrine and mountains
+	RunService:BindToRenderStep("TitleOrbit", Enum.RenderPriority.Camera.Value + 2, function()
+		local phase = (os.clock() - startedAt) / DOLLY_PERIOD * math.pi * 2
+		local t = (1 - math.cos(phase)) / 2 -- eased ping-pong between the two ends
+		camera.CFrame = CFrame.lookAt(DOLLY_FROM:Lerp(DOLLY_TO, t), LOOK_AT)
 	end)
 
 	local dismissed = Instance.new("BindableEvent")
@@ -134,6 +152,7 @@ function TitleScreen.show()
 	TweenService:Create(group, TweenInfo.new(0.7), { GroupTransparency = 1 }):Play()
 	task.wait(0.7)
 	RunService:UnbindFromRenderStep("TitleOrbit")
+	camera.FieldOfView = 70
 	camera.CameraType = Enum.CameraType.Custom
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
