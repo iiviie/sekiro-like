@@ -139,6 +139,12 @@ order: naginata (reach), then dual blades; kusarigama last.
   a ~0.22 s held follow-through at full extension. The whole body drives each cut: torso and hips twist, the front foot
   steps in and the stance drops (Light1 diagonal cut, Light2 rising backhand, Light3 overhead into a deep lunge).
   In Studio, `PlayerScripts.AnimTest:Invoke("sample", model, clip, windup, t)` freezes any clip at time `t` for review.
+- **Poses from Blender.** Stances and attack keyposes are authored in Blender on a matching R15 rig with
+  [art/anim/katana.blend](art/anim/katana.blend): the left hand is IK-locked to the hilt (a real two-handed grip),
+  feet are IK targets, and the torso, hips and head are keyed in character-space angles. Running the `run` text block
+  in Blender bakes every pose to joint Transforms in [BakedPoses.luau](src/shared/BakedPoses.luau) (generated; don't
+  edit by hand), which override the hand-written poses of the same name. Edit poses in the `poses` text block, rerun,
+  and check them in Studio with `AnimTest:Invoke("pose", model, name)`.
 - **Animation.** Locomotion uses Roblox's standard R15 animations (upright and natural; the Ninja pack's low stances
   made everyone look crouched). Out of combat the sword is carried low at the side; locked on, or within 4 s of an
   exchange, fighters raise a low guard. Combat motion is procedural: [Poses.luau](src/shared/Poses.luau)

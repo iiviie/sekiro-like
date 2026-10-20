@@ -510,5 +510,10 @@ local Poses: { [string]: Pose } = {}
 for name, spec in specs do
 	Poses[name] = compile(spec)
 end
+-- Poses keyed in Blender (art/anim) and exported as joint Transforms override the
+-- hand-written ones of the same name.
+for name, pose in require(script.Parent.BakedPoses) do
+	Poses[name] = pose
+end
 
 return Poses
