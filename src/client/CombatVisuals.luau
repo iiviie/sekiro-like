@@ -211,6 +211,9 @@ end
 -- rather than jittering at random (which reads as an explosion). Without a direction
 -- it falls back to a small rattle.
 local function shake(intensity: number, duration: number, from: Model?, to: Model?)
+	if player:GetAttribute("SettingCameraShake") == false then
+		return
+	end
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local root = rootOf(character)
@@ -378,6 +381,9 @@ local function lunge(speed: number)
 end
 
 local function hitstop(duration: number, ...: Model?)
+	if player:GetAttribute("SettingHitstop") == false then
+		return
+	end
 	for i = 1, select("#", ...) do
 		local model = select(i, ...)
 		if model then

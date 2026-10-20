@@ -261,7 +261,8 @@ local function updateRing()
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local outside = false
-	if root and root:IsA("BasePart") then
+	-- Only fighters in the match can be caught by the mist; the lobby is far outside it.
+	if root and root:IsA("BasePart") and character and character:GetAttribute("InMatch") then
 		local offset = root.Position - center
 		outside = Vector3.new(offset.X, 0, offset.Z).Magnitude > radius
 	end
@@ -286,6 +287,7 @@ local function livingFighters(): { Model }
 		if
 			instance:IsA("Model")
 			and instance ~= player.Character
+			and instance:GetAttribute("InMatch") == true
 			and instance:GetAttribute("CombatState") ~= "Dead"
 		then
 			table.insert(list, instance)
@@ -307,8 +309,10 @@ local function spectate(model: Model?)
 	end
 end
 
+local wasInMatch = false -- this client's character fought in the current match
+
 local function needsSpectate(): boolean
-	if Round.phase() ~= "Match" then
+	if Round.phase() ~= "Match" or not wasInMatch then
 		return false
 	end
 	local character = player.Character
@@ -336,9 +340,23 @@ end
 local function refreshBanner()
 	local phase = Round.phase()
 	local remaining = Round.endsAt() - now()
+	local character = player.Character
+	local fighting = character ~= nil and character:GetAttribute("InMatch") == true
 	if phase == "Intermission" then
-		phaseLabel.Text = spaced("Intermission")
-		subLabel.Text = `The royale begins in {clock(remaining)}`
+		local queued = state:GetAttribute("Queued") or 0
+		if state:GetAttribute("Waiting") then
+			phaseLabel.Text = spaced("Lobby")
+			subLabel.Text = "Press PLAY or step on the red pad to queue"
+		else
+			phaseLabel.Text = spaced(`Royale in {clock(remaining)}`)
+			subLabel.Text = if player:GetAttribute("Queued")
+				then `{queued} queued  ·  bots fill the empty seats`
+				else `{queued} queued  ·  press PLAY to join`
+		end
+	elseif phase == "Match" and not fighting and not needsSpectate() then
+		local alive = state:GetAttribute("Alive") or 0
+		phaseLabel.Text = spaced("Royale under way")
+		subLabel.Text = `{alive} remain  ·  you'll join the next one`
 	elseif phase == "Match" then
 		local alive = state:GetAttribute("Alive") or 0
 		phaseLabel.Text = spaced(`{alive} Remain`)
@@ -356,6 +374,11 @@ end
 
 local function onRoundEvent(kind: string, data: { [string]: any })
 	if kind == "MatchStart" then
+		local character = player.Character
+		wasInMatch = character ~= nil and character:GetAttribute("InMatch") == true
+		if not wasInMatch then
+			return
+		end
 		CombatHUD.splash(Assets.UI.KanjiDuel, `{data.fighters} fighters enter. One leaves.`, CRIMSON, 1.6)
 	elseif kind == "Eliminated" then
 		local text = if data.killer and data.deathblow
@@ -364,6 +387,11 @@ local function onRoundEvent(kind: string, data: { [string]: any })
 			else `{data.victim} was swallowed by the mist`
 		pushFeed(text, if data.deathblow then CRIMSON else PARCHMENT)
 	elseif kind == "Victory" then
+		local fought = wasInMatch
+		wasInMatch = false
+		if not fought then
+			return
+		end
 		if data.winner and data.winner == player.Character then
 			CombatHUD.splash(Assets.UI.KanjiVictory, "Victory Achieved", GOLD, 3.5)
 		elseif data.name then

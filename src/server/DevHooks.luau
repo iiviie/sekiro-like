@@ -7,6 +7,7 @@ local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local CombatService = require(script.Parent.CombatService)
+local StatsService = require(script.Parent.StatsService)
 
 local DevHooks = {}
 
@@ -21,6 +22,7 @@ function DevHooks.start()
 	-- spawn(name, position, facing): a plain R15 fighter with no brain.
 	-- perform(name, action, stampOffset?, flag?): CombatService.perform at now + offset.
 	-- get(name): a snapshot of that fighter's combat state.
+	-- grant(field, amount): adds to the first player's data, e.g. grant("Coins", 500).
 	-- clear(): removes every dummy.
 	hook.OnInvoke = function(command: string, ...: any): any
 		local args = { ... }
@@ -67,6 +69,13 @@ function DevHooks.start()
 				comboIndex = c.comboIndex,
 				trickUsed = c.stringTrickUsed,
 			}
+		elseif command == "grant" then
+			-- grant(field, amount): adds to the first player's saved data (coins, gems...).
+			local target = Players:GetPlayers()[1]
+			if target then
+				StatsService.add(target, args[1] :: string, args[2] :: number)
+			end
+			return target and target:GetAttribute(args[1] :: string)
 		elseif command == "clear" then
 			for _, model in dummies do
 				model:Destroy()

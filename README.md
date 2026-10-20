@@ -21,13 +21,22 @@ Tools (installed with Homebrew): `rojo` 7.7, `selene`, `stylua`. The Rojo Studio
 
 Press Play. A letterboxed title card (a slow dolly toward the shrine) shows first; click or press any key to enter.
 
-- **Intermission (15 s):** spar with two practice bots. You respawn instantly.
-- **Match:** everyone, plus bots filling up to six fighters, starts on a circle around the courtyard. After 20 s a ring of
-  red mist starts closing and hurts anyone outside it. No respawns; fallen players spectate (click to switch). The last
-  one standing wins.
-- **Results:** a victory banner, then the next intermission.
+- **Lobby.** You arrive on a floating shrine island above the castle. New players start **queued**, so the first fight
+  comes within ~15 s; press **PLAY** (or step on the glowing red pad) to join or leave the queue. While anyone is queued
+  a 12 s countdown runs. Lobby PvP is off by default (turning it on takes 3 s); with it off nobody can touch you except
+  the **Deflect Trainer**, which swings at whoever steps into its sand ring and never deals damage. Fall off the island
+  and you're put back.
+- **Menus** (bottom bar): **Weapons** (equip, or unlock with coins), **Store** (how coins are earned; gem packs once
+  developer products exist), **Profile** (wins, losses, W/L, kills, deathblows, most used weapons, ranked season tier
+  and rating), **Rewards** (7-day daily streak, gems on day 7), **Settings** (camera shake, hitstop, controls hint).
+- **Match:** queued players plus bots filling up to six fighters start on a circle around the courtyard. After 20 s a
+  ring of red mist starts closing and hurts anyone outside it. No respawns; fallen players spectate for a few seconds,
+  then return to the lobby. The last one standing wins.
+- **Results:** a victory banner, coins (play 10, kill 15, deathblow +5, win 60), ranked rating (pairwise Elo against the
+  other humans you placed above or below; bots don't count), then everyone back to the lobby.
 
-Wins and Kills show in the player list and are saved with DataStores (session-only in an unpublished place).
+Everything persists with DataStores in `PlayerData_v2` (old `PlayerStats_v1` Wins/Kills migrate on first visit), and
+is session-only in an unpublished place.
 
 | Action | Keyboard / mouse | Gamepad | Touch |
 |---|---|---|---|
@@ -84,8 +93,9 @@ All numbers live in [src/shared/Config.luau](src/shared/Config.luau). The rules 
 
 ### Testing
 
-Set the workspace attribute `HoldIntermission` to `true` from the Studio command bar to stay in intermission for
-practice or automated combat tests.
+Set the workspace attribute `HoldIntermission` to `true` from the Studio command bar to keep the lobby countdown from
+finishing. In Studio, `ServerStorage.CombatTest` (a BindableFunction from DevHooks) spawns dummy fighters, performs
+actions with exact timing, reads their state and grants currency, for automated combat tests.
 
 ## Weapons
 
@@ -144,9 +154,11 @@ order: naginata (reach), then dual blades; kusarigama last.
 
 ```
 src/
-  shared/   Config, Weapons, Types, Assets, Palette, Poses, Clips, Round
-  server/   init, CombatService, BotService, RoundService, StatsService, MapBuilder, Outfit, Locomotion, SwordRig, DevHooks
-  client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, TitleScreen, Ambience
+  shared/   Config, Weapons, Ranks, Types, Assets, Palette, Poses, Clips, Round
+  server/   init, CombatService, BotService, RoundService, StatsService, LobbyService, LobbyBuilder, MapBuilder,
+            Outfit, Locomotion, SwordRig, DevHooks
+  client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, LobbyHUD, Panels, UI, TitleScreen,
+            Ambience
 ```
 
 ## Before publishing

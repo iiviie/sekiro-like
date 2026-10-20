@@ -218,13 +218,43 @@ local Config = {
 	},
 
 	Round = {
-		Intermission = 15,
+		Intermission = 12, -- countdown once someone is queued
 		MaxDuration = 180, -- a match ends here even if several fighters remain
 		Results = 7,
 		MinFighters = 6, -- bots fill the match up to this many
-		PracticeBots = 2, -- sparring partners during intermission
 		SpawnRadius = 48, -- fighters start evenly spaced on this circle
 		RespawnDelay = 3, -- outside a match
+	},
+
+	-- The free-roam lobby: a floating shrine island above the castle. Players spawn here,
+	-- queue for the royale (PLAY or the glowing pad), and spar safely.
+	Lobby = {
+		Origin = Vector3.new(0, 80, 300), -- centre of the island's top surface
+		Radius = 44,
+		FallY = 40, -- below this height a lobby player is put back on the island
+		QueuePad = Vector3.new(0, 0, -20), -- offsets from Origin
+		QueuePadRadius = 6,
+		Spawn = Vector3.new(0, 0, 24),
+		Trainer = Vector3.new(-24, 0, 2),
+		Leaderboards = { Vector3.new(22, 0, 6), Vector3.new(30, 0, -10) },
+		AutoQueue = true, -- new players start queued: a first fight within ~30 s
+		PvPToggleDelay = 3, -- turning lobby PvP on takes this long, so it can't be an ambush
+	},
+
+	-- Soft currency earned by playing, premium currency bought or dripped free.
+	Economy = {
+		StartCoins = 250,
+		StartGems = 0,
+		Rewards = { Kill = 15, Deathblow = 5, Win = 60, Played = 10 },
+		-- Daily login streak: day N of a streak pays Daily[N] coins (gems on day 7).
+		Daily = { 50, 60, 70, 80, 100, 120, 150 },
+		DailyGems = 5,
+	},
+
+	Rating = {
+		Start = 400,
+		Division = 200, -- each tier has three divisions of this many points
+		K = 24, -- rating change per decisive pairwise result
 	},
 
 	Zone = {

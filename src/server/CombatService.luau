@@ -256,12 +256,21 @@ local function findTargets(attacker: Combatant, spec: AttackSpec, strike: CFrame
 	return targets
 end
 
+local hitAllowed: (attacker: Combatant, target: Combatant) -> boolean = function(_attacker, _target)
+	return true
+end
+
 local function resolveHit(attacker: Combatant, target: Combatant, spec: AttackSpec, hitAt: number)
-	if hitAt < target.protectedUntil then
+	if hitAt < target.protectedUntil or not hitAllowed(attacker, target) then
 		return
 	end
+	-- Training dummies build posture and teach timing, but never hurt anyone.
+	if attacker.model:GetAttribute("Trainer") then
+		spec = table.clone(spec)
+		spec.damage = 0
+	end
 
-	if target.state == "Broken" then
+	if target.state == "Broken" and not attacker.model:GetAttribute("Trainer") then
 		target.lastAttacker = attacker
 		target.lastAttackedAt = now()
 		target.executed = true
@@ -721,7 +730,19 @@ function CombatService.reset(c: Combatant, protection: number)
 end
 
 function CombatService.isProtected(c: Combatant): boolean
-	return now() < c.protectedUntil
+	return now() < c.protectedUntil or c.model:GetAttribute("Safe") == true
+end
+
+-- Swaps the weapon a fighter is holding (equipping in the lobby).
+function CombatService.setWeapon(c: Combatant, id: string)
+	c.weapon = Weapons.get(id).id
+	c.model:SetAttribute("Weapon", c.weapon)
+	SwordRig.attach(c.model, c.weapon)
+end
+
+-- Who may hurt whom; RoundService installs the lobby/arena rule. Default: anyone.
+function CombatService.setHitFilter(filter: (attacker: Combatant, target: Combatant) -> boolean)
+	hitAllowed = filter
 end
 
 function CombatService.onWindup(listener: WindupListener)

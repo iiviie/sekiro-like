@@ -569,18 +569,7 @@ function MapBuilder.build()
 	braziers(map)
 	fallingLeaves(map)
 
-	local spawn = Instance.new("SpawnLocation")
-	spawn.Name = "PlayerSpawn"
-	spawn.Anchored = true
-	spawn.Neutral = true
-	spawn.Duration = 0 -- a ForceField would block deathblows
-	spawn.Size = Vector3.new(8, 0.2, 8)
-	spawn.CFrame = CFrame.new(0, 0.1, ARENA.WallHalfExtent - 14)
-	spawn.Transparency = 1
-	spawn.CanCollide = false
-	spawn.CanQuery = false
-	spawn.Parent = map
-
+	-- Players spawn in the lobby (LobbyBuilder) and are placed into the arena for a match.
 	map.Parent = workspace
 
 	-- Disable spawn protection on any spawn that came with the place template too.

@@ -309,6 +309,18 @@ function CombatHUD.flashPeril()
 	tween(perilFlash, 0.9, { ImageTransparency = 1 }, Enum.EasingStyle.Sine)
 end
 
+-- In the lobby the bottom of the screen belongs to PLAY and the nav bar: hide your own
+-- vitality and stamina (nothing there can hurt you unless you opt into sparring) and lift
+-- the posture bar above PLAY, where it still teaches the trainer's rhythm.
+function CombatHUD.setLobbyMode(on: boolean)
+	if not ownGroup then
+		return
+	end
+	ownGroup.Visible = not on
+	staminaGroup.Visible = not on
+	postureGroup.Position = if on then UDim2.new(0.5, 0, 1, -260) else UDim2.new(0.5, 0, 1, -100)
+end
+
 -- A brief white flash at the screen's edges: you landed a perfect deflect.
 local perfectFlash: ImageLabel
 function CombatHUD.flashPerfect()
@@ -321,6 +333,9 @@ end
 
 -- Shows the controls reminder for a while, then fades it (called once you enter).
 function CombatHUD.showControls()
+	if Players.LocalPlayer:GetAttribute("SettingControlsHint") == false then
+		return
+	end
 	controlsHint.TextTransparency = 0.25
 	task.delay(CONTROLS_HINT_TIME, function()
 		tween(controlsHint, 2, { TextTransparency = 1 })

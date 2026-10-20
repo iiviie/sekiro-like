@@ -17,6 +17,9 @@
         },
         "RoundEvent": {
           "$className": "RemoteEvent"
+        },
+        "LobbyAction": {
+          "$className": "RemoteEvent"
         }
       }
     },

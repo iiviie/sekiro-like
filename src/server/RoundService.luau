@@ -1,9 +1,10 @@
 --!strict
--- The match loop: Intermission (spar with practice bots, instant respawns) -> Match
--- (everyone plus filler bots, a closing ring, no respawns, last one standing wins)
--- -> Results. Phase timing and the ring are published as attributes on
--- ReplicatedStorage.RoundState (see Shared/Round); eliminations and the winner go out
--- on the RoundEvent remote for the kill feed and banners.
+-- The match loop: Intermission (everyone in the lobby; a countdown runs while anyone is
+-- queued) -> Match (queued players plus filler bots are placed in the castle courtyard; a
+-- closing ring, no respawns, last one standing wins) -> Results (rewards and rating, then
+-- everyone back to the lobby). Players who aren't queued stay in the lobby throughout.
+-- Phase timing and the ring are published as attributes on ReplicatedStorage.RoundState
+-- (see Shared/Round); eliminations and the winner go out on the RoundEvent remote.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,6 +13,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Round = require(ReplicatedStorage.Shared.Round)
 local BotService = require(script.Parent.BotService)
 local CombatService = require(script.Parent.CombatService)
+local LobbyService = require(script.Parent.LobbyService)
 local StatsService = require(script.Parent.StatsService)
 
 type Combatant = CombatService.Combatant
@@ -36,6 +38,9 @@ local RoundService = {}
 local state = Round.state()
 local participants: { [Model]: boolean } = {}
 local eliminated: { [Player]: boolean } = {} -- players out of the current match
+local eliminationOrder: { Player } = {} -- humans, first out first
+local matchWeapons: { [Player]: string } = {}
+local RETURN_DELAY = 5 -- eliminated players watch for a moment, then return to the lobby
 
 local function now(): number
 	return workspace:GetServerTimeNow()
@@ -79,8 +84,15 @@ local function onDied(victim: Combatant, killer: Combatant?, deathblow: boolean)
 			killer = if killer then displayName(killer.model) else nil,
 			deathblow = deathblow,
 		})
-		if victim.player then
-			eliminated[victim.player] = true
+		local player = victim.player
+		if player then
+			eliminated[player] = true
+			table.insert(eliminationOrder, player)
+			task.delay(RETURN_DELAY, function()
+				if player.Character == victim.model then
+					spawnPlayer(player)
+				end
+			end)
 		end
 		state:SetAttribute("Alive", #aliveParticipants())
 		return
@@ -89,7 +101,7 @@ local function onDied(victim: Combatant, killer: Combatant?, deathblow: boolean)
 	local player = victim.player
 	if player then
 		task.delay(Config.Round.RespawnDelay, function()
-			if Round.phase() ~= "Match" and player.Character == victim.model then
+			if player.Character == victim.model then
 				spawnPlayer(player)
 			end
 		end)
@@ -105,12 +117,25 @@ local function waitUntil(t: number, stop: (() -> boolean)?)
 	end
 end
 
+local function queuedPlayers(): { Player }
+	local queued = {}
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local c = character and CombatService.get(character)
+		if LobbyService.isQueued(player) and c and c.state ~= "Dead" then
+			table.insert(queued, player)
+		end
+	end
+	return queued
+end
+
 local function intermission()
-	setPhase("Intermission", Config.Round.Intermission)
 	table.clear(participants)
 	table.clear(eliminated)
-	BotService.setRespawn(true)
-	BotService.setCount(Config.Round.PracticeBots)
+	table.clear(eliminationOrder)
+	table.clear(matchWeapons)
+	BotService.setRespawn(false)
+	BotService.setCount(0)
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -118,24 +143,47 @@ local function intermission()
 			spawnPlayer(player)
 		end
 	end
-	waitUntil(Round.endsAt())
-	-- Testing aid: set workspace attribute HoldIntermission = true (Studio command bar)
-	-- to stay in intermission for practice or automated combat tests.
-	while workspace:GetAttribute("HoldIntermission") do
-		state:SetAttribute("EndsAt", now() + 5)
-		task.wait(0.5)
+
+	-- The countdown only runs while someone is queued; with nobody queued it holds.
+	setPhase("Intermission", Config.Round.Intermission)
+	while true do
+		local queued = #queuedPlayers()
+		state:SetAttribute("Queued", queued)
+		if queued == 0 then
+			state:SetAttribute("Waiting", true)
+			state:SetAttribute("EndsAt", now() + Config.Round.Intermission)
+		else
+			state:SetAttribute("Waiting", false)
+			-- Testing aid: set workspace attribute HoldIntermission = true (Studio command
+			-- bar) to stay in the lobby for practice or automated combat tests.
+			if workspace:GetAttribute("HoldIntermission") then
+				state:SetAttribute("EndsAt", math.max(Round.endsAt(), now() + 5))
+			elseif now() >= Round.endsAt() then
+				return
+			end
+		end
+		task.wait(0.25)
 	end
 end
 
 local function match()
-	local players = Players:GetPlayers()
+	local queued = queuedPlayers()
 	BotService.setRespawn(false)
-	BotService.setCount(math.max(0, Config.Round.MinFighters - #players))
+	BotService.setCount(math.max(0, Config.Round.MinFighters - #queued))
 
-	-- Everyone with a living character fights; place them evenly around the courtyard.
+	-- Queued players and the filler bots fight; place them evenly around the courtyard.
 	local fighters: { Combatant } = {}
-	for _, c in CombatService.all() do
-		if c.state ~= "Dead" then
+	for _, player in queued do
+		local c = player.Character and CombatService.get(player.Character)
+		if c then
+			table.insert(fighters, c)
+			matchWeapons[player] = c.weapon
+		end
+	end
+	local bots = workspace:FindFirstChild("Bots")
+	for _, model in if bots then bots:GetChildren() else {} do
+		local c = model:IsA("Model") and CombatService.get(model)
+		if c and c.state ~= "Dead" then
 			table.insert(fighters, c)
 		end
 	end
@@ -148,6 +196,7 @@ local function match()
 		c.model:PivotTo(CFrame.lookAt(position, Vector3.new(0, 3, 0)))
 		CombatService.reset(c, 3)
 		participants[c.model] = true
+		LobbyService.setInMatch(c.model, true)
 	end
 
 	local t = now()
@@ -197,16 +246,38 @@ local function results(winner: Combatant?)
 	if winner and winner.player then
 		StatsService.addWin(winner.player)
 	end
+	-- Placements, best first: the winner, then the rest in reverse order of elimination.
+	local placements: { Player } = {}
+	if winner and winner.player then
+		table.insert(placements, winner.player)
+	end
+	for _, c in aliveParticipants() do
+		if c ~= winner and c.player then
+			table.insert(placements, c.player)
+		end
+	end
+	for i = #eliminationOrder, 1, -1 do
+		local player = eliminationOrder[i]
+		if player.Parent and not table.find(placements, player) then
+			table.insert(placements, player)
+		end
+	end
+	StatsService.recordMatch(placements, matchWeapons, if winner then winner.player else nil)
 	roundEvent:FireAllClients("Victory", {
 		winner = if winner then winner.model else nil,
 		name = if winner then displayName(winner.model) else nil,
 	})
 	waitUntil(Round.endsAt())
 
-	-- Fresh bodies for everyone before the next intermission.
-	for _, player in Players:GetPlayers() do
-		spawnPlayer(player)
+	-- Everyone who fought goes back to the lobby with a fresh body.
+	for model in participants do
+		LobbyService.setInMatch(model, false)
+		local player = Players:GetPlayerFromCharacter(model)
+		if player then
+			spawnPlayer(player)
+		end
 	end
+	BotService.setCount(0)
 end
 
 function RoundService.start()
@@ -214,10 +285,8 @@ function RoundService.start()
 	CombatService.onDied(onDied)
 
 	Players.PlayerAdded:Connect(function(player)
-		-- Late joiners watch the current match and join the next one.
-		if Round.phase() ~= "Match" then
-			spawnPlayer(player)
-		end
+		-- Everyone arrives in the lobby, even mid-match.
+		spawnPlayer(player)
 	end)
 	for _, player in Players:GetPlayers() do
 		if not player.Character then
