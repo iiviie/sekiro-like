@@ -24,8 +24,10 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
 - **Lobby.** You arrive on a floating shrine island above the castle. New players start **queued**, so the first fight
   comes within ~15 s; press **PLAY** (or step on the glowing red pad) to join or leave the queue. While anyone is queued
   a 12 s countdown runs. Lobby PvP is off by default (turning it on takes 3 s); with it off nobody can touch you except
-  the **Deflect Trainer**, which swings at whoever steps into its sand ring and never deals damage. Fall off the island
-  and you're put back.
+  the **Deflect Trainer**, which swings at whoever steps into its sand ring and never deals damage; after each swing a
+  readout says how many milliseconds before impact you pressed and what it earned. Fall off the island and you're put
+  back. Two boards show **Total Wins** and **Ranked Rating** (OrderedDataStores once published; this server's players
+  until then), and every player carries a title with their wins and rank.
 - **Menus** (bottom bar): **Weapons** (equip, or unlock with coins), **Store** (how coins are earned; gem packs once
   developer products exist), **Profile** (wins, losses, W/L, kills, deathblows, most used weapons, ranked season tier
   and rating), **Rewards** (7-day daily streak, gems on day 7), **Settings** (camera shake, hitstop, controls hint).
@@ -155,9 +157,11 @@ order: naginata (reach), then dual blades; kusarigama last.
 ```
 src/
   shared/   Config, Weapons, Ranks, Types, Assets, Palette, Poses, Clips, Round
-  server/   init, CombatService, BotService, RoundService, StatsService, LobbyService, LobbyBuilder, MapBuilder,
+  server/   init, CombatService, BotService, RoundService, StatsService, LobbyService, LobbyBuilder, LeaderboardService,
+            MapBuilder,
             Outfit, Locomotion, SwordRig, DevHooks
-  client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, LobbyHUD, Panels, UI, TitleScreen,
+  client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, LobbyHUD, Panels, UI, TrainerReadout,
+            TitleScreen,
             Ambience
 ```
 

@@ -283,7 +283,7 @@ function StatsService.recordMatch(placements: { Player }, weapons: { [Player]: s
 			end
 		end
 	end
-	for i, player in placements do
+	for _, player in placements do
 		local d = data[player]
 		if d then
 			d.Played += 1
