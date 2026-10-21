@@ -1,7 +1,8 @@
 --!strict
--- Ronin VIP (game pass `pass.VIP`, cosmetic only, no boosts): an exclusive black-lacquer
+-- Hatamoto VIP (game pass `pass.VIP`, cosmetic only, no boosts; the module, the plate id and the
+-- sheath keep the old name "Ronin" so saves and tooling don't break): an exclusive black-lacquer
 -- sheath with wisteria cord and gold fittings on the left hip, with a faint wisteria aura.
--- The rest of the pass lives elsewhere: the Ronin nameplate frame (`plate.Ronin`, granted by
+-- The rest of the pass lives elsewhere: the Hatamoto nameplate frame (`plate.Ronin`, granted by
 -- server/Monetization) and the chat tag: client/ChatTags with TextChatService, or the speaker
 -- tag below while the place still runs the legacy chat (TextChatService.ChatVersion). Keyed
 -- on the player's `VIP` attribute (Monetization), so it appears the moment the pass is bought.
@@ -77,7 +78,7 @@ local function build(lower: BasePart): Model
 	return model
 end
 
--- Legacy chat only: the [Ronin] tag on the player's speaker (ChatServiceRunner's ChatService).
+-- Legacy chat only: the [Hatamoto] tag on the player's speaker (ChatServiceRunner's ChatService).
 local legacyChat: any = nil
 local function legacyTag(player: Player)
 	if TextChatService.ChatVersion ~= Enum.ChatVersion.LegacyChatService then
@@ -106,7 +107,7 @@ local function legacyTag(player: Player)
 		end
 		if speaker then
 			local tags = if player:GetAttribute("VIP") == true
-				then { { TagText = "Ronin", TagColor = WISTERIA } }
+				then { { TagText = "Hatamoto", TagColor = WISTERIA } }
 				else {}
 			speaker:SetExtraData("Tags", tags)
 		end

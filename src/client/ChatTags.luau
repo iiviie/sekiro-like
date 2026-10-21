@@ -1,6 +1,6 @@
 --!strict
--- Chat tags: Ronin VIP owners (the `VIP` attribute from server/Monetization) get a wisteria
--- [Ronin] before their name in chat, in their nameplate frame's colour (Shared/Flair).
+-- Chat tags: Hatamoto VIP owners (the `VIP` attribute from server/Monetization) get a wisteria
+-- [Hatamoto] before their name in chat, in their nameplate frame's colour (Shared/Flair).
 -- Cosmetic only; the only TextChatService.OnIncomingMessage callback in the game.
 
 local Players = game:GetService("Players")
@@ -12,7 +12,7 @@ local Flair = require(ReplicatedStorage.Shared.Flair)
 local ChatTags = {}
 
 function ChatTags.start()
-	local tag = `<font color="#{Flair.plate("Ronin").edge:ToHex()}">[Ronin]</font> `
+	local tag = `<font color="#{Flair.plate("Ronin").edge:ToHex()}">[Hatamoto]</font> `
 	TextChatService.OnIncomingMessage = function(message: TextChatMessage): TextChatMessageProperties?
 		local source = message.TextSource
 		local speaker = source and Players:GetPlayerByUserId(source.UserId)

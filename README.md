@@ -185,7 +185,7 @@ week; a 3-times-a-week player reaches about tier 20. Tier skips: +1 (49 R$), +10
 ### Store, draws and odds
 
 - **Daily shop:** 2 coin and 2 gem items a day, plus a weekly featured set of 3 at 20% off (you pay only for what you
-  don't own). Items come back within a couple of weeks. No paid refresh; the only timers are the real rotation times.
+  don't own). Every item comes back within 8 weeks (`EconomyConfig.Shop.ReturnWithinDays`, 56 days). No paid refresh; the only timers are the real rotation times.
 - **Shrine Draw** (earned, no Robux): opens one outcome. Odds: 100 coins 40%, 250 coins 12%, 1 Whetstone 15%,
   3 Whetstones 3%, 5 gems 8%, 20 gems 2%, 10 Shards 10%, a common/uncommon cosmetic 6%, rare 3%, epic 1%. The odds
   sheet shows before your first draw of a session and from the Odds button any time; owned items read "owned → N
@@ -210,9 +210,10 @@ your next login). Then your rating **soft-resets** halfway to 400 (1,950 becomes
 season, after the rewards; Profile shows the reset for two weeks and, before it, where the next one will put you
 (`EconomyConfig.N.Ranked.SoftReset`).
 
-### Ronin VIP
+### Hatamoto VIP
 
-A game pass, cosmetic only: the Ronin nameplate frame (wisteria), a **[Ronin]** chat tag in the same colour
+A game pass, cosmetic only: the Hatamoto nameplate frame (wisteria; its id is still `plate.Ronin` so saves keep it,
+and the name stays clear of the Ronin bot tier), a **[Hatamoto]** chat tag in the same colour
 ([ChatTags.luau](src/client/ChatTags.luau) with TextChatService; [Ronin.luau](src/server/Ronin.luau) sets the speaker
 tag while the place still uses the legacy chat), and an exclusive black-lacquer sheath with gold fittings and a faint
 wisteria aura on the left hip (Ronin.luau). No boosts.
@@ -228,7 +229,7 @@ Until an id is filled in (it's `0` today), Studio purchases take Monetization's 
 | `bundle.LineYozakura` / `LineRaijin` / `LineKarasu` | Developer product | 1,499 | the line at L4 with its finisher (marked "soon": not on sale yet) |
 | `pass.Premium` | Developer product (bought per season) | 449 | the season's premium track |
 | `pass.TierSkip` / `pass.Tiers10` | Developer product | 49 / 399 | +1 / +10 pass tiers |
-| `pass.VIP` | Game pass | 299 | Ronin nameplate, chat tag, sheath |
+| `pass.VIP` | Game pass | 299 | Hatamoto nameplate, chat tag, sheath |
 | `pass.Loadouts` | Game pass | 99 | 6 loadout slots (3 without) |
 | `pass.TitleSlot` | Game pass | 99 | a second title slot |
 | `pass.VictoryCry` | Game pass | 149 | the victory cry |
@@ -317,7 +318,7 @@ stomp window) are per-move fields in `Config.Attacks` with defaults in `Config.M
 - **Posture.** Builds from guarded hits (×1.0), clean hits (×0.5, which can fill it to 99 but never break it) and being
   deflected. It recovers at a flat 9/s once its delay has passed: 0.5 s after your deflect, 2.5 s after a guarded or
   clean hit, 1.2 s after being deflected; there's no vitality scaling and no guard bonus. At 100 you're **broken** for
-  1.6 s with a red deathblow marker; a hit then is a **deathblow** (忍殺): 65 damage, so it kills a wounded fighter and
+  1.6 s with a red deathblow marker; a hit then is a **deathblow** (its splash is 斬): 65 damage, so it kills a wounded fighter and
   knocks an unhurt one down hard (posture wiped). A break that runs out unpunished leaves posture at 99, so the next
   guard or deflect re-breaks. `Config.Posture.Profiles.Boss` holds Kannagi's boss column for the boss duels to come.
 - **Stamina.** Only dodges (25 of 100) and feints cost stamina; attacks are limited by commitment, cooldowns and
@@ -554,4 +555,5 @@ src/
   tag paths are in place).
 - Fill in the maturity questionnaire (combat shows no blood: hits and deathblows throw ink).
 - Store page: icon and thumbnails (real gameplay captures work best), description, genre "Fighting".
-- Rename anything that borrows FromSoftware terms ("Shinobi Execution", "Mikiri") if you want to avoid trouble.
+- FromSoftware terms: "Shinobi Execution" and its 忍殺 splash are gone (a lethal deathblow splashes "Deathblow" under
+  斬). "Mikiri" stays: it is a real Japanese sword term (見切り, reading the cut), and the Guide and Coach explain it.
