@@ -1204,6 +1204,9 @@ local function simulate(pool: string, n: number, seed: number?): { [string]: any
 	return out
 end
 
+-- Odds audits (phase-3 tests, the ShopTest hook): n draws on the real roll functions.
+ShopService.simulate = simulate
+
 local function testHooks()
 	local hook = Instance.new("BindableFunction")
 	hook.Name = "ShopTest"
