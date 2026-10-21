@@ -219,7 +219,7 @@ add("bladeSkin", "Moon", {
 	name = "Moonlit Edge",
 	rarity = "epic",
 	price = { coins = 2500 },
-	rule = { stat = "Perfects", atLeast = 150, text = "150 perfect deflects" },
+	rule = { stat = "Perfects", atLeast = 150, text = "Land 150 perfect deflects" },
 	sources = { "coins" },
 })
 -- New coin skins: the long coin sink, gated by Mastery.
@@ -268,7 +268,7 @@ add("bladeSkin", "Kintsugi", {
 -- Boss-trial skins: earned, never sold. Two per star tier, plus the trainer's.
 add("bladeSkin", "Washi", {
 	name = "Washi Talisman",
-	rule = { boss = "Enemy03", text = "Clear the Shikigami trial" },
+	rule = { boss = "Enemy03", text = "Clear the Rabbit Shikigami trial" },
 	auto = true,
 	sources = { "boss" },
 })
@@ -317,7 +317,7 @@ add("bladeSkin", "Niten", {
 -- Boss no-hit gold variants: clear that boss without taking a hit (server/BossService).
 for _, g in
 	{
-		{ "GoldWashi", "Enemy03", "Gilded Talisman", "rare", "Shikigami" },
+		{ "GoldWashi", "Enemy03", "Gilded Talisman", "rare", "Rabbit Shikigami" },
 		{ "GoldNameless", "Enemy01", "Gilded Nameless", "epic", "Nameless Warrior" },
 		{ "GoldCatClaw", "Enemy07", "Gilded Claw", "epic", "Cat General" },
 		{ "GoldMistveil", "Enemy05", "Gilded Mist", "epic", "Guard of Mist" },
@@ -437,14 +437,14 @@ add("intro", "Iai", {
 add("intro", "Tsukimi", {
 	name = "Moon Gaze",
 	rarity = "epic",
-	rule = { boss = "Enemy06", text = "Defeat the Night Fox" },
+	rule = { boss = "Enemy06", text = "Clear the Night Fox trial" },
 	auto = true,
 	sources = { "boss" },
 })
 add("intro", "Ryu", {
 	name = "Dragon Coil",
 	rarity = "legendary",
-	rule = { allBosses = true, text = "Defeat all nine bosses" },
+	rule = { allBosses = true, text = "Clear every boss trial" },
 	auto = true,
 	sources = { "boss" },
 })
@@ -480,26 +480,26 @@ add("outfit", "ink", { name = "Ink Gi", rarity = "epic", price = { coins = 13000
 -- Boss sets: earned by a first clear of that boss.
 for _, boss in
 	{
-		{ "shikigami", "Enemy03", "Shikigami's Paper Robe", "uncommon" },
-		{ "nameless", "Enemy01", "Nameless Sashiko", "rare" },
-		{ "cat", "Enemy07", "Cat General's Gi", "rare" },
-		{ "mist", "Enemy05", "Guard of Mist", "rare" },
-		{ "demon", "Enemy04", "Little Demon's Gi", "epic" },
-		{ "fox", "Enemy06", "Night Fox", "epic" },
-		{ "niten", "Enemy09", "Niten's White", "legendary" },
+		{ "shikigami", "Enemy03", "Shikigami's Paper Robe", "uncommon", "Rabbit Shikigami" },
+		{ "nameless", "Enemy01", "Nameless Sashiko", "rare", "Nameless Warrior" },
+		{ "cat", "Enemy07", "Cat General's Gi", "rare", "Cat General" },
+		{ "mist", "Enemy05", "Mist Guard's Coat", "rare", "Guard of Mist" },
+		{ "demon", "Enemy04", "Little Demon's Gi", "epic", "Little Demon" },
+		{ "fox", "Enemy06", "Night Fox Kimono", "epic", "Night Fox" },
+		{ "niten", "Enemy09", "Niten's White", "legendary", "Niten Usagi" },
 	}
 do
 	add("outfit", boss[1], {
 		name = boss[3],
 		rarity = boss[4],
-		rule = { boss = boss[2], text = `Clear the {boss[3]} trial` },
+		rule = { boss = boss[2], text = `Clear the {boss[5]} trial` },
 		auto = true,
 		sources = { "boss" },
 	})
 end
 -- Premium sets.
 add("outfit", "miko", { name = "Shrine Maiden", rarity = "epic", price = { gems = 900 }, sources = { "gems" } })
-add("outfit", "shadow", { name = "Crimson Shadow", rarity = "epic", price = { gems = 650 }, sources = { "gems" } })
+add("outfit", "shadow", { name = "Crimson Shade", rarity = "epic", price = { gems = 650 }, sources = { "gems" } })
 
 --------------------------------------------------------------------------------------------
 -- Titles: achievements (earn-only), ranked season tiers, the pass, the bundle, a few for coins.
@@ -516,14 +516,14 @@ achievement("LastBlade", "The Last Blade", "rare", {
 	atLeast = 10,
 	text = "Win 10 royales against other players",
 })
-achievement("Kensei", "Kensei", "legendary", {
+achievement("Kensei", "Sword Saint", "legendary", {
 	stat = "HumanWins",
 	atLeast = 50,
 	text = "Win 50 royales against other players",
 })
 achievement("Executioner", "Executioner", "rare", { stat = "Deathblows", atLeast = 100, text = "Land 100 deathblows" })
-achievement("Unbroken", "Unbroken", "epic", { stat = "Perfects", atLeast = 500, text = "500 perfect deflects" })
-achievement("Mikiri", "Mikiri Master", "epic", { stat = "Mikiris", atLeast = 25, text = "25 Mikiri Counters" })
+achievement("Unbroken", "Unbroken", "epic", { stat = "Perfects", atLeast = 500, text = "Land 500 perfect deflects" })
+achievement("Mikiri", "Mikiri Master", "epic", { stat = "Mikiris", atLeast = 25, text = "Land 25 Mikiri Counters" })
 achievement("Demonslayer", "Demonslayer", "legendary", { allBosses = true, text = "Clear every boss trial" })
 for _, tier in { "Bronze", "Silver", "Gold", "Jade", "Crimson", "Shogun" } do
 	add("title", `S1{tier}`, {
@@ -559,7 +559,7 @@ add("banner", "Oni", {
 add("banner", "Thousand", {
 	name = "Thousand Deflects",
 	rarity = "epic",
-	rule = { stat = "Perfects", atLeast = 1000, text = "1,000 perfect deflects" },
+	rule = { stat = "Perfects", atLeast = 1000, text = "Land 1,000 perfect deflects" },
 	auto = true,
 	sources = { "achievement" },
 })
@@ -576,7 +576,8 @@ add("banner", "S1Path", { name = "Path of the Blade · S1", rarity = "epic", sou
 --------------------------------------------------------------------------------------------
 -- Nameplate frames: ranked season rewards and VIP.
 add("nameplate", "Plain", { name = "Plain", default = true, sources = { "default" } })
-add("nameplate", "Ronin", { name = "Ronin", rarity = "epic", sources = { "vip" } })
+-- The VIP plate shows as Hatamoto (the bot tier is Ronin); its id stays "Ronin" so owned saves keep it.
+add("nameplate", "Ronin", { name = "Hatamoto", rarity = "epic", sources = { "vip" } })
 for _, tier in { "Gold", "Jade", "Crimson", "Shogun" } do
 	add("nameplate", `S1{tier}`, {
 		name = `{tier} Frame · S1`,
@@ -643,8 +644,8 @@ add("pass", "Premium", {
 add("pass", "TierSkip", { name = "Tier skip", price = { product = "pass.TierSkip" }, sources = { "robux" } })
 add("pass", "Tiers10", { name = "+10 tiers", price = { product = "pass.Tiers10" }, sources = { "robux" } })
 add("pass", "VIP", {
-	name = "Ronin VIP",
-	blurb = "A Ronin nameplate and chat tag, an exclusive sheath. No boosts.",
+	name = "Hatamoto VIP",
+	blurb = "A Hatamoto nameplate and chat tag, an exclusive sheath. No boosts.",
 	rarity = "epic",
 	price = { product = "pass.VIP" },
 	contents = { items = { "plate.Ronin" } },
