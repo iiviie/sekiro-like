@@ -52,38 +52,32 @@ local function clear()
 	end
 end
 
-local function sectionTitle(text: string, y: number)
-	UI.text({
+-- A small caps section label with a gold rule fading out to the right.
+local function sectionTitle(text: string, y: number, parent: Instance?)
+	local into = parent or body
+	UI.label("caption", {
 		Position = UDim2.fromOffset(0, y),
 		Size = UDim2.new(1, 0, 0, 20),
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextColor3 = UI.Bronze,
-		TextSize = 16,
+		TextColor3 = UI.Theme.GoldHi,
+		TextSize = 15,
 		Text = text,
-	}, body)
-	UI.new("Frame", {
-		Position = UDim2.fromOffset(0, y + 22),
-		Size = UDim2.new(1, 0, 0, 1),
-		BackgroundColor3 = UI.Bronze,
-		BackgroundTransparency = 0.6,
-		BorderSizePixel = 0,
-	}, body)
+	}, into)
+	UI.divider(into, { Position = UDim2.fromOffset(0, y + 20), Size = UDim2.new(1, 0, 0, 6), ornament = "none" })
 end
 
+-- A stat chip on an inset plate: the label in small caps, the value in the number face.
 local function statBox(parent: Instance, label: string, value: string, position: UDim2, size: UDim2)
-	local box = UI.panel({ Position = position, Size = size, BackgroundColor3 = UI.PanelLight }, parent)
-	UI.text({
+	local box = UI.panel({ Position = position, Size = size, material = "inset" }, parent)
+	UI.label("caption", {
 		Position = UDim2.fromOffset(0, 6),
-		Size = UDim2.new(1, 0, 0, 16),
-		TextSize = 14,
-		TextTransparency = 0.3,
+		Size = UDim2.new(1, 0, 0, 18),
 		Text = label,
 	}, box)
-	UI.text({
-		Position = UDim2.fromOffset(0, 22),
-		Size = UDim2.new(1, -0, 1, -26),
-		Font = UI.Bold,
-		TextSize = 24,
+	UI.label("number", {
+		Position = UDim2.fromOffset(0, 24),
+		Size = UDim2.new(1, 0, 1, -28),
+		TextSize = 26,
 		Text = value,
 	}, box)
 end
@@ -118,55 +112,76 @@ local GUIDE = {
 	},
 }
 
+-- How to fight reads as a washi scroll: ink headings and body text on paper; the perilous
+-- entry shows the brushed 危 as an image.
 local function guidePanel()
+	local scroll = UI.panel({ Name = "Scroll", material = "washi", Size = UDim2.fromScale(1, 1) }, body)
+	UI.grain(scroll, 0.88)
 	local list = UI.new("ScrollingFrame", {
-		Size = UDim2.fromScale(1, 1),
+		Position = UDim2.fromOffset(18, 14),
+		Size = UDim2.new(1, -30, 1, -24),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		ScrollBarThickness = 4,
+		ScrollBarThickness = 5,
+		ScrollBarImageColor3 = UI.Theme.Bronze,
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		CanvasSize = UDim2.new(),
-	}, body)
-	UI.new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+	}, scroll)
+	UI.new("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+	UI.new("UIPadding", { PaddingRight = UDim.new(0, 12), PaddingBottom = UDim.new(0, 8) }, list)
 	for i, entry in GUIDE do
-		local card = UI.panel({
-			Size = UDim2.new(1, -10, 0, 0),
+		local card = UI.new("Frame", {
+			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			LayoutOrder = i,
-			BackgroundColor3 = UI.PanelLight,
+			BackgroundTransparency = 1,
 		}, list)
-		UI.new("UIPadding", {
-			PaddingLeft = UDim.new(0, 12),
-			PaddingRight = UDim.new(0, 12),
-			PaddingTop = UDim.new(0, 8),
-			PaddingBottom = UDim.new(0, 10),
-		}, card)
-		UI.new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, card)
-		UI.text({
-			Size = UDim2.new(1, 0, 0, 24),
+		UI.new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, card)
+		local perilous = string.find(entry[1], "危") ~= nil
+		local headRow = UI.new("Frame", {
+			Size = UDim2.new(1, 0, 0, 32),
 			LayoutOrder = 1,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Font = UI.Display,
-			TextSize = 24,
-			TextColor3 = if i == 4 then Color3.fromRGB(230, 80, 70) else UI.Gold,
-			Text = entry[1],
+			BackgroundTransparency = 1,
 		}, card)
+		local x = 0
+		if perilous then
+			UI.kanji("KanjiPeril", {
+				Position = UDim2.fromOffset(-4, -4),
+				Size = UDim2.fromOffset(40, 40),
+				ImageColor3 = UI.Theme.LacquerRed,
+			}, headRow)
+			x = 40
+		end
+		UI.text({
+			Position = UDim2.fromOffset(x, 0),
+			Size = UDim2.new(1, -x, 1, 0),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			FontFace = UI.Fonts.Display,
+			TextSize = 22,
+			TextColor3 = if perilous then UI.Theme.LacquerRed else UI.Theme.Ink,
+			Text = if perilous then "Red = perilous" else entry[1],
+		}, headRow)
 		UI.text({
 			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			LayoutOrder = 2,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextWrapped = true,
-			TextSize = 16,
+			TextSize = 17,
+			TextColor3 = UI.Theme.Ink,
 			Text = entry[2],
 		}, card)
+		if i < #GUIDE then
+			UI.divider(card, { LayoutOrder = 3, Size = UDim2.new(1, 0, 0, 12), color = UI.Theme.Bronze })
+		end
 	end
 	UI.text({
-		Size = UDim2.new(1, -10, 0, 40),
+		Size = UDim2.new(1, 0, 0, 44),
 		LayoutOrder = 99,
 		TextWrapped = true,
-		TextSize = 15,
-		TextTransparency = 0.2,
+		TextSize = 16,
+		TextColor3 = UI.Theme.Bronze,
+		FontFace = UI.Fonts.Label,
 		Text = "Practise on the Deflect Trainer in the dojo (left wing): it tells you how many milliseconds early you pressed.",
 	}, list)
 end
@@ -187,82 +202,72 @@ local function trialsPanel()
 			local value = if fresh then math.min(progress[id] or 0, trial.goal) else 0
 			local done = value >= trial.goal
 			local card = UI.panel({
-				Position = UDim2.fromOffset(0, (i - 1) * 88),
+				Name = id,
+				Position = UDim2.fromOffset(0, (i - 1) * 86),
 				Size = UDim2.new(1, -4, 0, 78),
-				BackgroundColor3 = if done then Color3.fromRGB(34, 44, 36) else UI.PanelLight,
+				material = "inset",
+				tint = if done then UI.Theme.JadeBtn:Lerp(UI.Theme.Plate, 0.5) else UI.Theme.Plate,
 			}, body)
 			UI.new("ImageLabel", {
-				Position = UDim2.fromOffset(4, 2),
-				Size = UDim2.fromOffset(74, 74),
+				Position = UDim2.fromOffset(6, 4),
+				Size = UDim2.fromOffset(70, 70),
 				BackgroundTransparency = 1,
 				Image = Assets.Icons.Trials,
-				ImageTransparency = if done then 0 else 0.15,
+				ImageTransparency = if done then 0.35 else 0,
 			}, card)
+			if done then
+				UI.badge(card, "done", 28).Position = UDim2.fromOffset(62, 58)
+			end
 			UI.text({
-				Position = UDim2.fromOffset(90, 8),
-				Size = UDim2.new(1, -250, 0, 26),
+				Position = UDim2.fromOffset(88, 8),
+				Size = UDim2.new(1, -250, 0, 28),
 				TextXAlignment = Enum.TextXAlignment.Left,
-				Font = UI.Display,
-				TextSize = 24,
+				FontFace = UI.Fonts.Display,
+				TextSize = 21,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				TextColor3 = if done then UI.Theme.Dim else UI.Theme.Bone,
 				Text = trial.text,
 			}, card)
-			local track = UI.new("Frame", {
-				Position = UDim2.fromOffset(90, 44),
-				Size = UDim2.new(1, -250, 0, 16),
-				BackgroundColor3 = Color3.fromRGB(12, 10, 12),
-				BorderSizePixel = 0,
+			UI.progress({
+				Position = UDim2.fromOffset(88, 44),
+				Size = UDim2.new(1, -250, 0, 22),
+				value = value,
+				max = trial.goal,
+				tone = "crimson",
+				doneTone = "jade",
+				textWidth = 70,
+				format = function(v: number, m: number): string
+					return if v >= m then "Done" else `{v} / {m}`
+				end,
 			}, card)
-			UI.corner(track, UDim.new(1, 0))
-			local fill = UI.new("Frame", {
-				Size = UDim2.fromScale(math.max(value / trial.goal, 0.02), 1),
-				BackgroundColor3 = if done then UI.Jade else UI.Crimson,
-				BorderSizePixel = 0,
-			}, track)
-			UI.corner(fill, UDim.new(1, 0))
-			UI.text({
-				Size = UDim2.fromScale(1, 1),
-				Font = UI.Bold,
-				TextSize = 13,
-				TextStrokeTransparency = 0.3,
-				Text = if done then "COMPLETE" else `{value} / {trial.goal}`,
-			}, track)
 			local reward = UI.new("Frame", {
 				AnchorPoint = Vector2.new(1, 0.5),
-				Position = UDim2.new(1, -12, 0.5, 0),
-				Size = UDim2.fromOffset(140, 60),
+				Position = UDim2.new(1, -14, 0.5, 0),
+				Size = UDim2.fromOffset(130, 62),
 				BackgroundTransparency = 1,
 			}, card)
-			UI.new("ImageLabel", {
-				Position = UDim2.fromOffset(0, 0),
-				Size = UDim2.fromOffset(34, 34),
-				BackgroundTransparency = 1,
-				Image = Assets.Icons.Coin,
+			UI.price({
+				currency = "coins",
+				amount = trial.coins,
+				Position = UDim2.fromOffset(10, 2),
+				Size = UDim2.new(1, -10, 0, 30),
 			}, reward)
-			UI.text({
-				Position = UDim2.fromOffset(38, 2),
-				Size = UDim2.new(1, -38, 0, 30),
-				TextXAlignment = Enum.TextXAlignment.Left,
-				Font = UI.Bold,
-				TextSize = 22,
-				TextColor3 = UI.Gold,
-				Text = UI.number(trial.coins),
-			}, reward)
-			UI.text({
-				Position = UDim2.fromOffset(38, 32),
-				Size = UDim2.new(1, -38, 0, 22),
-				TextXAlignment = Enum.TextXAlignment.Left,
+			UI.label("number", {
+				Position = UDim2.fromOffset(0, 36),
+				Size = UDim2.new(1, 0, 0, 22),
+				TextXAlignment = Enum.TextXAlignment.Right,
 				TextSize = 16,
-				TextTransparency = 0.2,
+				TextColor3 = UI.Theme.GoldHi,
 				Text = `+{trial.xp} XP`,
 			}, reward)
 		end
 	end
 	local secondsLeft = secondsLeftToday()
 	UI.text({
-		Position = UDim2.fromOffset(0, 258),
+		Position = UDim2.fromOffset(0, 256),
 		Size = UDim2.new(1, 0, 0, 20),
-		TextSize = 15,
-		TextTransparency = 0.35,
+		TextSize = 16,
+		TextColor3 = UI.Theme.Dim,
 		Text = `New trials in {math.floor(secondsLeft / 3600)}h {math.floor(secondsLeft % 3600 / 60)}m  ·  rewards pay out the moment a trial is done`,
 	}, body)
 end
@@ -286,7 +291,14 @@ local function profilePanel()
 		statBox(body, stat[1], stat[2], UDim2.new(column / 3, 4, 0, 34 + row * 70), UDim2.new(1 / 3, -8, 0, 62))
 	end
 
-	sectionTitle("Most used weapons", 184)
+	UI.label("caption", {
+		Position = UDim2.fromOffset(0, 184),
+		Size = UDim2.new(0.5, -8, 0, 20),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = UI.Theme.GoldHi,
+		TextSize = 15,
+		Text = "Most used weapons",
+	}, body)
 	local ok, uses = pcall(function()
 		return HttpService:JSONDecode(attr("WeaponUses", "{}"))
 	end)
@@ -300,11 +312,15 @@ local function profilePanel()
 	for i = 1, 3 do
 		local entry = sorted[i]
 		UI.text({
-			Position = UDim2.fromOffset(0, 192 + i * 24),
-			Size = UDim2.new(0.5, 0, 0, 22),
+			Position = UDim2.fromOffset(0, 184 + i * 23),
+			Size = UDim2.new(0.5, -8, 0, 22),
 			TextXAlignment = Enum.TextXAlignment.Left,
-			TextSize = 16,
-			Text = if entry then `#{i}  {Weapons.get(entry.id).name}  ·  {entry.count} games` else `#{i}  —`,
+			TextSize = 17,
+			TextColor3 = if entry then UI.Theme.Bone else UI.Theme.Ash,
+			RichText = true,
+			Text = if entry
+				then `<font color="#E8C77A">{i}</font>   {Weapons.get(entry.id).name}  <font color="#A89F92">·  {entry.count} games</font>`
+				else `{i}   —`,
 		}, body)
 	end
 
@@ -312,50 +328,49 @@ local function profilePanel()
 	local rating = attr("Rating", Config.Rating.Start)
 	local rank = Ranks.of(rating)
 	local season = UI.panel({
-		Position = UDim2.new(0.5, 4, 0, 190),
-		Size = UDim2.new(0.5, -4, 0, 88),
-		BackgroundColor3 = UI.PanelLight,
+		Name = "Season",
+		Position = UDim2.new(0.5, 4, 0, 184),
+		Size = UDim2.new(0.5, -4, 0, 92),
+		material = "inset",
 	}, body)
-	UI.text({
-		Position = UDim2.fromOffset(12, 6),
-		Size = UDim2.new(1, -24, 0, 18),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextSize = 14,
-		TextTransparency = 0.3,
-		Text = `Season 1  ·  peak {attr("PeakRating", rating)}`,
-	}, season)
 	UI.new("ImageLabel", {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, 6, 0, 18),
-		Size = UDim2.fromOffset(64, 64),
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 2, 0.5, 0),
+		Size = UDim2.fromOffset(84, 84),
 		BackgroundTransparency = 1,
 		Image = Assets.RankCrests[rank.tier] or "",
 		ZIndex = 2,
 	}, season)
-	UI.text({
-		Position = UDim2.fromOffset(12, 24),
-		Size = UDim2.new(1, -24, 0, 30),
+	UI.label("caption", {
+		Position = UDim2.fromOffset(92, 8),
+		Size = UDim2.new(1, -104, 0, 18),
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = UI.Display,
-		TextSize = 28,
+		Text = `Season 1  ·  peak {attr("PeakRating", rating)}`,
+	}, season)
+	UI.text({
+		Position = UDim2.fromOffset(92, 26),
+		Size = UDim2.new(1, -104, 0, 30),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		FontFace = UI.Fonts.Display,
+		TextSize = 24,
 		TextColor3 = rank.color,
 		Text = rank.name,
 	}, season)
-	UI.text({
-		Position = UDim2.fromOffset(12, 24),
-		Size = UDim2.new(1, -84, 0, 30),
+	UI.label("number", {
+		Position = UDim2.fromOffset(92, 26),
+		Size = UDim2.new(1, -104, 0, 30),
 		TextXAlignment = Enum.TextXAlignment.Right,
-		Font = UI.Bold,
 		TextSize = 20,
 		Text = `{rating}`,
 	}, season)
 	local bar = UI.new("Frame", {
-		Position = UDim2.fromOffset(12, 58),
-		Size = UDim2.new(1, -24, 0, 6),
+		Position = UDim2.fromOffset(92, 60),
+		Size = UDim2.new(1, -104, 0, 6),
 		BackgroundColor3 = UI.Ink,
 		BorderSizePixel = 0,
 	}, season)
 	UI.corner(bar, UDim.new(1, 0))
+	UI.stroke(bar, UI.Bronze, 1, 0)
 	local fill = UI.new("Frame", {
 		Size = UDim2.fromScale(math.clamp((rating - rank.floor) / (rank.ceiling - rank.floor), 0, 1), 1),
 		BackgroundColor3 = rank.color,
@@ -363,12 +378,12 @@ local function profilePanel()
 	}, bar)
 	UI.corner(fill, UDim.new(1, 0))
 	UI.text({
-		Position = UDim2.fromOffset(12, 66),
-		Size = UDim2.new(1, -24, 0, 16),
+		Position = UDim2.fromOffset(92, 68),
+		Size = UDim2.new(1, -104, 0, 18),
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextSize = 13,
-		TextTransparency = 0.4,
-		Text = `{rank.floor}  →  {rank.ceiling}   ·   vs players only, not bots`,
+		TextSize = 14,
+		TextColor3 = UI.Theme.Ash,
+		Text = `{rank.floor} → {rank.ceiling}  ·  vs players, not bots`,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, season)
 end
@@ -382,57 +397,74 @@ local function rewardsPanel()
 	for day, coins in daily.Coins do
 		local done = day < nextDay or (claimedToday and day == nextDay)
 		local isNext = day == nextDay and not claimedToday
+		local last = day == #daily.Coins
 		local card = UI.panel({
-			Position = UDim2.new((day - 1) / 7, 3, 0, 36),
-			Size = UDim2.new(1 / 7, -6, 0, 104),
-			BackgroundColor3 = if isNext then UI.Crimson elseif done then UI.Panel else UI.PanelLight,
+			Name = `Day{day}`,
+			Position = UDim2.new((day - 1) / 7, 3, 0, 34),
+			Size = UDim2.new(1 / 7, -6, 0, 114),
+			material = "inset",
+			tint = if isNext
+				then UI.Theme.JadeBtn
+				elseif last then UI.Theme.LacquerHi:Lerp(UI.Theme.Gold, 0.18)
+				else UI.Theme.Plate,
 		}, body)
-		UI.text({
+		if isNext then
+			UI.new("UIStroke", { Name = "_Pulse", Color = UI.Theme.JadeText, Thickness = 2 }, card)
+			if not UI.reducedMotion() then
+				UI.play(card:FindFirstChild("_Pulse") :: UIStroke, UI.Motion.Pulse, { Transparency = 0.7 })
+			end
+		end
+		UI.label("caption", {
 			Position = UDim2.fromOffset(0, 6),
 			Size = UDim2.new(1, 0, 0, 18),
-			TextSize = 14,
+			TextColor3 = if isNext then UI.Theme.Bone else UI.Theme.Dim,
 			Text = `Day {day}`,
 		}, card)
-		UI.text({
-			Position = UDim2.fromOffset(0, 34),
-			Size = UDim2.new(1, 0, 0, 28),
-			Font = UI.Bold,
-			TextSize = 22,
-			TextColor3 = UI.Gold,
-			Text = `● {coins}`,
+		UI.new("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0, 26),
+			Size = UDim2.fromOffset(40, 40),
+			BackgroundTransparency = 1,
+			Image = if last then Assets.Icons.Rewards else Assets.Icons.Coin,
+			ImageTransparency = if done then 0.5 else 0,
 		}, card)
-		if day == #daily.Coins then
-			UI.text({
-				Position = UDim2.fromOffset(0, 62),
+		UI.label("number", {
+			Position = UDim2.fromOffset(0, 66),
+			Size = UDim2.new(1, 0, 0, 22),
+			TextSize = 18,
+			TextColor3 = if done then UI.Theme.Ash else UI.Theme.GoldHi,
+			Text = UI.number(coins),
+		}, card)
+		if last then
+			UI.label("number", {
+				Position = UDim2.fromOffset(0, 86),
 				Size = UDim2.new(1, 0, 0, 20),
 				TextSize = 15,
-				TextColor3 = Color3.fromRGB(240, 110, 100),
-				Text = `+ ◆ {daily.LastDayGems}`,
+				TextColor3 = if done then UI.Theme.Ash else UI.Theme.JadeText,
+				Text = `+{daily.LastDayGems} gems`,
 			}, card)
 		end
 		if done then
-			UI.text({
-				Position = UDim2.new(0, 0, 1, -24),
-				Size = UDim2.new(1, 0, 0, 20),
-				TextSize = 14,
-				TextColor3 = UI.Jade,
-				Text = "Claimed",
-			}, card)
+			UI.badge(card, "done", 26).Position = UDim2.new(1, -14, 0, 14)
 		end
 	end
 	local claim = UI.button({
 		Name = "Claim",
+		variant = if claimedToday then "disabled" else "reward",
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 160),
-		Size = UDim2.fromOffset(220, 50),
-		Font = UI.Display,
-		TextSize = 26,
+		Position = UDim2.new(0.5, 0, 0, 166),
+		Size = UDim2.fromOffset(260, UI.Touch),
+		FontFace = UI.Fonts.Display,
+		TextSize = 24,
 		Text = if claimedToday then "Come back tomorrow" else "Claim",
-		BackgroundColor3 = if claimedToday then UI.Panel else UI.Crimson,
+		sound = if claimedToday then false else "Press",
 	}, body)
-	UI.stroke(claim)
+	if claimedToday then
+		claim:SetAttribute("Quiet", true)
+	end
 	claim.Activated:Connect(function()
 		if not claimedToday then
+			UI.sound("Claim")
 			-- Say what it paid once the server has granted it.
 			local nextCoins = daily.Coins[nextDay] or 0
 			player:GetAttributeChangedSignal("LastDaily"):Once(function()
@@ -443,6 +475,58 @@ local function rewardsPanel()
 	end)
 end
 
+-- One settings row: the label left, a segmented control right (ink track, crimson thumb).
+local function segmented(
+	parent: Instance,
+	y: number,
+	key: string,
+	label: string,
+	options: { { text: string, value: any } },
+	selected: any,
+	onPick: (any) -> ()
+)
+	UI.label("label", {
+		Position = UDim2.fromOffset(0, y),
+		Size = UDim2.new(1, -280, 0, 48),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Text = label,
+	}, parent)
+	local width = 86 * #options
+	local track = UI.new("Frame", {
+		Name = key,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, y + 2),
+		Size = UDim2.fromOffset(width, 46),
+		BackgroundColor3 = UI.Ink,
+		BorderSizePixel = 0,
+	}, parent)
+	UI.corner(track, UDim.new(0, 6))
+	UI.stroke(track, UI.Theme.Bronze, 1, 0)
+	for i, option in options do
+		local on = option.value == selected
+		local seg = UI.new("TextButton", {
+			Name = option.text,
+			Position = UDim2.new((i - 1) / #options, 3, 0, 3),
+			Size = UDim2.new(1 / #options, -6, 1, -6),
+			BackgroundColor3 = if on then UI.Theme.CrimsonBtn else UI.Ink,
+			BackgroundTransparency = if on then 0 else 1,
+			AutoButtonColor = false,
+			FontFace = if on then UI.Fonts.Number else UI.Fonts.Label,
+			TextSize = 16,
+			TextColor3 = if on then UI.Theme.Bone else UI.Theme.Dim,
+			Text = option.text,
+		}, track)
+		UI.corner(seg, UDim.new(0, 4))
+		UI.juice(seg, { sound = "Tab" })
+		seg.Activated:Connect(function()
+			if not on then
+				onPick(option.value)
+				Panels.redraw()
+			end
+		end)
+	end
+end
+
 local function settingsPanel()
 	-- `offByDefault`: the attribute reads as off until it's switched on (the rest read as on).
 	local options: { { key: string, label: string, offByDefault: boolean? } } = {
@@ -451,31 +535,65 @@ local function settingsPanel()
 		{ key = "SettingControlsHint", label = "Show controls reminder" },
 		{ key = "SettingReducedEffects", label = "Reduced effects", offByDefault = true },
 	}
-	sectionTitle("Settings  ·  saved for this session", 0)
+	local list = UI.new("ScrollingFrame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 5,
+		ScrollBarImageColor3 = UI.Theme.Gold,
+		CanvasSize = UDim2.fromOffset(0, 34 + (#options + 2) * 54),
+	}, body)
+	sectionTitle("Settings  ·  saved for this session", 0, list)
 	for i, option in options do
 		local value = player:GetAttribute(option.key)
 		local on = if option.offByDefault then value == true else value ~= false
-		UI.text({
-			Position = UDim2.fromOffset(0, 10 + i * 52),
-			Size = UDim2.new(1, -150, 0, 40),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextSize = 19,
-			Text = option.label,
-		}, body)
-		local toggle = UI.button({
-			Name = option.key,
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.new(1, 0, 0, 10 + i * 52),
-			Size = UDim2.fromOffset(110, 40),
-			Text = if on then "On" else "Off",
-			BackgroundColor3 = if on then UI.Crimson else UI.PanelLight,
-		}, body)
-		UI.stroke(toggle)
-		toggle.Activated:Connect(function()
-			player:SetAttribute(option.key, not on) -- local only; read by the effects code
-			Panels.redraw()
-		end)
+		segmented(
+			list,
+			30 + (i - 1) * 54,
+			option.key,
+			option.label,
+			{
+				{ text = "Off", value = false },
+				{ text = "On", value = true },
+			},
+			on,
+			function(v)
+				player:SetAttribute(option.key, v) -- local only; read by the effects code
+			end
+		)
 	end
+	-- Reduce motion follows the Roblox setting until it's picked here.
+	segmented(
+		list,
+		30 + #options * 54,
+		"SettingReduceMotion",
+		"Reduce motion",
+		{
+			{ text = "Off", value = false },
+			{ text = "On", value = true },
+		},
+		UI.reducedMotion(),
+		function(v)
+			player:SetAttribute("SettingReduceMotion", v)
+		end
+	)
+	local volume = player:GetAttribute("SettingUIVolume")
+	segmented(
+		list,
+		30 + (#options + 1) * 54,
+		"SettingUIVolume",
+		"Menu sounds",
+		{
+			{ text = "Off", value = 0 },
+			{ text = "Low", value = 0.5 },
+			{ text = "Full", value = 1 },
+		},
+		if typeof(volume) == "number" then volume else 1,
+		function(v)
+			player:SetAttribute("SettingUIVolume", v)
+			UI.sound("Press")
+		end
+	)
 end
 
 type Def = { title: string, build: (body: Frame) -> (), large: boolean? }
@@ -586,8 +704,8 @@ function Panels.header(): Frame
 	local strip = UI.new("Frame", {
 		Name = "HeaderExtra",
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -72, 0, 12),
-		Size = UDim2.new(1, -300, 0, 40),
+		Position = UDim2.new(1, -76, 0, 16),
+		Size = UDim2.new(1, -330, 0, 40),
 		BackgroundTransparency = 1,
 	}, window)
 	UI.new("UIListLayout", {
@@ -609,6 +727,10 @@ function Panels.open(id: string)
 	if was ~= id then
 		drawn = nil
 	end
+	if not window.Visible then
+		UI.openMotion(window)
+		UI.sound("Confirm")
+	end
 	window.Visible = true
 	refit()
 	Panels.redraw()
@@ -622,6 +744,9 @@ function Panels.closeAll()
 	local was = current
 	current = nil
 	if window then
+		if window.Visible then
+			UI.sound("Cancel")
+		end
 		window.Visible = false
 		local sheet = window:FindFirstChild("Sheet")
 		if sheet then
@@ -657,23 +782,31 @@ function Panels.start(remote: RemoteEvent)
 	})
 	window = UI.panel({
 		Name = "Window",
+		material = "lacquer",
+		sliceScale = 1,
 		Size = UDim2.fromOffset(NORMAL.X, NORMAL.Y),
 		Visible = false,
+		Active = true,
 	}, screen)
+	UI.grain(window, 0.9)
 	local scale = UI.new("UIScale", { Name = "Fit" }, window)
 	local camera = workspace.CurrentCamera
 	refit = function()
 		local large = Panels.isLarge()
 		local dims = if large then LARGE else NORMAL
 		window.Size = UDim2.fromOffset(dims.X, dims.Y)
-		if large then
+		-- On a phone the lobby nav is a rail on the left, so normal panels centre too, clear
+		-- of the rail.
+		local compact = UI.compact(camera.ViewportSize)
+		if large or compact then
 			local area = screen.AbsoluteSize
 			if area.X < 1 then
 				area = camera.ViewportSize
 			end
+			local side = if large then 16 else 200
 			window.AnchorPoint = Vector2.new(0.5, 0.5)
 			window.Position = UDim2.fromScale(0.5, 0.5)
-			scale.Scale = math.clamp(math.min((area.X - 16) / dims.X, (area.Y - 12) / dims.Y), 0.4, 1)
+			scale.Scale = math.clamp(math.min((area.X - side) / dims.X, (area.Y - 12) / dims.Y), 0.4, 1)
 		else
 			local size = camera.ViewportSize
 			local reserve = math.floor(200 * UI.lobbyScale(size))
@@ -684,36 +817,15 @@ function Panels.start(remote: RemoteEvent)
 	end
 	camera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
 	screen:GetPropertyChangedSignal("AbsoluteSize"):Connect(refit)
-	titleLabel = UI.text({
-		Name = "Title",
-		Position = UDim2.fromOffset(24, 14),
-		Size = UDim2.new(1, -90, 0, 36),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = UI.Display,
-		TextSize = 32,
-		Text = "",
-	}, window)
-	local close = UI.button({
-		Name = "Close",
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -10, 0, 6),
-		Size = UDim2.fromOffset(58, 54),
-		Text = "X",
-		TextSize = 20,
-		BackgroundColor3 = UI.Crimson,
-	}, window)
-	close.Activated:Connect(Panels.closeAll)
-	UI.new("Frame", {
-		Position = UDim2.fromOffset(24, 58),
-		Size = UDim2.new(1, -48, 0, 1),
-		BackgroundColor3 = UI.Bronze,
-		BackgroundTransparency = 0.5,
-		BorderSizePixel = 0,
-	}, window)
+	-- Title in Merriweather with a crimson brush under it, the seigaiha band behind the
+	-- header, and the tsuba close in the corner.
+	local chrome = UI.windowChrome(window)
+	titleLabel = chrome.title
+	chrome.close.Activated:Connect(Panels.closeAll)
 	body = UI.new("Frame", {
 		Name = "Body",
-		Position = UDim2.fromOffset(24, 68),
-		Size = UDim2.new(1, -48, 1, -82),
+		Position = UDim2.fromOffset(24, 76),
+		Size = UDim2.new(1, -48, 1, -92),
 		BackgroundTransparency = 1,
 		ClipsDescendants = true,
 	}, window)
