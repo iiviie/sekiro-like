@@ -36,7 +36,12 @@ local fightToken = 0
 local bar: Frame
 local nameLabel: TextLabel
 local subLabel: TextLabel
-local livesLabel: TextLabel
+local livesRow: Frame
+local kanjiName: ImageLabel
+local challengeButton: TextButton
+local selectedId: string? = nil
+local pickEntries: { [string]: { [string]: any } } = {}
+local setStatus: (text: string?, color: Color3?) -> ()
 local vitalityFill: Frame
 local postureFill: Frame
 local deathblowDot: ImageLabel
@@ -50,6 +55,8 @@ local bannerToken = 0
 
 local PENDING_TIMEOUT = 5 -- seconds before an unanswered pick says so
 local PICK_REACH = 10 -- studs off the pad edge before the picker closes (server allows 12)
+local THEME = UI.Theme
+local CHROME = (Assets.UI :: any).Chrome or {}
 local VITALITY = Color3.fromRGB(176, 30, 28)
 local POSTURE_LOW = Color3.fromRGB(255, 204, 96)
 local POSTURE_HIGH = Color3.fromRGB(214, 44, 22)
@@ -69,7 +76,7 @@ local function track(parent: Instance, position: UDim2, height: number, color: C
 	local frame = UI.new("Frame", {
 		Size = UDim2.new(1, 0, 0, height),
 		Position = position,
-		BackgroundColor3 = Color3.fromRGB(16, 12, 14),
+		BackgroundColor3 = THEME.Ink,
 		BackgroundTransparency = 0.2,
 		BorderSizePixel = 0,
 	}, parent)
@@ -93,79 +100,99 @@ local function build()
 		DisplayOrder = 6,
 	}, player:WaitForChild("PlayerGui"))
 
-	-- The picker.
+	-- The picker: a lacquer window with the boss cards; pick one, then Challenge.
 	picker = UI.panel({
 		Name = "Picker",
+		material = "lacquer",
+		sliceScale = 1,
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(620, 500),
+		Size = UDim2.fromOffset(660, 520),
 		Visible = false,
 	}, screen)
-	UI.new("UISizeConstraint", { MaxSize = Vector2.new(620, 500) }, picker)
 	-- Small screens (a phone in landscape): shrink to fit, LEAVE always on screen.
 	pickerFit = UI.new("UIScale", {}, picker)
 	local camera = workspace.CurrentCamera
 	local function refit()
 		local size = camera.ViewportSize
-		pickerFit.Scale = math.clamp(math.min((size.Y - 60) / 500, (size.X - 32) / 620), 0.5, 1)
+		pickerFit.Scale = math.clamp(math.min((size.Y - 24) / 520, (size.X - 32) / 660), 0.5, 1)
 	end
 	camera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
 	refit()
-	UI.text({
-		Text = "BOSS TRIALS  ·  試練",
-		Font = UI.Display,
-		TextSize = 34,
-		Size = UDim2.new(1, 0, 0, 44),
-		Position = UDim2.fromOffset(0, 10),
-	}, picker)
-	UI.text({
+	local chrome = UI.windowChrome(picker, { title = "Boss Trials" })
+	chrome.close.Activated:Connect(function()
+		BossHUD.closePicker()
+	end)
+	UI.label("body", {
 		Text = "Kannagi's nine. Two lives each: a deathblow starts phase 2, the second ends it.",
 		TextSize = 16,
-		TextColor3 = UI.Bronze,
-		Size = UDim2.new(1, -40, 0, 22),
-		Position = UDim2.fromOffset(20, 54),
+		TextColor3 = THEME.Dim,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		Size = UDim2.new(1, -56, 0, 22),
+		Position = UDim2.fromOffset(28, 70),
 	}, picker)
 	-- What's going on: the arena taken, your place in line, a pick on its way, a refusal.
-	statusLabel = UI.text({
+	statusLabel = UI.label("label", {
 		Name = "Status",
 		Text = "",
-		TextSize = 15,
-		Font = UI.Bold,
-		TextColor3 = UI.Gold,
+		TextSize = 16,
+		TextColor3 = THEME.GoldHi,
+		TextXAlignment = Enum.TextXAlignment.Left,
 		TextWrapped = true,
-		Size = UDim2.new(1, -40, 0, 36),
-		Position = UDim2.fromOffset(20, 76),
+		Size = UDim2.new(1, -56, 0, 36),
+		Position = UDim2.fromOffset(28, 94),
 		Visible = false,
 	}, picker)
 	list = UI.new("ScrollingFrame", {
 		Name = "List",
-		Size = UDim2.new(1, -32, 1, -174),
-		Position = UDim2.fromOffset(16, 114),
+		Size = UDim2.new(1, -40, 1, -186),
+		Position = UDim2.fromOffset(20, 100),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		ScrollBarThickness = 6,
+		ScrollBarThickness = 5,
+		ScrollBarImageColor3 = THEME.Gold,
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		CanvasSize = UDim2.new(),
 	}, picker)
-	UI.new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, list)
-	local close = UI.button({
-		Name = "Close",
-		Text = "CLOSE",
-		Size = UDim2.fromOffset(140, 38),
+	UI.new("UIGridLayout", {
+		CellSize = UDim2.fromOffset(142, 186),
+		CellPadding = UDim2.fromOffset(12, 12),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	}, list)
+	UI.new("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6) }, list)
+	challengeButton = UI.button({
+		Name = "Challenge",
+		variant = "primary",
+		Text = "Challenge",
+		FontFace = UI.Fonts.Display,
+		TextSize = 24,
+		Size = UDim2.fromOffset(220, UI.Touch),
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -12),
+		Position = UDim2.new(0.5, 0, 1, -16),
 	}, picker)
-	close.Activated:Connect(function()
-		BossHUD.closePicker()
+	challengeButton.Activated:Connect(function()
+		local id = selectedId
+		local entry = id and pickEntries[id]
+		if not id or not entry or pendingAt then
+			return -- one pick at a time
+		end
+		-- Stays open until the server answers with a Start (closes it) or a Notice (says why
+		-- not), so a pick can never just vanish.
+		pendingAt = os.clock()
+		setStatus(`Opening the gate to the {entry.name}...`, UI.Parchment)
+		BossVisuals.prepare(id)
+		remote:FireServer("Choose", id)
 	end)
 	-- While you wait for the arena: give up your place.
 	cancelButton = UI.button({
 		Name = "LeaveLine",
-		Text = "LEAVE LINE",
-		Size = UDim2.fromOffset(140, 38),
+		variant = "danger",
+		Text = "Leave line",
+		Size = UDim2.fromOffset(160, UI.Touch),
 		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.new(0.5, 80, 1, -12),
-		BackgroundColor3 = UI.Crimson,
+		Position = UDim2.new(0.5, 126, 1, -16),
 		Visible = false,
 	}, picker)
 	cancelButton.Activated:Connect(function()
@@ -182,33 +209,64 @@ local function build()
 		Visible = false,
 	}, screen)
 	UI.new("UISizeConstraint", { MinSize = Vector2.new(320, 64), MaxSize = Vector2.new(720, 64) }, bar)
-	nameLabel = UI.text({
+	-- The name sits on a horizontal ink band so it reads over any sky.
+	UI.new("ImageLabel", {
+		Name = "Band",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0, 18),
+		Size = UDim2.new(1.25, 0, 0, 74),
+		BackgroundTransparency = 1,
+		Image = Assets.UI.InkBand,
+		ImageTransparency = 0.15,
+		ZIndex = 0,
+	}, bar)
+	nameLabel = UI.label("heading", {
+		Name = "BossName",
 		Text = "",
-		Font = UI.Display,
 		TextSize = 26,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextStrokeTransparency = 0.4,
-		Size = UDim2.new(1, -120, 0, 26),
-	}, bar)
-	subLabel = UI.text({
-		Text = "",
-		TextSize = 15,
-		TextColor3 = UI.Bronze,
-		TextXAlignment = Enum.TextXAlignment.Left,
+		TextStrokeColor3 = THEME.Ink,
 		TextStrokeTransparency = 0.5,
-		Size = UDim2.new(1, -120, 0, 16),
-		Position = UDim2.fromOffset(2, 25),
+		Position = UDim2.fromOffset(0, -6),
+		Size = UDim2.new(1, -120, 0, 30),
 	}, bar)
-	livesLabel = UI.text({
+	-- The Japanese name as a brush image (art/ui/chrome.py), never as fallback-font text.
+	kanjiName = UI.new("ImageLabel", {
+		Name = "BossKanji",
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromOffset(0, -8),
+		Size = UDim2.fromOffset(260, 40),
+		BackgroundTransparency = 1,
+		ScaleType = Enum.ScaleType.Fit,
+		ImageColor3 = THEME.Bone,
+		Visible = false,
+	}, bar)
+	UI.new("UIAspectRatioConstraint", { AspectRatio = 4.3 }, kanjiName)
+	subLabel = UI.label("body", {
 		Text = "",
-		TextSize = 22,
-		TextColor3 = UI.Crimson,
-		TextXAlignment = Enum.TextXAlignment.Right,
-		TextStrokeTransparency = 0.4,
+		TextSize = 16,
+		TextColor3 = THEME.Dim,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextStrokeColor3 = THEME.Ink,
+		TextStrokeTransparency = 0.5,
+		Size = UDim2.new(1, -120, 0, 18),
+		Position = UDim2.fromOffset(2, 24),
+	}, bar)
+	-- Lives: small gold-rimmed crimson diamonds.
+	livesRow = UI.new("Frame", {
+		Name = "Lives",
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.fromScale(1, 0),
-		Size = UDim2.fromOffset(120, 26),
+		Size = UDim2.fromOffset(140, 26),
+		BackgroundTransparency = 1,
 	}, bar)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 4),
+	}, livesRow)
 	vitalityFill = track(bar, UDim2.fromOffset(0, 44), 9, VITALITY, false)
 	postureFill = track(bar, UDim2.fromOffset(0, 56), 6, POSTURE_LOW, true)
 	-- The deathblow marker, centred on the posture bar while the boss is broken (the
@@ -269,6 +327,33 @@ local function showBanner(text: string, sub: string?, hold: number)
 	end)
 end
 
+-- One pip per life left: the chrome art, or a rotated crimson square with a gold rim.
+local function setLives(count: number)
+	if #livesRow:GetChildren() - 1 == count then
+		return
+	end
+	for _, child in livesRow:GetChildren() do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
+	for i = 1, count do
+		local pip = UI.new("ImageLabel", {
+			Name = `Life{i}`,
+			LayoutOrder = i,
+			Size = UDim2.fromOffset(22, 22),
+			BackgroundTransparency = 1,
+		}, livesRow)
+		if not UI.art(pip, "LifePip") then
+			pip.Size = UDim2.fromOffset(14, 14)
+			pip.Rotation = 45
+			pip.BackgroundTransparency = 0
+			pip.BackgroundColor3 = THEME.CrimsonBtn
+			UI.new("UIStroke", { Color = THEME.Gold, Thickness = 1.5 }, pip)
+		end
+	end
+end
+
 local function refresh()
 	local model = watched
 	if not model then
@@ -292,7 +377,7 @@ local function refresh()
 	end
 	local lives = model:GetAttribute("BossLives")
 	if typeof(lives) == "number" then
-		livesLabel.Text = string.rep("◆", math.min(lives, 7))
+		setLives(math.min(lives, 7))
 	end
 end
 
@@ -336,14 +421,14 @@ local function watch(model: Model)
 	refresh()
 end
 
-local function setStatus(text: string?, color: Color3?)
+function setStatus(text: string?, color: Color3?)
 	statusLabel.Text = text or ""
 	statusLabel.TextColor3 = color or UI.Gold
 	statusLabel.Visible = text ~= nil and text ~= ""
 	-- The list moves up into the status line's room while there's nothing to say.
-	local gap = if statusLabel.Visible then 30 else 0
-	list.Position = UDim2.fromOffset(16, 84 + gap)
-	list.Size = UDim2.new(1, -32, 1, -144 - gap)
+	local gap = if statusLabel.Visible then 36 else 0
+	list.Position = UDim2.fromOffset(20, 100 + gap)
+	list.Size = UDim2.new(1, -40, 1, -186 - gap)
 end
 
 local function setLine(position: number?)
@@ -384,53 +469,66 @@ local function openPicker(bosses: { { [string]: any } }, busy: { [string]: any }
 			child:Destroy()
 		end
 	end
-	for i, entry in bosses do
-		local id = entry.id :: string
-		local button = UI.button({
-			Name = `Boss_{id}`,
-			Text = "",
-			LayoutOrder = i,
-			Size = UDim2.new(1, -10, 0, 58),
-			BackgroundColor3 = if entry.tutorial then Color3.fromRGB(40, 44, 40) else UI.PanelLight,
-		}, list)
-		UI.text({
-			Text = `{entry.name}   {entry.nameJP}`,
-			Font = UI.Display,
-			TextSize = 22,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Position = UDim2.fromOffset(12, 4),
-			Size = UDim2.new(1, -150, 0, 26),
-		}, button)
-		UI.text({
-			Text = entry.blurb or "",
-			TextSize = 14,
-			TextColor3 = Color3.fromRGB(190, 180, 160),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			Position = UDim2.fromOffset(12, 32),
-			Size = UDim2.new(1, -24, 0, 18),
-		}, button)
-		UI.text({
-			Text = stars(entry.stars or 0) .. (if entry.cleared then "   ✓" else ""),
-			TextSize = 18,
-			TextColor3 = if entry.cleared then UI.Jade else UI.Gold,
-			TextXAlignment = Enum.TextXAlignment.Right,
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.new(1, -12, 0, 6),
-			Size = UDim2.fromOffset(130, 22),
-		}, button)
-		button.Activated:Connect(function()
-			if pendingAt then
-				return -- one pick at a time
-			end
-			-- Stays open until the server answers with a Start (closes it) or a Notice (says
-			-- why not), so a pick can never just vanish.
-			pendingAt = os.clock()
-			setStatus(`Opening the gate to the {entry.name}...`, UI.Parchment)
-			BossVisuals.prepare(id)
-			remote:FireServer("Choose", id)
-		end)
+	table.clear(pickEntries)
+	-- Keep the last pick if it's still offered; else the first boss not yet cleared.
+	local stillThere = false
+	for _, entry in bosses do
+		if entry.id == selectedId then
+			stillThere = true
+		end
 	end
+	if not stillThere then
+		selectedId = nil
+		for _, entry in bosses do
+			if not entry.cleared and not entry.tutorial then
+				selectedId = entry.id
+				break
+			end
+		end
+		selectedId = selectedId or (bosses[1] and bosses[1].id)
+	end
+	local function draw()
+		for _, child in list:GetChildren() do
+			if child:IsA("GuiButton") then
+				child:Destroy()
+			end
+		end
+		for i, entry in bosses do
+			local id = entry.id :: string
+			pickEntries[id] = entry
+			local count = entry.stars or 0
+			local rarity = if entry.tutorial
+				then "common"
+				elseif count >= 3 then "epic"
+				elseif count == 2 then "rare"
+				else "uncommon"
+			UI.card({
+				Name = `Boss_{id}`,
+				LayoutOrder = i,
+				name = entry.name,
+				rarity = rarity,
+				caption = if count <= 0 then "Tutorial" else stars(count),
+				captionColor = THEME.GoldHi,
+				image = if entry.tutorial
+					then Assets.Icons.Guide
+					elseif entry.cleared then Assets.Icons.Trophy
+					else Assets.Icons.Deathblow,
+				state = if entry.cleared then "equipped" else nil,
+				status = if entry.cleared then "Cleared" else "Not yet cleared",
+				statusColor = if entry.cleared then THEME.JadeText else THEME.Dim,
+				selected = id == selectedId,
+				onActivated = function()
+					if selectedId ~= id then
+						selectedId = id
+						draw()
+					end
+				end,
+			}, list)
+		end
+		local entry = selectedId and pickEntries[selectedId]
+		challengeButton.Text = if entry then `Challenge  ·  {entry.name}` else "Challenge"
+	end
+	draw()
 	setLine(line)
 	if line then
 		setStatus(
@@ -464,7 +562,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			-- The trial broke off mid-fight: take its HUD down with it.
 			clearFight()
 		end
-		local color = if kind == "Refused" or kind == "Failed" then Color3.fromRGB(240, 120, 100) else UI.Gold
+		local color = if kind == "Refused" or kind == "Failed" then THEME.CrimsonText else UI.Gold
 		if picker.Visible then
 			setStatus(text, color)
 		else
@@ -477,7 +575,13 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		setPickerVisible(false)
 		BossVisuals.prepare(data.boss)
 		local def = Bosses.def(data.boss)
-		nameLabel.Text = `{data.nameJP}   {data.name}`
+		nameLabel.Text = data.name or ""
+		local names = CHROME.BossNames
+		local jp = typeof(names) == "table" and names[data.boss] or nil
+		kanjiName.Visible = typeof(jp) == "string"
+		if typeof(jp) == "string" then
+			kanjiName.Image = jp
+		end
 		subLabel.Text = stars(data.stars or 0) .. (if def and def.blurb then "   ·   " .. def.blurb else "")
 		bar.Visible = true
 		lesson.Visible = false
@@ -567,7 +671,7 @@ function BossHUD.start()
 				setPickerVisible(false)
 			elseif pendingAt and os.clock() - pendingAt > PENDING_TIMEOUT then
 				pendingAt = nil
-				setStatus("The shrine didn't answer. Pick again.", Color3.fromRGB(240, 120, 100))
+				setStatus("The shrine didn't answer. Pick again.", THEME.CrimsonText)
 			end
 		end
 		if counting then
