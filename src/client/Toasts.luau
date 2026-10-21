@@ -66,10 +66,29 @@ end
 local reportPending = false
 local reportArrived = 0
 
+-- A Store or Shrine reveal (client/Reveal) is on screen: it sits under this ScreenGui, so a
+-- banner on the stage line would print over its title ("Premium unlocked" over "Thank you").
+local function revealOpen(): boolean
+	local gui = player:FindFirstChild("PlayerGui")
+	return gui ~= nil and gui:FindFirstChild("Reveal") ~= nil
+end
+
 -- Plays `show` on the stage line once it is free, or `fallback` (a toast) instead while a
 -- report card is open, while you're fighting, or when it would hold the report up too long.
 -- A banner that was waiting its turn and finds the report open by then becomes the toast.
+-- While a reveal is open the banner waits for it to close (the reveal already says it).
 local function stage(duration: number, show: () -> (), fallback: () -> ())
+	if revealOpen() and not fighting() then
+		task.spawn(function()
+			local started = os.clock()
+			while revealOpen() and os.clock() - started < 120 do
+				task.wait(0.25)
+			end
+			task.wait(0.4)
+			stage(duration, show, fallback)
+		end)
+		return
+	end
 	local now = os.clock()
 	local wait = math.max(0, stageFreeAt - now)
 	local late = reportPending and now + wait + duration > reportArrived + REPORT_MAX_DELAY
