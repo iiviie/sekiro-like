@@ -526,38 +526,79 @@ local function feathersAt(h: Handle, position: Vector3, n: number, up: number, c
 	}, 5)
 end
 
--- The crow: a dark bird of two flapping feather wings, flown along a path.
+-- The crow: a rounded black body and head, a grey beak, a wedge tail and two long wings that
+-- beat while it flies and fold while it perches, flown along a path. (A box body read as a
+-- phone in the hand.)
+local CROW = Color3.fromRGB(18, 16, 24)
+
+local function ellipsoid(name: string, size: Vector3, color: Color3, parent: Instance): BasePart
+	local p = part({ Name = name, Size = size, Color = color, Anchored = true }, parent)
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = p
+	return p
+end
+
 local function crow(h: Handle, from: Vector3, to: Vector3, time: number, scale: number): BasePart
-	local body = part({
-		Anchored = true,
-		Size = Vector3.new(0.35, 0.3, 0.8) * scale,
-		Color = Color3.fromRGB(16, 14, 20),
-		CFrame = CFrame.lookAt(from, to),
-	}, h.folder)
-	for side = -1, 1, 2 do
-		local wing = Instance.new("BillboardGui")
-		wing.Size = UDim2.fromScale(1.6 * scale, 1.6 * scale)
-		wing.StudsOffset = Vector3.new(side * 0.55 * scale, 0.1, 0)
-		wing.LightInfluence = 1
-		wing.Parent = body
-		local img = Instance.new("ImageLabel")
-		img.BackgroundTransparency = 1
-		img.Size = UDim2.fromScale(1, 1)
-		img.Image = C.Feather
-		img.ImageColor3 = Color3.fromRGB(20, 18, 26)
-		img.Rotation = side * 70
-		img.Parent = wing
-		task.spawn(function()
-			local t0 = os.clock()
-			while img.Parent do
-				img.Rotation = side * (70 + 40 * math.sin((os.clock() - t0) * 22))
-				task.wait()
-			end
-		end)
+	local s = scale * 1.45 -- about a real crow beside a 5-stud fighter
+	local body = ellipsoid("Crow", Vector3.new(0.34, 0.34, 0.62) * s, CROW, h.folder)
+	body.CFrame = CFrame.lookAt(from, to)
+	-- -Z is forward (lookAt): head and beak in front, tail behind.
+	local bits: { { p: BasePart, at: CFrame } } = {}
+	local function attach(p: BasePart, at: CFrame)
+		p.Parent = body
+		table.insert(bits, { p = p, at = at })
 	end
+	attach(ellipsoid("Head", Vector3.new(0.24, 0.24, 0.26) * s, CROW, h.folder), CFrame.new(0, 0.12 * s, -0.36 * s))
+	local beak =
+		part({ Name = "Beak", Size = Vector3.new(0.07, 0.07, 0.2) * s, Color = Color3.fromRGB(60, 58, 64) }, h.folder)
+	beak.Anchored = true
+	attach(beak, CFrame.new(0, 0.1 * s, -0.54 * s))
+	local tail = part({ Name = "Tail", Size = Vector3.new(0.26, 0.03, 0.36) * s, Color = CROW }, h.folder)
+	tail.Anchored = true
+	attach(tail, CFrame.new(0, 0.02 * s, 0.42 * s) * CFrame.Angles(math.rad(12), 0, 0))
+	local wings = {}
+	for side = -1, 1, 2 do
+		local wing = part({ Name = "Wing", Size = Vector3.new(0.9, 0.03, 0.44) * s, Color = CROW }, h.folder)
+		wing.Anchored = true
+		wing.Parent = body
+		table.insert(wings, { p = wing, side = side })
+	end
+	local t0 = os.clock()
+	local function place()
+		local cf = body.CFrame
+		for _, b in bits do
+			b.p.CFrame = cf * b.at
+		end
+		-- beating in flight (about 5 a second), folded back along the body while perched
+		local perched = body:GetAttribute("Perched") == true
+		local lift = if perched then math.rad(-12) else math.rad(-5 + 50 * math.sin((os.clock() - t0) * 30))
+		for _, w in wings do
+			local fold = if perched then CFrame.Angles(0, -w.side * math.rad(78), 0) else CFrame.identity
+			w.p.CFrame = cf
+				* CFrame.new(w.side * 0.14 * s, 0.08 * s, 0)
+				* fold
+				* CFrame.Angles(0, 0, w.side * lift)
+				* CFrame.new(w.side * 0.45 * s, 0, 0)
+		end
+	end
+	place()
+	task.spawn(function()
+		while body.Parent do
+			place()
+			task.wait()
+		end
+	end)
+	local heading = Vector3.new(to.X - from.X, 0, to.Z - from.Z)
+	heading = if heading.Magnitude > 1e-3 then heading.Unit else Vector3.zAxis
 	TweenService:Create(body, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		CFrame = CFrame.lookAt(to, to + (to - from).Unit),
+		CFrame = CFrame.lookAt(to, to + heading), -- lands level
 	}):Play()
+	task.delay(time, function()
+		if body.Parent then
+			body:SetAttribute("Perched", true)
+		end
+	end)
 	return body
 end
 
@@ -799,7 +840,7 @@ local BEATS: { [string]: { Beat } } = {
 					return
 				end
 				local s = scaleOf(h)
-				local perch = r.Position + r.CFrame:VectorToWorldSpace(Vector3.new(-1.9, 1.3, -0.5) * s)
+				local perch = r.Position + r.CFrame:VectorToWorldSpace(Vector3.new(-1.9, 1.6, -0.5) * s)
 				local from = perch + r.CFrame:VectorToWorldSpace(Vector3.new(-6, 12, -8) * s)
 				local bird = crow(h, from, perch, 0.5, s)
 				sound(C.Sounds.Wings, r, 0.5, 1.1, 1.5)
@@ -812,6 +853,7 @@ local BEATS: { [string]: { Beat } } = {
 						return
 					end
 					local away = perch + r.CFrame:VectorToWorldSpace(Vector3.new(-3, 14, 10) * s)
+					bird:SetAttribute("Perched", false)
 					sound(C.Sounds.Wings, r, 0.6, 1.2, 1.5)
 					feathersAt(h, perch, 14, 2, INK)
 					TweenService:Create(bird, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
