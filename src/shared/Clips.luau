@@ -228,6 +228,10 @@ end
 -- early); these put every one 0-15 ms after it. (The earlier "half the active window" values,
 -- 0.03-0.08, were compensating for Animator's old 20 ms floor per windup segment, which stretched
 -- dense bakes past the hit.)
+-- Re-checked for the 1.3x blade (Weapons OVERSIZE, tip 5 studs from the hand, was 3.85): a cut's
+-- timing is set by the arm's sweep, and the moment the blade crosses a body-sized box 3-4 studs
+-- ahead moved by at most 5 ms on every clip, so these stand. (The tip-past-3-studs probe is no use
+-- here: Light1/2 and the thrust hold the long tip that far out during the windup already.)
 local IMPACT_LEAD: { [string]: number } = {
 	Light1 = 0.025,
 	Light2 = 0.02,

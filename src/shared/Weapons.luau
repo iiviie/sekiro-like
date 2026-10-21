@@ -22,8 +22,14 @@ export type WeaponLook = {
 	Scale: Vector3, -- SpecialMesh scale
 	Size: Vector3, -- the part's size at that scale; blade along +Z, edge toward -Y
 	GripZ: number, -- handle centre, where the fist closes
-	GuardZ: number, -- tsuba; the swing trail starts here
+	GuardZ: number, -- where the edge starts (the habaki); the swing trail starts here
 	TipZ: number,
+	-- Fittings built from parts by server/SwordRig over the mesh, so the sword reads at
+	-- camera distance: a bold tsuba, a pommel cap and a bright line along the cutting edge.
+	TsubaZ: number, -- the tsuba's centre
+	Tsuba: Vector3, -- its thickness, width and height
+	PommelZ: number,
+	Edge: { Vector3 }, -- the cutting edge in part space, habaki to tip
 }
 
 export type WeaponDef = {
@@ -46,6 +52,54 @@ export type WeaponDef = {
 
 local KATANA_MESH = "rbxassetid://114165484128397"
 local KATANA_TEXTURE = "rbxassetid://85720589438351"
+local KATANA_NATIVE = Vector3.new(0.4782, 0.6382, 6.4796) -- the mesh's own size (SpecialMesh scale 1)
+
+-- Where the katana mesh's own parts sit, as fractions of the part's size (measured in Studio
+-- from a side-on capture): the habaki, the tip, the tsuba's centre, and the cutting edge from
+-- the habaki to the tip, set a hair inside the silhouette.
+local KATANA_GUARD = -0.2436
+local KATANA_TIP = 0.489
+local KATANA_TSUBA = -0.2818
+local KATANA_EDGE = {
+	Vector2.new(-0.2432, -0.148),
+	Vector2.new(-0.1023, -0.153),
+	Vector2.new(-0.0091, -0.133),
+	Vector2.new(0.0864, -0.085),
+	Vector2.new(0.1795, -0.023),
+	Vector2.new(0.275, 0.056),
+	Vector2.new(0.3682, 0.150),
+	Vector2.new(0.4636, 0.292),
+	Vector2.new(0.4885, 0.43),
+}
+
+-- A look on the katana mesh at SpecialMesh `scale`. The fist (a 1-stud-deep R15 hand) closes
+-- right behind the tsuba, so the blade's whole length shows and the pommel peeks out behind.
+local function katanaLook(scale: Vector3, tsubaThickness: number): WeaponLook
+	local size = KATANA_NATIVE * scale
+	local tsubaZ = KATANA_TSUBA * size.Z
+	local edge = {}
+	for i, point in KATANA_EDGE do
+		edge[i] = Vector3.new(0, point.Y * size.Y, point.X * size.Z)
+	end
+	return {
+		MeshId = KATANA_MESH,
+		TextureId = KATANA_TEXTURE,
+		Scale = scale,
+		Size = size,
+		GripZ = tsubaZ - tsubaThickness / 2 - 0.5,
+		GuardZ = KATANA_GUARD * size.Z,
+		TipZ = KATANA_TIP * size.Z,
+		TsubaZ = tsubaZ,
+		-- An oval disc a little larger than the mesh's own (thin, pointed) tsuba, which it hides.
+		Tsuba = Vector3.new(tsubaThickness, 0.78 * size.Y, 1.1 * size.Y),
+		PommelZ = -size.Z / 2,
+		Edge = edge,
+	}
+end
+
+-- Blades are stylised and oversized (Dueling Grounds' read at Roblox scale): every weapon is
+-- 1.3x its old length and breadth and 1.5x as thick, so it reads at 30 studs.
+local OVERSIZE = Vector3.new(1.5, 1.3, 1.3)
 
 local defs: { [string]: WeaponDef } = {
 	-- The baseline everything is measured against: no strengths, no weaknesses.
@@ -55,15 +109,8 @@ local defs: { [string]: WeaponDef } = {
 		description = "Balanced. Fast enough to pressure, safe enough to deflect with.",
 		archetype = "All-rounder",
 		price = 0,
-		look = {
-			MeshId = KATANA_MESH,
-			TextureId = KATANA_TEXTURE,
-			Scale = Vector3.new(0.6 * 1.35, 0.6 * 2.6, 0.6 * 1.13),
-			Size = Vector3.new(0.39, 0.99, 4.4),
-			GripZ = -1.7,
-			GuardZ = -1.07,
-			TipZ = 2.15,
-		},
+		-- 5.7 studs, the tip 5 studs from the hand.
+		look = katanaLook(Vector3.new(0.6 * 1.35, 0.6 * 2.6, 0.6 * 1.13) * OVERSIZE, 0.1),
 		windup = 1,
 		recovery = 1,
 		damage = 1,
@@ -80,15 +127,8 @@ local defs: { [string]: WeaponDef } = {
 		description = "Heavy and long. Breaks guards and posture, but every swing is a commitment.",
 		archetype = "Bruiser",
 		price = 600,
-		look = {
-			MeshId = KATANA_MESH,
-			TextureId = KATANA_TEXTURE,
-			Scale = Vector3.new(0.6 * 1.6, 0.6 * 3.2, 0.6 * 1.5),
-			Size = Vector3.new(0.46, 1.22, 5.85),
-			GripZ = -2.15,
-			GuardZ = -1.35,
-			TipZ = 2.85,
-		},
+		-- 7.6 studs, the tip 6.4 studs from the hand.
+		look = katanaLook(Vector3.new(0.6 * 1.6, 0.6 * 3.2, 0.6 * 1.5) * OVERSIZE, 0.12),
 		windup = 1.4,
 		recovery = 1.3,
 		damage = 1.3,

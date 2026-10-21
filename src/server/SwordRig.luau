@@ -43,6 +43,65 @@ local function trail(sword: BasePart, look: Weapons.WeaponLook)
 	swing.Parent = sword
 end
 
+-- A part welded to the sword (a fitting): no physics, no shadow, and it falls with the
+-- blade when the dead let go of it.
+local function fitting(sword: BasePart, name: string, size: Vector3, at: CFrame, color: Color3): BasePart
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.Color = color
+	part.Material = Enum.Material.Metal
+	part.CanCollide, part.CanQuery, part.CanTouch = false, false, false
+	part.Massless = true
+	part.CastShadow = false
+	local weld = Instance.new("Weld")
+	weld.Part0 = sword
+	weld.Part1 = part
+	weld.C0 = at
+	weld.Parent = part
+	part.Parent = sword
+	return part
+end
+
+-- An oval disc (a cylinder mesh) facing along the blade.
+local function disc(sword: BasePart, name: string, z: number, size: Vector3, color: Color3)
+	local part = fitting(sword, name, Vector3.one, CFrame.new(0, 0, z) * CFrame.Angles(0, math.pi / 2, 0), color)
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Cylinder
+	mesh.Scale = Vector3.new(size.X, size.Z, size.Y) -- cylinder length, then its two diameters
+	mesh.Parent = part
+end
+
+-- The mesh's own tsuba and handle are thin at Roblox scale; a bold iron tsuba with a gold rim,
+-- a gold pommel cap and a bright line down the cutting edge (skin-coloured, see applySkin)
+-- give the sword a silhouette and a glint at 30 studs.
+local function fittings(sword: BasePart, look: Weapons.WeaponLook)
+	local tsuba = look.Tsuba
+	disc(sword, "Tsuba", look.TsubaZ, tsuba, Color3.fromRGB(34, 30, 30))
+	disc(
+		sword,
+		"TsubaRim",
+		look.TsubaZ,
+		Vector3.new(tsuba.X * 0.5, tsuba.Y + 0.08, tsuba.Z + 0.08),
+		Color3.fromRGB(200, 154, 64)
+	)
+	local cap = math.min(tsuba.Y, tsuba.Z) * 0.42
+	disc(sword, "Kashira", look.PommelZ, Vector3.new(0.08, cap, cap * 1.3), Color3.fromRGB(200, 154, 64))
+
+	local edge = look.Edge
+	for i = 1, #edge - 1 do
+		local a, b = edge[i], edge[i + 1]
+		local line = fitting(
+			sword,
+			"Edge",
+			Vector3.new(0.07, 0.06, (b - a).Magnitude + 0.03),
+			CFrame.lookAt((a + b) / 2, b),
+			Color3.new(1, 1, 1)
+		)
+		line.Material = Enum.Material.Neon
+	end
+end
+
 function SwordRig.attach(model: Model, weaponId: string?): BasePart?
 	local look = Weapons.get(weaponId).look
 	local hand = model:FindFirstChild("RightHand") or model:FindFirstChild("Right Arm")
@@ -62,6 +121,7 @@ function SwordRig.attach(model: Model, weaponId: string?): BasePart?
 	sword.CanCollide = false
 	sword.CanTouch = false
 	sword.Massless = true
+	sword.Reflectance = 0.2 -- catches the sky, so the steel reads bright in daylight
 
 	local mesh = Instance.new("SpecialMesh")
 	mesh.MeshType = Enum.MeshType.FileMesh
@@ -69,6 +129,7 @@ function SwordRig.attach(model: Model, weaponId: string?): BasePart?
 	mesh.TextureId = look.TextureId
 	mesh.Scale = look.Scale
 	mesh.Parent = sword
+	fittings(sword, look)
 
 	trail(sword, look)
 
@@ -114,6 +175,12 @@ function SwordRig.applySkin(model: Model, skinId: string?)
 	local mesh = sword:FindFirstChildOfClass("SpecialMesh")
 	if mesh then
 		mesh.VertexColor = skin.tint
+	end
+	-- The edge line takes the skin's bright trail colour (Obsidian's "burning edge").
+	for _, line in sword:GetChildren() do
+		if line.Name == "Edge" and line:IsA("BasePart") then
+			line.Color = skin.trail[1]
+		end
 	end
 	local outline = sword:FindFirstChild("BladeOutline")
 	if outline and outline:IsA("Highlight") then
