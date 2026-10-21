@@ -63,6 +63,7 @@ type Fighter = {
 	clip: string, -- intro ref whose clip plays
 	card: Card,
 	fx: IntroFX.Handle?,
+	hats: { [BasePart]: number }?, -- headwear hidden while the intro wears its own (old Transparency)
 }
 
 type Session = {
@@ -174,23 +175,28 @@ end
 
 local CARD_W, CARD_H = 380, 104
 
+-- Where a card rests: a bottom corner, wholly above the letterbox (the bars are 10% high).
+local function cardHome(right: boolean): UDim2
+	return UDim2.new(if right then 1 else 0, if right then -28 else 28, 0.9, -8)
+end
+
 -- A lower-third card: an accent edge, the intro's kanji, title over name, rank (or the boss's
 -- name in Japanese), then the intro's name or the boss's line. `right` mirrors it.
 local function buildCard(parent: Instance, card: Card, right: boolean): Frame
 	local frame = UI.new("CanvasGroup", {
 		Name = if right then "CardRight" else "CardLeft",
 		AnchorPoint = Vector2.new(if right then 1 else 0, 1),
-		Position = UDim2.new(if right then 1 else 0, if right then -28 else 28, 0.9, 14),
+		Position = cardHome(right),
 		Size = UDim2.fromOffset(CARD_W, CARD_H),
-		BackgroundColor3 = THEME.Ink,
-		BackgroundTransparency = 0.18,
+		BackgroundTransparency = 1,
 		GroupTransparency = 1,
 	}, parent) :: Frame
-	UI.new("UIGradient", {
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, if right then 0.6 else 0),
-			NumberSequenceKeypoint.new(1, if right then 0 else 0.6),
-		}),
+	-- an opaque lacquer plate (a see-through ink one read grey-beige over the sand)
+	UI.panel({
+		Name = "Body",
+		Size = UDim2.fromScale(1, 1),
+		material = "lacquer",
+		sliceScale = 0.5,
 	}, frame)
 	-- the accent edge
 	UI.new("Frame", {
@@ -233,7 +239,7 @@ local function buildCard(parent: Instance, card: Card, right: boolean): Frame
 			TextXAlignment = align,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextStrokeColor3 = THEME.Ink,
-			TextStrokeTransparency = 0.5,
+			TextStrokeTransparency = 0.35,
 		}, frame)
 		for k, v in props do
 			(label :: any)[k] = v
@@ -261,14 +267,14 @@ local function buildCard(parent: Instance, card: Card, right: boolean): Frame
 	})
 	line("Sub", 61, 18, {
 		FontFace = UI.Fonts.Body,
-		TextSize = 15,
-		TextColor3 = card.subColor or THEME.Dim,
+		TextSize = 16,
+		TextColor3 = THEME.Bone,
 		Text = card.sub or "",
 	})
 	line("Intro", 79, 18, {
 		FontFace = if card.line then UI.Fonts.Body else UI.Fonts.Label,
-		TextSize = 14,
-		TextColor3 = if card.line then THEME.Bone else card.accent:Lerp(THEME.Bone, 0.35),
+		TextSize = 16,
+		TextColor3 = if card.line then THEME.Bone else THEME.Dim,
 		Text = if card.line
 			then `“{card.line}”`
 			elseif card.introName then UI.tracked(string.upper(card.introName))
@@ -280,7 +286,7 @@ end
 
 local function showCard(card: Frame, show: boolean, slide: boolean?)
 	local right = card.Name == "CardRight"
-	local home = UDim2.new(if right then 1 else 0, if right then -28 else 28, 0.9, 14)
+	local home = cardHome(right)
 	if show then
 		if slide ~= false then
 			card.Position = home + UDim2.fromOffset(if right then 120 else -120, 0)
@@ -411,6 +417,44 @@ end
 ---------------------------------------------------------------------------------------
 -- The session
 
+-- An intro that puts its own hat on (the Wanderer's Kasa) hides the fighter's own headwear on
+-- this screen while it plays: an outfit kasa or a hat accessory. Restored when the intro ends.
+local function hideHats(f: Fighter)
+	if not (f.fx and f.fx.props.Kasa) then
+		return
+	end
+	local hats: { [BasePart]: number } = {}
+	for _, child in f.model:GetChildren() do
+		local part: BasePart? = nil
+		if child:IsA("BasePart") and (child.Name == "Kasa" or child.Name == "Hat") then
+			part = child
+		elseif child:IsA("Accessory") then
+			local handle = child:FindFirstChild("Handle")
+			if
+				handle
+				and handle:IsA("BasePart")
+				and (child.AccessoryType == Enum.AccessoryType.Hat or handle:FindFirstChild("HatAttachment"))
+			then
+				part = handle
+			end
+		end
+		if part and part.Transparency < 1 then
+			hats[part] = part.Transparency
+			part.Transparency = 1
+		end
+	end
+	f.hats = hats
+end
+
+local function restoreHats(f: Fighter)
+	for part, transparency in f.hats or {} do
+		if part.Parent then
+			part.Transparency = transparency
+		end
+	end
+	f.hats = nil
+end
+
 local HUD_GUIS = { "LobbyHUD", "CombatHUD", "RoundHUD", "BossHUD", "DuelHUD", "TouchHUD", "Coach", "Toasts" }
 local SKIP_ACTION = "IntroSkip"
 local SINK_ACTION = "IntroSink"
@@ -480,6 +524,7 @@ local function endSession(s: Session, quick: boolean?)
 		if f.fx then
 			IntroFX.stop(f.fx, if quick then 0 else 0.6)
 		end
+		restoreHats(f)
 		-- an intro cut short blends straight to the stance
 		local current = Animator.current(f.model)
 		if current and string.sub(current, 1, 6) == "Intro_" then
@@ -667,15 +712,33 @@ function IntroCinematic.play(spec: Spec)
 		local okFx, handle = pcall(IntroFX.start, f.model, intro.ref, f.card.accent, startsIn)
 		if okFx then
 			fighter.fx = handle
+			hideHats(fighter)
 		else
 			warn("[IntroCinematic] effects:", handle)
+		end
+	end
+
+	-- The VS two-shot's side: the one nearest where the camera is now.
+	local camera = workspace.CurrentCamera
+	local sideSign = 1
+	-- Which fighter the two-shot shows on the left: their card goes bottom-left.
+	local firstLeft = true
+	do
+		local a, b = s.fighters[1], s.fighters[2]
+		local ra, rb = a and rootOf(a.model), b and rootOf(b.model)
+		if ra and rb then
+			local across = rb.Position - ra.Position
+			local perp = Vector3.new(across.X, 0, across.Z).Unit:Cross(Vector3.yAxis)
+			sideSign = if perp:Dot(camera.CFrame.Position - (ra.Position + rb.Position) / 2) >= 0 then 1 else -1
+			local shot = twoShot(a, b, 1, sideSign)
+			firstLeft = shot:PointToObjectSpace(ra.Position).X <= shot:PointToObjectSpace(rb.Position).X
 		end
 	end
 
 	-- Cards
 	local single = #s.fighters == 1
 	for i, f in s.fighters do
-		local card = buildCard(gui, f.card, i == 2)
+		local card = buildCard(gui, f.card, if i == 1 then not firstLeft else firstLeft)
 		local scale = card:FindFirstChild("Scale") :: UIScale
 		scale.Scale = math.clamp(UI.viewport().X / 1300, 0.72, 1) -- 0.72 keeps a phone's smallest line near 10 pt
 		table.insert(s.cards, card)
@@ -730,18 +793,7 @@ function IntroCinematic.play(spec: Spec)
 	end
 
 	-- The camera and the beats.
-	local camera = workspace.CurrentCamera
 	camera.CameraType = Enum.CameraType.Scriptable
-	local sideSign = 1
-	do
-		local a, b = s.fighters[1], s.fighters[2]
-		local ra, rb = a and rootOf(a.model), b and rootOf(b.model)
-		if ra and rb then
-			local across = rb.Position - ra.Position
-			local perp = Vector3.new(across.X, 0, across.Z).Unit:Cross(Vector3.yAxis)
-			sideSign = if perp:Dot(camera.CFrame.Position - (ra.Position + rb.Position) / 2) >= 0 then 1 else -1
-		end
-	end
 	local me = player.Character
 	local foe: Model? = nil
 	for _, f in s.fighters do
@@ -1014,11 +1066,11 @@ function IntroCinematic.start()
 		end
 		bots.ChildAdded:Connect(consider)
 	end)
-	-- Studio test hook: PlayerScripts.IntroTest:Invoke("preview", "Iai") / ("vs", model, ref)
+	-- Studio test hook: PlayerScripts.IntroTest:Invoke("preview", "Iai") / ("vs", model, mode?, introRef?)
 	if RunService:IsStudio() then
 		local hook = Instance.new("BindableFunction")
 		hook.Name = "IntroTest"
-		hook.OnInvoke = function(command: string, a: any, b: any): any
+		hook.OnInvoke = function(command: string, a: any, b: any, c: any): any
 			if command == "preview" then
 				IntroCinematic.preview(a)
 			elseif command == "vs" then
@@ -1040,8 +1092,13 @@ function IntroCinematic.start()
 						},
 						{
 							model = a,
-							intro = Intros.forBot(a.Name),
-							card = IntroCinematic.cardOf(nil, a, a.Name, Intros.forBot(a.Name)),
+							intro = if typeof(c) == "string" then c else Intros.forBot(a.Name),
+							card = IntroCinematic.cardOf(
+								nil,
+								a,
+								a.Name,
+								if typeof(c) == "string" then c else Intros.forBot(a.Name)
+							),
 						},
 					},
 					canSkip = true,
