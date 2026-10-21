@@ -19,7 +19,10 @@ Tools (installed with Homebrew): `rojo` 7.7, `selene`, `stylua`. The Rojo Studio
 
 ## Playing
 
-Press Play. A letterboxed title card (a slow dolly toward the shrine) shows first; click or press any key to enter.
+Press Play. The title card shows first: the LAST BLADE logo over a slow dolly past the floating lobby island. It's
+also the loading gate ([TitleScreen.luau](src/client/TitleScreen.luau), [WorldGate.luau](src/client/WorldGate.luau)):
+it waits for the server's `WorldReady` and preloads the lobby's meshes and the UI art, and "press any key" / "tap to
+begin" appears only then, so nobody walks into a half-loaded world. Logo art and its tools are in `art/logo/`.
 
 - **Lobby.** You arrive on a floating shrine island above the castle: a cobbled spawn plaza, a grand stair up to the
   torii terrace (where the Royale pad is, overlooking the castle), the dojo with the Deflect Trainer on the left wing,
