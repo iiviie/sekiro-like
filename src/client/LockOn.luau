@@ -18,11 +18,31 @@ local LockOn = {}
 
 local target: Model? = nil
 local PROBE_RADIUS = 0.4
+-- Framing at contact (on top of Config.LockOn's Close* values, full at contact and eased in from
+-- CloseRange). Kannagi's lens (60 deg, 9.3-stud arm, lag 7) is unchanged; what changes is where the
+-- arm points. Straight behind you, a same-size opponent at contact hides behind your own back (46%
+-- of their head, torso, arms and blade in view, the rest only with your body faded). Swinging the
+-- arm 32 deg round the pair's midpoint toward your shoulder, a touch higher and tilted down onto
+-- them, shows 78% standing, 75% while you swing and 88% while they swing, with no fade.
+local FRAMING = {
+	Orbit = 32, -- degrees the arm swings round the pair's midpoint toward your shoulder
+	Shoulder = 0, -- studs further out to the side
+	Raise = 0.5, -- studs higher (x the target's BodyScale)
+	PivotRaise = 0.4, -- the pivot (and the arm's probe origin) rises too
+	PullBack = 0,
+	FocusDrop = 0.4, -- the look point drops toward the target's waist, so the view tilts down onto them
+}
+-- The camera keeps to one shoulder; it only crosses to the other when the fight has turned it
+-- well over there (an opponent dashing past), and then swings across smoothly.
+local SIDE_SWITCH = 1.5 -- studs past the pair line
+local SIDE_RATE = 3
 local probeParams = RaycastParams.new()
 probeParams.FilterType = Enum.RaycastFilterType.Exclude
 probeParams.RespectCanCollide = true
 local eye: Vector3? = nil -- the lagged camera position and look direction (Kannagi's spring arm)
 local lookDir: Vector3? = nil
+local side = 1 -- which shoulder the camera sits over (1 right, -1 left)
+local sideBlend = 1
 local reticle: BillboardGui? = nil
 local listeners: { (Model?) -> () } = {}
 
@@ -145,6 +165,7 @@ function LockOn.set(model: Model?)
 		camera.CameraType = Enum.CameraType.Scriptable
 		if not was then
 			eye, lookDir = camera.CFrame.Position, camera.CFrame.LookVector -- swing over from here
+			side, sideBlend = 1, 1
 		end
 	else
 		camera.CameraType = Enum.CameraType.Custom
@@ -198,6 +219,18 @@ function LockOn.baseFov(): number
 	return if target then settings.FieldOfView else settings.FreeFieldOfView
 end
 
+-- Studio tuning: a workspace attribute LockOn<Name> (e.g. LockOnShoulder) overrides FRAMING.
+local function framing(name: string): number
+	local value = FRAMING[name]
+	if RunService:IsStudio() then
+		local override = workspace:GetAttribute("LockOn" .. name)
+		if typeof(override) == "number" then
+			return override
+		end
+	end
+	return value
+end
+
 local function updateCamera(dt: number)
 	if not target then
 		eye, lookDir = nil, nil
@@ -226,14 +259,36 @@ local function updateCamera(dt: number)
 	-- How close the pair stands: 0 at CloseRange and beyond, 1 at contact (~3 studs).
 	local close = math.clamp((settings.CloseRange - distance) / (settings.CloseRange - 3), 0, 1)
 	close = close * close * (3 - 2 * close) -- smoothstep, so the framing eases in
-	local pivot = mine.Position + Vector3.yAxis * settings.PivotHeight
+
+	-- Keep to the shoulder the camera is already over unless the fight turned it well across.
+	if eye then
+		local across = (eye - mine.Position):Dot(right)
+		if across * side < -SIDE_SWITCH then
+			side = -side
+		end
+	end
+	sideBlend += (side - sideBlend) * (1 - math.exp(-dt * SIDE_RATE))
+
+	local pivot = mine.Position + Vector3.yAxis * (settings.PivotHeight + framing("PivotRaise") * close)
+	local shoulder = settings.CameraShoulder + (settings.CloseShoulder + framing("Shoulder")) * close
+	-- The arm behind you (back, out to the shoulder)...
+	local back = -(settings.CameraDistance + (settings.ClosePullBack + framing("PullBack")) * close)
+	local out = shoulder * sideBlend
+	-- ...orbits around the pair's midpoint toward that shoulder at contact, so the line of sight
+	-- to the opponent clears your own body instead of running through your back.
+	local orbit = math.rad(framing("Orbit")) * close * sideBlend
+	local centre = distance * 0.5 * close -- how far ahead of you the orbit centre sits
+	local a, b = back - centre, out
+	local cosO, sinO = math.cos(orbit), math.sin(orbit)
+	a, b = a * cosO + b * sinO, -a * sinO + b * cosO
 	local desiredEye = pivot
-		- forward * (settings.CameraDistance + settings.ClosePullBack * close)
-		+ Vector3.yAxis * (settings.CameraHeight + settings.CloseRaise * close * scale)
-		+ right * (settings.CameraShoulder + settings.CloseShoulder * close)
+		+ forward * (a + centre)
+		+ right * b
+		+ Vector3.yAxis * (settings.CameraHeight + (settings.CloseRaise + framing("Raise")) * close * scale)
 	-- Look at the pair, sliding toward the target's chest as they close in (a taller boss's
-	-- chest sits higher).
-	local focus = mine.Position:Lerp(theirs.Position, 0.55 + 0.2 * close) + Vector3.yAxis * (1.2 + 0.6 * close * scale)
+	-- chest sits higher), and down onto them at contact.
+	local focus = mine.Position:Lerp(theirs.Position, 0.55 + 0.2 * close)
+		+ Vector3.yAxis * (1.2 + (0.6 * scale - framing("FocusDrop")) * close)
 
 	-- Kannagi's lag: the eye trails its arm at speed 7 (never more than MaxLag behind), and
 	-- the view turns toward the target at speed 5.

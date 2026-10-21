@@ -3,8 +3,9 @@
 -- your own character and blots out the screen. Anyone standing in that line, or right on
 -- top of the camera, fades out on your screen only (LocalTransparencyModifier) until they
 -- step clear. Their blade stays visible enough to read a swing.
--- Locked on at contact range your own body can hide the target's torso from the camera behind
--- you; then your body (not your blade) fades to SELF_FADE until the target is in clear view.
+-- Locked on at contact range the camera swings round the pair (LockOn) so your own body rarely
+-- hides the target; as a last resort, when it hides both their head and their chest, your body
+-- (not your blade) fades to SELF_FADE until one of them is in clear view.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -79,7 +80,7 @@ local selfFade = 0
 local selfParams = RaycastParams.new()
 selfParams.FilterType = Enum.RaycastFilterType.Include
 
--- Whether our own body stands between the camera and the target's head or chest.
+-- Whether our own body stands between the camera and both the target's head and chest.
 local function hidesTarget(character: Model, target: Model, from: Vector3): boolean
 	local body = {}
 	for _, part in partsOf(character) do
@@ -88,13 +89,17 @@ local function hidesTarget(character: Model, target: Model, from: Vector3): bool
 		end
 	end
 	selfParams.FilterDescendantsInstances = body
+	local hidden = 0
 	for _, name in { "UpperTorso", "Head" } do
 		local part = target:FindFirstChild(name)
-		if part and part:IsA("BasePart") and workspace:Raycast(from, part.Position - from, selfParams) then
-			return true
+		if part and part:IsA("BasePart") then
+			if not workspace:Raycast(from, part.Position - from, selfParams) then
+				return false
+			end
+			hidden += 1
 		end
 	end
-	return false
+	return hidden > 0
 end
 
 local function fadeSelf(character: Model, from: Vector3, dt: number)
