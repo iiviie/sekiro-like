@@ -156,7 +156,7 @@ local function refreshLockGlyph()
 			glyph.TextTransparency = dim
 		end
 	end
-	strokes.LockOn.Color = if autoLock then UI.Jade else UI.Bronze
+	strokes.LockOn.Color = if autoLock then UI.Jade else UI.Theme.Ash
 end
 
 local function toggleAutoLock()
@@ -199,13 +199,35 @@ local function makeButton(name: string, handler: Handler)
 		Image = "",
 	}, cluster)
 	UI.corner(button, UDim.new(0.5, 0))
-	UI.stroke(
-		button,
-		if name == "Block" then UI.Parchment elseif name == "Attack" then UI.Crimson else UI.Bronze,
-		if primary then 2.5 else 1.5,
-		0.15
-	)
-	strokes[name] = button:FindFirstChildOfClass("UIStroke") :: UIStroke
+	-- A 2 px ink rim so the disc reads over dark ground, and an inner hairline ring in the
+	-- button's colour (bone for Deflect, crimson for Slash, gold for the rest) that also
+	-- shows state: gold while guarding, jade while auto lock-on is on.
+	UI.new("UIStroke", { Name = "Rim", Color = UI.Theme.Ink, Thickness = 2, Transparency = 0.1 }, button)
+	local ring = UI.new("Frame", {
+		Name = "Ring",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, -6, 1, -6),
+		BackgroundTransparency = 1,
+		ZIndex = 2,
+	}, button)
+	UI.new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, ring)
+	strokes[name] = UI.new("UIStroke", {
+		Color = if name == "Block" then UI.Parchment elseif name == "Attack" then UI.Crimson else UI.Theme.Gold,
+		Thickness = if primary then 2 else 1,
+		Transparency = 0.15,
+	}, ring)
+	local art = UI.new("ImageLabel", {
+		Name = "RingArt",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(1.04, 1.04),
+		BackgroundTransparency = 1,
+		ZIndex = 3,
+	}, button)
+	if not UI.art(art, "TouchRing") then
+		art:Destroy()
+	end
 	local press = UI.new("UIScale", {}, button)
 
 	local glyph = Assets.Touch[name]
@@ -363,8 +385,22 @@ local function panelOpen(): boolean
 	return false
 end
 
+-- Heal is out of gourds: its disc fades (disabled look); it still answers a press.
+local function refreshDisabled()
+	local glyph = glyphs.Heal
+	local character = player.Character
+	local gourds = character and character:GetAttribute("Gourds")
+	local empty = typeof(gourds) == "number" and gourds <= 0
+	if glyph and glyph:IsA("ImageLabel") then
+		glyph.ImageTransparency = if empty then 0.6 else 0
+	elseif glyph and glyph:IsA("TextLabel") then
+		glyph.TextTransparency = if empty then 0.6 else 0
+	end
+end
+
 local function tick()
 	watchDefaultJump()
+	refreshDisabled()
 	local touch = usingTouch()
 	updateAutoLock(touch)
 	-- In a match or a duel the cluster is always up. In the lobby the bottom belongs to PLAY
