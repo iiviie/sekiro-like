@@ -230,6 +230,19 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		Size = UDim2.new(0, 250, 1, 0),
 		material = "inset",
 	}, parent)
+	-- The pane's height before any UIScale above it: on a phone it's too short to stack the
+	-- text, the price and the button, so the price moves up beside the rarity line.
+	local scale = 1
+	local node: Instance? = box
+	while node do
+		local fit = node:FindFirstChildOfClass("UIScale")
+		if fit then
+			scale *= fit.Scale
+		end
+		node = node.Parent
+	end
+	local paneH = box.AbsoluteSize.Y / math.max(scale, 0.01)
+	local short = paneH > 50 and paneH < 344
 	UI.rarityGlow(box, item.rarity, 1)
 	UI.rarityFrame(box, item.rarity, 4, 0.16)
 	if item.rarity == "legendary" then
@@ -282,23 +295,49 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 			else howToGet(item, state.progress)
 		if pricePill and StoreUI.rotatedOut(item) then
 			-- The real rotation: out of the shop today, never gone for good.
-			text = `Sold in the Store's daily shop, and back {StoreUI.returnText()}. Wishlist it to hear the day.`
+			text = if short
+				then `In the Store's daily shop, back {StoreUI.returnText()}.`
+				else `Sold in the Store's daily shop, and back {StoreUI.returnText()}. Wishlist it to hear the day.`
 		end
 		if item.blurb and not pricePill then
 			text = `{item.blurb}\n{text}`
 		end
 	end
-	UI.text({
+	-- The text takes the room left above whatever sits over the button (the price pill, the
+	-- second-title link), so it never runs under them; a long line drops to 14 px, then ends "…".
+	local ruleEntry = state.progress[item.id]
+	local hasPill = not owns
+		and not (item.rule and typeof(ruleEntry) == "table" and ruleEntry[1] < ruleEntry[2])
+		and item.price ~= nil
+		and not item.price.product
+		and Catalog.isReady(item)
+		and (item.price.coins ~= nil or item.price.gems ~= nil)
+	local titleLink = item.category == "title"
+		and owns
+		and StoreUI.attr("TitleSlots", 1) < 2
+		and not StoreUI.passes()["pass.TitleSlot"]
+	local reserved = UI.Touch + (if hasPill and not short then 54 elseif titleLink then 48 else 16)
+	local textH = if upgradable
+		then 22
+		elseif paneH <= 50 then 58 -- not laid out yet: the desktop height
+		else math.clamp(paneH - reserved - (y + 46), 18, 58)
+	local body = UI.text({
 		Name = "Text",
 		Position = UDim2.fromOffset(14, y + 46),
-		Size = UDim2.new(1, -28, 0, if upgradable then 22 else 58),
+		Size = UDim2.new(1, -28, 0, textH),
 		TextWrapped = true,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
 		TextSize = 15,
 		TextColor3 = UI.Theme.Dim,
 		Text = text,
 	}, box)
+	task.defer(function()
+		if body.Parent and not body.TextFits then
+			body.TextSize = 14
+		end
+	end)
 	if isLine and owns then
 		levelPips(box, item, level, y + 70)
 	end
@@ -525,9 +564,11 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		UI.price({
 			currency = if price.gems then "gems" else "coins",
 			amount = price.gems or price.coins or 0,
-			AnchorPoint = Vector2.new(0.5, 1),
-			Position = UDim2.new(0.5, 0, 1, -touch - 20),
-			Size = UDim2.fromOffset(130, 30),
+			-- A short pane (phone): on the rarity line, right; else centred over the button.
+			AnchorPoint = if short then Vector2.new(1, 0) else Vector2.new(0.5, 1),
+			Position = if short then UDim2.fromOffset(250 - 12, y + 23) else UDim2.new(0.5, 0, 1, -touch - 20),
+			Size = UDim2.fromOffset(if short then 108 else 130, if short then 24 else 30),
+			height = if short then 24 else nil,
 			ZIndex = 6,
 		}, box)
 	end
