@@ -34,6 +34,9 @@ TIERS = {
     "epic": ((150, 92, 196), (88, 48, 128), BONE, 2),
     "legendary": (GOLD, BRONZE, BONE, 3),
     "mythic": (CRIMSON, LACQUER, GOLD, 4),
+    # Appended (not inserted) so the other tiers keep their noise seeds. Level 0.5: plain
+    # band plus small bone corner pips (rare has diamonds).
+    "uncommon": ((108, 196, 164), (46, 110, 92), BONE, 0.5),
 }
 
 yy, xx = np.mgrid[0:N, 0:N].astype(np.float32)
@@ -169,6 +172,11 @@ def compose(name: str) -> Image.Image:
         else:
             paint(corners(diamond, off, r * 0.45), dark)
 
+    if level == 0.5:
+        off = 46 * SS
+        paint(corners(disc, off, 11 * SS), INK)
+        paint(corners(disc, off, 7 * SS), BONE)
+
     if level >= 2:
         # Mid-edge studs.
         mids = np.zeros((N, N), np.float32)
@@ -184,7 +192,9 @@ def compose(name: str) -> Image.Image:
 
 
 def main() -> None:
-    for name in TIERS:
+    import sys
+
+    for name in sys.argv[1:] or TIERS:
         compose(name).save(HERE / "png" / f"frame_{name}.png", optimize=True)
         print(f"frame_{name}")
 
