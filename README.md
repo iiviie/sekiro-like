@@ -469,17 +469,22 @@ order: naginata (reach), then dual blades; kusarigama last.
   cycle, so you keep stepping under a swing.
 - **Animation.** Every R15 fighter stands in a low swordsman stance: hips dropped, right foot leading, hips turned
   36° with the chest turned back to the opponent ([Gait.luau](src/shared/Gait.luau) places the feet and hips, Animator
-  solves the legs with IK, scaled to each rig's leg length and foot). Walking, running, strafing and backpedalling are
-  a procedural cycle driven by the motion shown: about 3 steps a second at full speed (longer strides with a flight
-  phase, not faster legs), heel strike or flat landing, a roll onto the toes and push-off, the heel kicking up behind
-  and the knee driving forward. A planted foot is locked where it landed, so it can't slide. The pelvis bobs, sways
-  and turns with the legs, the chest counter-turns, the free arm pumps with a bent elbow and the sword hand swings a
-  little with the blade held steady, and the body leans into the run, into acceleration and into turns. Lock-on
-  strafes turn the hips toward the travel (the waist takes the twist back to the target); standing, feet hold their
-  place and step back under the body when it turns or settles. Fights run lower with smaller steps. Roblox's own
-  animations only show in the air, when seated or climbing. Rigs over 90 studs from the camera are posed 15 times a
-  second. Out of combat the stance stands taller and the blade is carried
-  forward and down; locked on, or within 4 s of an exchange, fighters raise a two-handed chudan guard. Combat motion
+  solves the legs with IK, scaled to each rig's leg length and foot). Walking and running forward faster than about
+  5 studs/s show Roblox's default R15 walk and run (the Animate script's own clips, which every Roblox player knows),
+  played by the Animator on every rig at the top priority and timed to the ground speed like the Animate script; the
+  sword arm and the stance sit on top, and the sword hand keeps time with that run's shoulder swing. Slow steps, lock-on
+  strafes, backpedals and standing are a procedural cycle driven by the motion shown: about 3.5 steps a second at full
+  speed, heel strike or flat landing, a roll onto the toes and push-off. A planted foot is locked where it landed, so
+  it can't slide. The pelvis bobs, sways and turns with the legs, the chest counter-turns, the free arm swings at chest
+  height, and the body leans into acceleration and into turns. Lock-on strafes turn the hips up to 40° toward the
+  travel (the waist takes the twist back to the target) and stand taller than the planted fight stance. Standing, the
+  feet hold their place and step back under the body when it turns or settles; a hard stop dips and rocks back for
+  a quarter second, and the relaxed stance breathes and shifts its weight from foot to foot. `Gait.Mode`
+  ("hybrid" / "procedural", top of Gait.luau; Studio attribute `GaitMode` overrides it live) switches forward running
+  back to the procedural cycle (the round-1 A/B kept "hybrid"). Roblox's jump, fall, climb and seat animations show in
+  the air and when seated or climbing. Rigs over 90 studs from the camera are posed 15 times a second. Out of combat
+  the stance stands taller and the blade rests on the right shoulder (it's too long to carry low without trailing on
+  the sand); locked on, or within 4 s of an exchange, fighters raise a two-handed chudan guard. Combat motion
   is procedural: [Poses.luau](src/shared/Poses.luau)
   describes each pose as directions (where the arm, forearm and blade point), solves them into joint rotations, and
   [Animator.luau](src/client/Animator.luau) layers them over the locomotion with eased keyframes from [Clips.luau](src/shared/Clips.luau).
