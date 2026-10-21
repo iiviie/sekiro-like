@@ -102,6 +102,9 @@ local Assets = {
 			KanjiEpic = "rbxassetid://111497332918162", -- 秀
 			KanjiLegendary = "rbxassetid://113748455336743", -- 極
 			KanjiTitle = "rbxassetid://84190621069944", -- 最後の刃, vertical
+			-- The LAST BLADE title logo (art/logo/png/lb_inkgold_seal.png at 1024x643): sumi brush
+			-- wordmark, crimson enso, katana and the 最後の刃 hanko, on transparency.
+			Logo = "rbxassetid://136659977326363",
 			-- Boss names in brush kanji, keyed by boss id (Shared/Bosses nameJP).
 			BossNames = {
 				Enemy01 = "rbxassetid://119643877629421",
