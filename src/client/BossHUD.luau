@@ -1,7 +1,7 @@
 --!strict
--- Boss trials on screen: the shrine's boss picker, the boss's name banner and bars along the
--- bottom of the screen (vitality, posture growing from the centre, remaining lives), phase and
--- lesson banners, and the result. Driven by ReplicatedStorage.Remotes.Boss (server/
+-- Boss trials on screen: the shrine's boss picker, the boss's name banner and bars across the
+-- top of the screen (vitality, posture growing from the centre, remaining lives; the middle
+-- stays the fighters'), phase and lesson lines under them, and the result. Driven by ReplicatedStorage.Remotes.Boss (server/
 -- BossService) and the boss model's attributes.
 
 local Players = game:GetService("Players")
@@ -235,16 +235,17 @@ local function build()
 		remote:FireServer("Cancel")
 	end)
 
-	-- The boss bar, just above your own posture bar (CombatHUD's, 80 px tall at -100).
+	-- The boss bar at the top-centre (the round banner's place, which hides in a trial), its
+	-- brush-kanji name in the top bar's empty middle.
 	bar = UI.new("Frame", {
 		Name = "BossBar",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -188),
-		Size = UDim2.new(0.5, 0, 0, 64),
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 64),
+		Size = UDim2.new(0.4, 0, 0, 64),
 		BackgroundTransparency = 1,
 		Visible = false,
 	}, screen)
-	UI.new("UISizeConstraint", { MinSize = Vector2.new(320, 64), MaxSize = Vector2.new(720, 64) }, bar)
+	UI.new("UISizeConstraint", { MinSize = Vector2.new(300, 64), MaxSize = Vector2.new(560, 64) }, bar)
 	-- The name sits on a horizontal ink band so it reads over any sky.
 	UI.new("ImageLabel", {
 		Name = "Band",
@@ -259,11 +260,11 @@ local function build()
 	nameLabel = UI.label("heading", {
 		Name = "BossName",
 		Text = "",
-		TextSize = 26,
+		TextSize = 22,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextStrokeColor3 = THEME.Ink,
 		TextStrokeTransparency = 0.5,
-		Position = UDim2.fromOffset(0, -6),
+		Position = UDim2.fromOffset(0, -4),
 		Size = UDim2.new(1, -120, 0, 30),
 	}, bar)
 	-- The Japanese name as a brush image (art/ui/chrome.py), never as fallback-font text.
@@ -271,7 +272,7 @@ local function build()
 		Name = "BossKanji",
 		AnchorPoint = Vector2.new(0, 1),
 		Position = UDim2.fromOffset(0, -8),
-		Size = UDim2.fromOffset(260, 40),
+		Size = UDim2.fromOffset(200, 32),
 		BackgroundTransparency = 1,
 		ScaleType = Enum.ScaleType.Fit,
 		ImageColor3 = THEME.Bone,
@@ -280,7 +281,7 @@ local function build()
 	UI.new("UIAspectRatioConstraint", { AspectRatio = 4.3 }, kanjiName)
 	subLabel = UI.label("body", {
 		Text = "",
-		TextSize = 16,
+		TextSize = 14,
 		TextColor3 = THEME.Dim,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -323,28 +324,48 @@ local function build()
 		{ Size = UDim2.fromOffset(52, 52) }
 	):Play()
 
+	-- "Fight in 3", "Phase 2" and the tutorial's lesson: short lines under the bar.
 	banner = UI.text({
 		Name = "Banner",
 		Text = "",
 		Font = UI.Display,
-		TextSize = 40,
+		TextSize = 28,
 		TextStrokeTransparency = 0.35,
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 92),
-		Size = UDim2.fromOffset(700, 48),
+		Position = UDim2.new(0.5, 0, 0, 136),
+		Size = UDim2.fromOffset(560, 34),
 		Visible = false,
 	}, screen)
 	lesson = UI.text({
 		Name = "Lesson",
 		Text = "",
-		TextSize = 20,
+		TextSize = 17,
 		TextColor3 = UI.Gold,
 		TextStrokeTransparency = 0.4,
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 140),
-		Size = UDim2.fromOffset(700, 26),
+		Position = UDim2.new(0.5, 0, 0, 172),
+		Size = UDim2.fromOffset(560, 22),
 		Visible = false,
 	}, screen)
+	-- Phones get these at the HUD's scale (the picker fits itself).
+	for _, obj in { bar, banner, lesson } :: { GuiObject } do
+		local fit = UI.new("UIScale", { Name = "Fit" }, obj)
+		local function refitHud()
+			fit.Scale = UI.hudScale()
+			local s = fit.Scale
+			-- Offsets from the top shrink with the scale, so the three stay stacked.
+			if obj == bar then
+				obj.Position = UDim2.new(0.5, 0, 0, math.floor(64 * s))
+			elseif obj == banner then
+				obj.Position = UDim2.new(0.5, 0, 0, math.floor(136 * s))
+			else
+				obj.Position = UDim2.new(0.5, 0, 0, math.floor(172 * s))
+			end
+		end
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(refitHud)
+		player:GetAttributeChangedSignal("UIViewport"):Connect(refitHud)
+		refitHud()
+	end
 end
 
 local function showBanner(text: string, sub: string?, hold: number)
