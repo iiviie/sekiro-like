@@ -28,15 +28,14 @@ local GOLD = Color3.fromRGB(240, 200, 110)
 local CRIMSON = Color3.fromRGB(200, 40, 34)
 local FEED_LIFETIME = 6
 local FEED_MAX = 3
--- The mist wall is a ring of vertical, camera-facing beams: double-sided, unlike a
--- cylinder part, whose inside faces are culled so it vanishes once you're within it. Phones
--- and tablets get fewer, wider columns: each is a tall translucent quad (overdraw).
+-- The mist wall is a ring of soft vertical panels (Beams: double-sided, unlike a cylinder
+-- part, whose inside faces are culled so it vanishes once you're within it), with a line and
+-- a wash on the ground under it (see "Ring" below). Phones and tablets get fewer, wider
+-- panels: each is a tall translucent quad (overdraw).
 local MIST_COLUMNS = if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then 40 else 72
-local MIST_HEIGHT = 28
-local MIST_BASE_Y = 1 -- just under the courtyard floor, so the mist rises out of the ground
--- Soft columns (the posture bar's glow stretched up each one: feathered sides, no hard
--- edges) instead of flat quads; neighbours overlap so the wall reads as one low bank of mist.
-local MIST_OVERLAP = 2.2 -- column width over the gap between columns
+local MIST_HEIGHT = 28 -- from a stud under the ground; the panel fades out by about two thirds up
+-- Soft panels; neighbours overlap so the wall reads as one bank of mist, not a fence of posts.
+local MIST_OVERLAP = 3 -- panel width over the gap between panels (less and the panels read as stripes)
 
 local RoundHUD = {}
 
@@ -53,7 +52,6 @@ local ring: Part
 local mistBottoms: { Attachment } = {}
 local mistTops: { Attachment } = {}
 local mistBeams: { Beam } = {}
-local mistWidth = 0
 local ringShown = false
 local mistGrade: ColorCorrectionEffect
 local spectating: Model? = nil
@@ -316,24 +314,79 @@ end
 
 ---------------------------------------------------------------------------------------
 -- Ring
+--
+-- Beams on one invisible anchor part (double-sided, no collision), in two parts:
+--   wall    soft panels standing on the circle. Each is a flat panel along the ring rather
+--           than a quad turned to the camera, so the panels beside the lens are seen edge-on
+--           instead of swinging across the screen, and the wall in front of you stays up as you
+--           walk toward it. They only thin out when the lens itself is outside the ring and
+--           they stand between it and you.
+--   ground  a crimson line on the ground at the radius (a bright core in a soft halo), and a
+--           dark-red wash just outside it (two bands, denser at the line): exactly where the
+--           mist begins, from anywhere inside. Each band is a ring of curved arcs (Bezier
+--           beams), so it has no joints or gaps.
+-- Ground heights come from the terrain under each point (boulders and fences ignored).
 
--- Column transparency by distance to the camera: hidden, faint, normal.
-local MIST_NEAR = {
-	NumberSequence.new(1),
-	NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.85),
-		NumberSequenceKeypoint.new(0.5, 0.93),
-		NumberSequenceKeypoint.new(1, 1),
-	}),
-	NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.5),
-		NumberSequenceKeypoint.new(0.5, 0.78),
-		NumberSequenceKeypoint.new(1, 1),
-	}),
+-- A Beam that doesn't face the camera spreads its width along its attachments' Y axis (checked
+-- in Studio: attachments with X along the beam and Y up stand it as a vertical band); a curve
+-- leaves Attachment0 along +X and arrives at Attachment1 along +X.
+local function orient(position: Vector3, along: Vector3, across: Vector3): CFrame
+	return CFrame.fromMatrix(position, along, across, along:Cross(across))
+end
+
+local UP = Vector3.yAxis
+local GROUND_ARCS = if MIST_COLUMNS < 72 then 16 else 24
+local GROUND_LIFT = 0.25
+-- The ground bands: offset of the band's centre outside the radius, width, transparency,
+-- colour, self-light, light influence.
+local GROUND_BANDS = {
+	{ out = 0, width = 0.7, transparency = 0.1, color = Color3.fromRGB(230, 46, 50), glow = 0.5, lit = 0.15 },
+	{ out = 0, width = 2.4, transparency = 0.62, color = Color3.fromRGB(222, 40, 46), glow = 0.4, lit = 0.2 },
+	{ out = 2.3, width = 4, transparency = 0.62, color = Color3.fromRGB(120, 14, 22), glow = 0, lit = 0.6 },
+	{ out = 4.6, width = 9, transparency = 0.8, color = Color3.fromRGB(120, 14, 22), glow = 0, lit = 0.6 },
 }
-local mistLevels: { number } = {}
-local placedCenter: Vector3? = nil -- where the columns were last put (they only move as it closes)
+
+-- Wall panel transparency up its height: normal, and thinned (the lens is outside the ring
+-- and the panel stands close to it, between it and you).
+local WALL_NORMAL = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.12),
+	NumberSequenceKeypoint.new(0.3, 0.55),
+	NumberSequenceKeypoint.new(0.7, 1),
+	NumberSequenceKeypoint.new(1, 1),
+})
+local WALL_THIN = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.85),
+	NumberSequenceKeypoint.new(0.25, 0.95),
+	NumberSequenceKeypoint.new(1, 1),
+})
+local WALL_HIDDEN = NumberSequence.new(1)
+local wallLevels: { NumberSequence } = {}
+type Arc = { beam: Beam, a: Attachment, b: Attachment, index: number, out: number }
+local arcs: { Arc } = {}
+local wallGround: { number } = {} -- terrain height under each wall panel
+local arcGround: { number } = {} -- terrain height at each arc joint
+local groundRadius = -1
+local groundCenter: Vector3? = nil
+local placedCenter: Vector3? = nil -- where the ring was last put (it only moves as it closes)
 local placedRadius = -1
+
+local function beam(props: { [string]: any }): (Beam, Attachment, Attachment)
+	local a = Instance.new("Attachment")
+	a.Parent = ring
+	local b = Instance.new("Attachment")
+	b.Parent = ring
+	local new = Instance.new("Beam")
+	new.Attachment0 = a
+	new.Attachment1 = b
+	new.FaceCamera = false
+	new.Segments = 1
+	new.Enabled = false
+	for key, value in props do
+		(new :: any)[key] = value
+	end
+	new.Parent = ring
+	return new, a, b
+end
 
 local function buildRing()
 	ring = Instance.new("Part")
@@ -347,26 +400,34 @@ local function buildRing()
 	ring.Size = Vector3.one
 	ring.CFrame = CFrame.identity
 	for i = 1, MIST_COLUMNS do
-		local bottom = Instance.new("Attachment")
-		bottom.Parent = ring
-		local top = Instance.new("Attachment")
-		top.Parent = ring
-		local beam = Instance.new("Beam")
-		beam.Attachment0 = bottom
-		beam.Attachment1 = top
-		beam.FaceCamera = true
-		beam.Segments = 1
 		-- Ink-red, darkening upwards; barely self-lit, so it tints the arena only where it stands.
-		beam.Color = ColorSequence.new(Color3.fromRGB(170, 30, 26), Color3.fromRGB(120, 20, 20))
-		beam.Transparency = MIST_NEAR[3]
-		beam.Texture = Assets.UI.BarGlow
-		beam.TextureMode = Enum.TextureMode.Stretch
-		beam.TextureLength = 1
-		beam.LightEmission = 0.15
-		beam.LightInfluence = 0.3
-		beam.Enabled = false
-		beam.Parent = ring
-		mistBottoms[i], mistTops[i], mistBeams[i] = bottom, top, beam
+		-- The posture bar's glow stretched up each panel: feathered sides, no hard edges.
+		mistBeams[i], mistBottoms[i], mistTops[i] = beam({
+			Name = "Wall",
+			Color = ColorSequence.new(Color3.fromRGB(184, 26, 32), Color3.fromRGB(110, 16, 22)),
+			Transparency = WALL_NORMAL,
+			Texture = Assets.UI.BarGlow,
+			TextureMode = Enum.TextureMode.Stretch,
+			TextureLength = 1,
+			LightEmission = 0.3,
+			LightInfluence = 0.35,
+		})
+		wallLevels[i] = WALL_NORMAL
+	end
+	for i = 1, GROUND_ARCS do
+		for _, band in GROUND_BANDS do
+			local new, a, b = beam({
+				Name = "Ground",
+				Segments = 12,
+				Color = ColorSequence.new(band.color),
+				Transparency = NumberSequence.new(band.transparency),
+				LightEmission = band.glow,
+				LightInfluence = band.lit,
+				Width0 = band.width,
+				Width1 = band.width,
+			})
+			table.insert(arcs, { beam = new, a = a, b = b, index = i, out = band.out })
+		end
 	end
 	ring.Parent = workspace
 
@@ -380,41 +441,93 @@ end
 local function showRing(visible: boolean)
 	if visible ~= ringShown then
 		ringShown = visible
-		for _, beam in mistBeams do
-			beam.Enabled = visible
+		for _, wall in mistBeams do
+			wall.Enabled = visible
+		end
+		for _, arc in arcs do
+			arc.beam.Enabled = visible
 		end
 	end
 end
 
+-- The terrain's height at a point (the courtyard floor if nothing is under it).
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Include
+groundParams.FilterDescendantsInstances = { workspace.Terrain }
+local function groundAt(x: number, z: number): number
+	local hit = workspace:Raycast(Vector3.new(x, 80, z), Vector3.new(0, -160, 0), groundParams)
+	return if hit then hit.Position.Y else 2
+end
+
+local function outward(angle: number): Vector3
+	return Vector3.new(math.cos(angle), 0, math.sin(angle))
+end
+
 local function placeRing(center: Vector3, radius: number)
-	-- Camera-facing columns right beside the lens would fill the screen with flat red, so
-	-- columns fade out as the camera gets close; the screen tint says you're in the mist.
 	local camera = workspace.CurrentCamera
 	local eye = if camera then camera.CFrame.Position else Vector3.zero
-	local moved = center ~= placedCenter or radius ~= placedRadius
-	placedCenter, placedRadius = center, radius
-	for i = 1, MIST_COLUMNS do
-		local base = mistBottoms[i].Position
-		if moved then
-			local angle = (i / MIST_COLUMNS) * math.pi * 2
-			base = Vector3.new(center.X + math.cos(angle) * radius, MIST_BASE_Y, center.Z + math.sin(angle) * radius)
-			mistBottoms[i].Position = base
-			mistTops[i].Position = base + Vector3.new(0, MIST_HEIGHT, 0)
+	local flat = Vector3.new(center.X, 0, center.Z)
+	if center ~= placedCenter or radius ~= placedRadius then
+		placedCenter, placedRadius = center, radius
+		local step = math.pi * 2 / MIST_COLUMNS
+		local arcStep = math.pi * 2 / GROUND_ARCS
+		-- Terrain heights only change meaningfully once the ring has moved a stud or so.
+		if groundCenter ~= center or math.abs(radius - groundRadius) > 1 then
+			groundCenter, groundRadius = center, radius
+			for i = 1, MIST_COLUMNS do
+				local p = flat + outward((i - 0.5) * step) * radius
+				wallGround[i] = groundAt(p.X, p.Z)
+			end
+			for i = 1, GROUND_ARCS do
+				local p = flat + outward(i * arcStep) * radius
+				arcGround[i] = groundAt(p.X, p.Z)
+			end
 		end
-		local gap = Vector3.new(base.X - eye.X, 0, base.Z - eye.Z).Magnitude
-		local level = if gap < 14 then 1 elseif gap < 22 then 2 else 3
-		if mistLevels[i] ~= level then
-			mistLevels[i] = level
-			mistBeams[i].Transparency = MIST_NEAR[level]
+		-- Each panel wider than the gap to its neighbour, so the feathered sides overlap into a wall.
+		local width = 2 * math.pi * radius / MIST_COLUMNS * MIST_OVERLAP + 0.4
+		for i = 1, MIST_COLUMNS do
+			local out = outward((i - 0.5) * step)
+			local tangent = Vector3.new(-out.Z, 0, out.X)
+			local base = flat + out * radius + Vector3.new(0, wallGround[i] - 1, 0)
+			mistBottoms[i].CFrame = orient(base, UP, tangent)
+			mistTops[i].CFrame = orient(base + Vector3.new(0, MIST_HEIGHT, 0), UP, tangent)
+			if math.abs(mistBeams[i].Width0 - width) > 0.05 then
+				mistBeams[i].Width0 = width
+				mistBeams[i].Width1 = width
+			end
+		end
+		-- The ground arcs: joint to joint, each end along the ring and its width across it, the
+		-- Bezier handles sized so the curve follows the circle.
+		for _, arc in arcs do
+			local r = radius + arc.out
+			local i = arc.index
+			local a0, a1 = (i - 1) * arcStep, i * arcStep
+			local y0 = arcGround[if i == 1 then GROUND_ARCS else i - 1] + GROUND_LIFT
+			local y1 = arcGround[i] + GROUND_LIFT
+			local out0, out1 = outward(a0), outward(a1)
+			arc.a.CFrame = orient(flat + out0 * r + Vector3.new(0, y0, 0), Vector3.new(-out0.Z, 0, out0.X), out0)
+			arc.b.CFrame = orient(flat + out1 * r + Vector3.new(0, y1, 0), Vector3.new(-out1.Z, 0, out1.X), out1)
+			local handle = 4 / 3 * math.tan(arcStep / 4) * r
+			arc.beam.CurveSize0 = handle
+			arc.beam.CurveSize1 = handle
 		end
 	end
-	-- Each column wider than the gap to its neighbour, so the soft edges overlap into a wall.
-	local width = 2 * math.pi * radius / MIST_COLUMNS * MIST_OVERLAP + 0.4
-	if math.abs(width - mistWidth) > 0.05 then
-		mistWidth = width
-		for _, beam in mistBeams do
-			beam.Width0 = width
-			beam.Width1 = width
+	-- The wall only steps aside for the lens when the lens is out in the mist itself (backed up
+	-- against the edge, the camera trails outside it): then the panels close to the lens, which
+	-- stand between it and you, thin out. From inside, a panel within a couple of studs of the
+	-- lens is the only one hidden.
+	local eyeOutside = Vector3.new(eye.X - center.X, 0, eye.Z - center.Z).Magnitude > radius - 0.5
+	for i = 1, MIST_COLUMNS do
+		local base = mistBottoms[i].Position
+		local gap = Vector3.new(base.X - eye.X, 0, base.Z - eye.Z).Magnitude
+		local level = if gap < 2.5
+			then WALL_HIDDEN
+			elseif eyeOutside and gap < 9 then WALL_HIDDEN
+			elseif eyeOutside and gap < 16 then WALL_THIN
+			else WALL_NORMAL
+		if wallLevels[i] ~= level then
+			wallLevels[i] = level
+			mistBeams[i].Transparency = level
 		end
 	end
 end
