@@ -411,8 +411,8 @@ local function gemsTab(list: ScrollingFrame)
 			-- An honest ribbon: the biggest bonus of the six.
 			local ribbon = UI.new("Frame", {
 				Name = "BestValue",
-				AnchorPoint = Vector2.new(1, 0),
-				Position = UDim2.new(1, -8, 0, 8),
+				AnchorPoint = Vector2.new(0, 1),
+				Position = UDim2.new(0, 6, 1, -8),
 				Size = UDim2.fromOffset(0, 22),
 				AutomaticSize = Enum.AutomaticSize.X,
 				BackgroundColor3 = UI.Theme.Gold,
