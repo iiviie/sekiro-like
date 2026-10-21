@@ -300,13 +300,21 @@ order: naginata (reach), then dual blades; kusarigama last.
 - **At runtime** the left arm is solved live (two-bone IK) onto the hilt whenever a two-handed clip or stance is
   showing, so the grip holds between frames too. While you move, attack clips leave the hips and legs to the walk
   cycle, so you keep stepping under a swing.
-- **Animation.** Locomotion uses Roblox's standard R15 animations (upright and natural; the Ninja pack's low stances
-  made everyone look crouched). Out of combat the sword is carried low at the side; locked on, or within 4 s of an
-  exchange, fighters raise a low guard. Combat motion is procedural: [Poses.luau](src/shared/Poses.luau)
+- **Animation.** Every R15 fighter stands in a low swordsman stance: hips dropped, right foot leading, hips turned
+  38° with the chest turned back to the opponent ([Gait.luau](src/shared/Gait.luau) places the feet and hips, Animator
+  solves the legs with IK, scaled to each rig's leg length). Walking, running, strafing and backpedalling are procedural
+  footwork driven by the real ground velocity relative to facing, so planted feet don't slide; Roblox's own animations
+  only show in the air, when seated or climbing. Out of combat the stance stands taller and the blade is carried
+  forward and down; locked on, or within 4 s of an exchange, fighters raise a two-handed chudan guard. Combat motion
+  is procedural: [Poses.luau](src/shared/Poses.luau)
   describes each pose as directions (where the arm, forearm and blade point), solves them into joint rotations, and
   [Animator.luau](src/client/Animator.luau) layers them over the locomotion with eased keyframes from [Clips.luau](src/shared/Clips.luau).
-- **Swords.** The katana is 4.4 studs (the odachi 5.85) and much broader than the source mesh, with a thin ink outline (a Highlight) so it
-  reads at camera distance. Trails taper, steel-white for slashes and red for perilous attacks. **Blade skins**
+- **Swords.** Stylised and slightly oversized, like Dueling Grounds': the katana is 5.7 studs (the odachi 7.6), with
+  a code-built dark iron tsuba with a gold rim, a gold pommel cap and a bright neon line along the edge welded over the
+  mesh ([SwordRig.luau](src/server/SwordRig.luau)), and a thin ink outline (a Highlight) so it reads at camera
+  distance. The visible blade is longer than the hit box (`Config` hit areas are gameplay and weren't scaled). Each
+  strike draws a wide gradient crescent that follows the blade's real sweep, steel-white for slashes (or the skin's
+  colour) and red for perilous attacks. **Blade skins**
   ([Progression.luau](src/shared/Progression.luau)) tint the mesh through `SpecialMesh.VertexColor` and recolour the
   outline and trail; the rarer ones add a glow or drifting petals. Some unlock through play (Mastery 3, 5 wins, 25
   deathblows, 150 perfect deflects) and are then bought with coins. Roblox caps how many
@@ -337,18 +345,31 @@ order: naginata (reach), then dual blades; kusarigama last.
 - **Map.** [MapBuilder.luau](src/server/MapBuilder.luau) generates the terrain, castle walls, shrine hall, a pale-sand
   duelling circle (so dark-clad fighters read clearly), moss along the walls, crimson nobori banners, braziers and
   drifting maple leaves. World and HUD colours come from [Palette.luau](src/shared/Palette.luau).
+- **Environment** ([EnvironmentProfile.luau](src/server/EnvironmentProfile.luau), at startup): terrain material colours
+  for midday (calm sand fighting floors so characters pop, fresh grass, near-neutral cliff rock), warm sandstone for the
+  placed lanterns and boulders, and the round vermilion lacquered post with a black cap used on every fence, the dojo
+  and the shrine.
 - **Materials.** `MaterialService` overrides re-skin every Plaster, Wood and ClayRoofTiles surface at once with
   generated materials (aged lime plaster, cedar, kawara tiles), the closest thing Roblox has to one shared shader. They
   live in the place file, not in git. Lacquered red pillars use SmoothPlastic so the timber override skips them.
-- **Lighting.** Golden hour under a storm-lit sunset sky, graded a touch brighter and warmer than neutral (exposure
-  +0.3, saturation +0.08) so it reads on a phone: `LightingStyle = Realistic` with `PrioritizeLightingQuality`,
-  the sun placed where the skybox glows, warm key light against cool violet ambient, and a dense Atmosphere that pushes
-  the mountains back. All of it is in `default.project.json` (the deprecated `Technology` property is gone). Props in `Workspace.Props` came from the Creator Store and were
+- **Lighting.** Bright, soft daylight in the spirit of Dueling Grounds, applied by the server at startup from
+  [LightingProfile.luau](src/shared/LightingProfile.luau): an early-afternoon sun, neutral-warm ambient high enough that
+  faces and clothes read in shadow, soft shadows, a light far haze that leaves fighters clear, a gentle grade and bloom,
+  and Roblox's stock day sky. `LightingStyle = Realistic` with `PrioritizeLightingQuality` stay in
+  `default.project.json` (scripts can't set them); that file's older golden-hour values still show in edit mode until
+  they're brought in line with the profile. Props in `Workspace.Props` came from the Creator Store and were
   stripped of every script.
-- **Fighters.** Bots are dressed by [Outfit.luau](src/server/Outfit.luau): a woven kasa (made with Studio's mesh
-  generator), gi and hakama in one of four muted colourways, and a crimson sash.
-- **Combat VFX.** Hits throw dark, gravity-pulled blood along the line of the blow instead of glowing sparks; deathblows
-  add a heavier arc, pools on the floor and a brief desaturated freeze. The camera kicks along the blow and settles
+- **Fighters.** Bots and bosses are dressed by [Outfit.luau](src/server/Outfit.luau) in textured classic Shirt/Pants:
+  a gi with crossed lapels and an obi over pleated hakama, six mid-tone colourways for bots and one set per boss
+  (ids in [Clothing.luau](src/shared/Clothing.luau)). The templates are built by `art/clothing/build.py` from
+  Codex-generated fabric swatches; to retune colours edit its `COLOURWAYS`, rebuild, re-upload and paste
+  `build.py --luau` into Clothing.luau. Bots also wear a woven kasa (made with Studio's mesh generator).
+- **Combat VFX** ([CombatVisuals.luau](src/client/CombatVisuals.luau)). Slash smears are pooled flat Beams swept
+  between the sword's `TrailStart`/`TrailEnd` attachments every frame (interpolated, so even a 70 ms cut draws a smooth
+  arc). Deflects spray long sparks from where the blades meet (more, and a bigger bloom, for a perfect deflect); hits
+  add a cut streak, a white star flash and shards to the dark, gravity-pulled blood; deathblows add an X cut, pools on
+  the floor and a brief desaturated freeze. **Settings → Reduced effects** thins particles, drops flash lights and
+  shortens smears. In Studio, `workspace:SetAttribute("VfxSlowMo", 0.1)` slows only these effects for screenshots. The camera kicks along the blow and settles
   rather than jittering at random.
 - **Sound.** Licensed ProSoundEffects and APM library audio. Every asset id is in [Assets.luau](src/shared/Assets.luau).
 
