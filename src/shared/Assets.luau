@@ -162,6 +162,72 @@ local Assets = {
 		Season = "rbxassetid://110824746436682", -- torii stairway to a peak shrine (Path of the Blade)
 	},
 
+	-- Cosmetics (part C): finisher and blade-line particles, beams, brush kanji stamps, banner
+	-- patterns and frames. Drawn white by art/cosmetics/generate.py (Pillow) and tinted in game;
+	-- ids in art/cosmetics/ids.json.
+	Cosmetics = {
+		Petal = "rbxassetid://126792036538103", -- sakura petal, tip up
+		Feather = "rbxassetid://127904119333708", -- crow flight feather, tip up
+		InkSplats = "rbxassetid://133803757591718", -- 2x2 flipbook of ink splats
+		Crescent = "rbxassetid://98184169300786", -- crescent moon with a halo
+		BoltA = "rbxassetid://73070513529820", -- lightning bolt strip (Beam texture, stretch)
+		BoltB = "rbxassetid://98390385631384",
+		-- Brush kanji stamps (same brush as Assets.UI.Kanji*).
+		Kanji = {
+			Ink = "rbxassetid://78100734092328", -- 墨
+			Sakura = "rbxassetid://104158533787446", -- 桜
+			Crow = "rbxassetid://102567344055605", -- 鴉
+			Thunder = "rbxassetid://118190542505386", -- 雷
+			Moon = "rbxassetid://128154559283575", -- 月
+			Yozakura = "rbxassetid://93304148377219", -- 夜桜
+			Raijin = "rbxassetid://123430697483634", -- 雷神
+			Karasu = "rbxassetid://84698114541136", -- 烏
+			Crane = "rbxassetid://122434294661277", -- 鶴
+			Wave = "rbxassetid://84863099216334", -- 波
+			Mountain = "rbxassetid://131795628713965", -- 山
+			Bamboo = "rbxassetid://112202378064890", -- 竹
+			Dragon = "rbxassetid://120164688243644", -- 龍
+			Tiger = "rbxassetid://91496308744763", -- 虎
+			Oni = "rbxassetid://80486239470079", -- 鬼
+			Thousand = "rbxassetid://126129664399872", -- 千
+			Gold = "rbxassetid://140544555980028", -- 金
+			Jade = "rbxassetid://97610545219778", -- 翠
+			Crimson = "rbxassetid://116632938795939", -- 紅
+			Shogun = "rbxassetid://110125898057346", -- 将軍
+			Path = "rbxassetid://104475987167439", -- 道
+			Ronin = "rbxassetid://95630061646070", -- 浪人
+		} :: { [string]: string },
+		-- Tileable 256px patterns (pat_mountains is 512x256 and best cropped, not tiled).
+		Patterns = {
+			Seigaiha = "rbxassetid://104983715491832", -- waves
+			Asanoha = "rbxassetid://137642212839919", -- hemp leaf
+			Kikko = "rbxassetid://80858830277486", -- tortoise shell
+			Bamboo = "rbxassetid://75330847723519",
+			Mountains = "rbxassetid://80846596960823",
+			Uroko = "rbxassetid://90509244904989", -- scales
+			Tora = "rbxassetid://130002419549230", -- tiger stripes
+			Hishi = "rbxassetid://75146617055120", -- small diamonds
+			Cloth = "rbxassetid://123655543305020", -- linen weave
+		} :: { [string]: string },
+		BannerFrame = "rbxassetid://106730658274164", -- 256x512, 9-slice Rect(48,48,208,464)
+		PlatePlain = "rbxassetid://124238483635933", -- 512x128, 9-slice Rect(64,40,448,88)
+		PlateOrnate = "rbxassetid://136241008300992",
+		Sounds = {
+			InkSwish = "rbxassetid://9119690582", -- PSE: dowel swish
+			InkSplash = "rbxassetid://9119481909", -- PSE: splash, thunking impact
+			Chimes = "rbxassetid://9119447936", -- PSE: bell tree, wind chimes
+			LineChime = "rbxassetid://9120752412", -- PSE: wind chimes, ceramic clinks
+			Wings = "rbxassetid://9125386815", -- PSE: bursts of wings flapping
+			LineWings = "rbxassetid://9125386815",
+			Caw = "rbxassetid://5829815715", -- crow caw
+			Thunder = "rbxassetid://9126082854", -- PSE: synth thunder crack
+			Zap = "rbxassetid://9114277757", -- PSE: electric zaps
+			LineZap = "rbxassetid://9114277757",
+			TempleBell = "rbxassetid://9125597663", -- PSE: small cast-iron temple bell
+			MoonHum = "rbxassetid://9120118396", -- PSE: tonal ring, glowing hum
+		} :: { [string]: string },
+	},
+
 	-- Touch button glyphs (mobile), keyed by CombatInput action name.
 	Touch = {
 		Attack = "rbxassetid://124769771778245",

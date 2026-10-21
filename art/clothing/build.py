@@ -87,6 +87,10 @@ COLOURWAYS: dict[str, dict] = {
     "cat": dict(gi=(164, 98, 52), eri=(96, 60, 36), juban=(236, 222, 190), obi=(214, 170, 60), hakama=(100, 74, 56), himo=(214, 170, 60), fabric="gi_cotton"),
     "shadow": dict(gi=(112, 40, 44), eri=(70, 62, 66), juban=(196, 40, 44), obi=(186, 30, 36), hakama=(88, 80, 88), himo=(186, 30, 36), fabric="sashiko"),
     "niten": dict(gi=(232, 232, 238), eri=(66, 82, 128), juban=(246, 246, 250), obi=(66, 82, 128), hakama=(70, 86, 134), himo=(232, 232, 238), fabric="gi_cotton"),
+    # player coin colourways (part C; Catalog outfit.rust / .pine / .ink)
+    "rust": dict(gi=(150, 78, 44), eri=(92, 46, 26), juban=(232, 222, 200), obi=(222, 200, 150), hakama=(72, 68, 66), himo=(222, 200, 150), fabric="sashiko"),
+    "pine": dict(gi=(46, 82, 64), eri=(28, 50, 40), juban=(228, 224, 206), obi=(204, 164, 82), hakama=(84, 90, 96), himo=(204, 164, 82), fabric="gi_cotton"),
+    "ink": dict(gi=(34, 34, 42), eri=(18, 18, 22), juban=(236, 232, 224), obi=(150, 34, 46), hakama=(44, 44, 52), himo=(206, 200, 190), fabric="sashiko"),
 }
 
 SWATCH_PX = 300  # each 1254px swatch is scaled so its weave reads at template scale
@@ -545,7 +549,12 @@ def main():
         print(luau())
         return
     OUT.mkdir(exist_ok=True)
+    only = None
+    if "--only" in sys.argv:  # e.g. --only rust,pine,ink: build just these (the rest stay as uploaded)
+        only = set(sys.argv[sys.argv.index("--only") + 1].split(","))
     for name, cw in COLOURWAYS.items():
+        if only and name not in only:
+            continue
         build_shirt(cw).save(OUT / f"{name}_shirt.png")
         build_pants(cw).save(OUT / f"{name}_pants.png")
         print("built", name)
