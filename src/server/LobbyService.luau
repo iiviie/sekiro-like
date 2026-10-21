@@ -87,6 +87,11 @@ local function allow(player: Player): boolean
 	return true
 end
 
+-- The same request budget for other lobby remotes (server/BossService's picker).
+function LobbyService.allowRequest(player: Player): boolean
+	return allow(player)
+end
+
 -- Lobby characters with sparring off are "Safe": no one but the trainer can touch them,
 -- and they can't hit other players either.
 local function refreshSafe(player: Player)

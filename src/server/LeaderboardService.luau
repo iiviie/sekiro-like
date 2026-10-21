@@ -33,6 +33,7 @@ local LeaderboardService = {}
 
 local stores: { [string]: OrderedDataStore } = {}
 local lastWrite: { [Player]: number } = {}
+local unwritten: { [Player]: boolean } = {} -- a change the throttle skipped (written on leave)
 local names: { [number]: string } = {}
 
 type Row = { name: string, value: number }
@@ -154,15 +155,17 @@ local function refreshBoards()
 	end
 end
 
-local function write(player: Player)
+local function write(player: Player, force: boolean?)
 	local data = StatsService.get(player)
 	if not data or next(stores) == nil then
 		return
 	end
 	local now = os.clock()
-	if now - (lastWrite[player] or -math.huge) < WRITE_INTERVAL then
+	if not force and now - (lastWrite[player] or -math.huge) < WRITE_INTERVAL then
+		unwritten[player] = true
 		return
 	end
+	unwritten[player] = nil
 	lastWrite[player] = now
 	for _, board in BOARDS do
 		local store = stores[board.store]
@@ -356,6 +359,10 @@ function LeaderboardService.start()
 		onPlayer(player)
 	end
 	Players.PlayerRemoving:Connect(function(player)
+		if unwritten[player] then
+			write(player, true) -- a win just before leaving still reaches the boards
+		end
+		unwritten[player] = nil
 		lastWrite[player] = nil
 		-- Without global stores the boards show this server; drop the leaver.
 		if next(stores) == nil then

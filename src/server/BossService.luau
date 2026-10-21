@@ -890,6 +890,9 @@ function BossService.start()
 	end
 
 	remote.OnServerEvent:Connect(function(player: Player, action: unknown, argument: unknown)
+		if action ~= "SkipIntro" and not LobbyService.allowRequest(player) then
+			return -- the lobby's request budget: each Choose or Cancel sends a notice
+		end
 		if action == "Choose" and typeof(argument) == "string" and Bosses.def(argument) then
 			if nearShrine(player) or (RunService:IsStudio() and player:GetAttribute("BossAnywhere")) then
 				choose(player, argument)
