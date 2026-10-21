@@ -17,10 +17,10 @@
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
+local Audio = require(script.Parent.Audio)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 
 local UI = {}
@@ -440,9 +440,11 @@ function UI.isTouch(): boolean
 	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 end
 
--- name -> { id, volume, pitch }
+-- name -> { placeholder id, volume, pitch }. A generated cue "UI<name>" (art/sound, Shared/
+-- AudioIds) replaces the placeholder; "" means generated only (silent until it exists).
 local SFX = Assets.Cosmetics.Sounds :: any
 local SOUNDS: { [string]: { any } } = {
+	Hover = { "", 0.15, 1 },
 	Press = { SFX.InkSwish, 0.35, 1.3 },
 	Confirm = { SFX.LineChime, 0.3, 1.2 },
 	Cancel = { SFX.InkSwish, 0.25, 0.9 },
@@ -461,22 +463,10 @@ local SOUNDS: { [string]: { any } } = {
 	RevealLegendary = { SFX.TempleBell, 0.6, 0.8 },
 }
 
-local soundGroup: SoundGroup? = nil
 local lastPlayed: { [string]: number } = {}
 
-local function group(): SoundGroup
-	if soundGroup and soundGroup.Parent then
-		return soundGroup
-	end
-	local existing = SoundService:FindFirstChild("UI")
-	soundGroup = if existing and existing:IsA("SoundGroup")
-		then existing
-		else UI.new("SoundGroup", { Name = "UI", Volume = 0.6 }, SoundService)
-	return soundGroup :: SoundGroup
-end
-
--- Plays a UI sound (section 10 of the guide) through the "UI" SoundGroup; each name at
--- most once per 60 ms. The Settings slider (SettingUIVolume, 0..1) scales the group.
+-- Plays a UI sound (section 10 of the guide) through client/Audio's "UI" group; each name at
+-- most once per 60 ms. The Settings sliders (SettingUIVolume and Master) scale the group.
 function UI.sound(name: string, pitch: number?): Sound?
 	local def = SOUNDS[name]
 	if not def or typeof(def[1]) ~= "string" then
@@ -487,29 +477,7 @@ function UI.sound(name: string, pitch: number?): Sound?
 		return nil
 	end
 	lastPlayed[name] = now
-	local g = group()
-	local player = Players.LocalPlayer
-	local volume = player and player:GetAttribute("SettingUIVolume")
-	g.Volume = 0.6 * (if typeof(volume) == "number" then math.clamp(volume, 0, 1) else 1)
-	if g.Volume <= 0 then
-		return nil
-	end
-	local s = UI.new("Sound", {
-		SoundId = def[1],
-		Volume = def[2],
-		PlaybackSpeed = pitch or def[3],
-		SoundGroup = g,
-	}, g)
-	s:Play()
-	s.Ended:Once(function()
-		s:Destroy()
-	end)
-	task.delay(8, function()
-		if s.Parent then
-			s:Destroy()
-		end
-	end)
-	return s
+	return Audio.ui("UI" .. name, def[1], def[2], pitch or def[3], def[3])
 end
 
 ---------------------------------------------------------------------------------------
@@ -1000,6 +968,7 @@ function UI.juice(button: GuiButton, opts: { [string]: any }?)
 			return
 		end
 		hovered = true
+		UI.sound("Hover")
 		to(hoverScale, UI.Motion.Hover)
 		setSkinColor(button, restColor(button):Lerp(T.GoldHi, 0.1))
 	end)
