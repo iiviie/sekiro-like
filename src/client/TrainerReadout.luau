@@ -7,9 +7,9 @@
 -- The windows quoted are your own (a newcomer's are wider), from the DeflectWindow and
 -- PerfectWindow attributes the server publishes on your character.
 --
--- When the trainer first swings at you with no lock-on, the camera locks on to it (pair
--- framing, your own body faded) so you can watch the blade and the glint; it lets go once
--- you walk away, and stays off if you release it yourself while you train.
+-- When the trainer first swings at you on a visit with no lock-on, the camera locks on to it
+-- (pair framing, your own body faded) so you can watch the blade and the glint; it lets go
+-- once you walk away, and isn't forced again that visit if you release it yourself.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -57,6 +57,9 @@ end
 
 -- "42 ms before impact" or, for a press after it (still inside the late tolerance), "11 ms late".
 local function timing(ms: number): string
+	if math.abs(ms) > 1e6 then
+		return "no press seen" -- a window opened without a local press (none on record)
+	end
 	return if ms < 0 then `{-ms} ms late` else `{ms} ms before impact`
 end
 
@@ -116,17 +119,17 @@ end
 -- it or puts it behind you, faded, right where you're meant to watch the glint.
 local TRAINER_RING = 10 -- it swings at the nearest player within 9 studs (LobbyService)
 local TRAINER_LET_GO = 16 -- an automatic lock lets go once you're this far away
-local SESSION_GAP = 6 -- seconds without a swing at you: you left, so the next visit locks again
-local declined = false
+local SESSION_GAP = 6 -- seconds without a swing: you left, so the next visit locks on again
+local framed = false -- this visit's lock-on is done (released by hand, it stays released)
 local lastSwingAt = -math.huge
 
 local function frameTrainer(trainer: Model)
 	local clock = os.clock()
 	if clock - lastSwingAt > SESSION_GAP then
-		declined = false
+		framed = false
 	end
 	lastSwingAt = clock
-	if declined or LockOn.target() ~= nil or LockOn.distanceTo(trainer) > TRAINER_RING then
+	if framed or LockOn.target() ~= nil or LockOn.distanceTo(trainer) > TRAINER_RING then
 		return
 	end
 	-- Aimed at you, not at someone else standing closer: the trainer turns to its target
@@ -142,6 +145,7 @@ local function frameTrainer(trainer: Model)
 	if toMe.Magnitude > 0.1 and theirs.CFrame.LookVector:Dot(toMe.Unit) < 0.7 then
 		return
 	end
+	framed = true
 	LockOn.engage(trainer, 1)
 	task.spawn(function()
 		local deadline = os.clock() + 1.2
@@ -157,10 +161,6 @@ local function frameTrainer(trainer: Model)
 				return
 			end
 			task.wait(0.25)
-		end
-		-- Let go by hand while still training: leave the camera alone until they walk off.
-		if LockOn.distanceTo(trainer) <= TRAINER_LET_GO then
-			declined = true
 		end
 	end)
 end
