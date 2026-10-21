@@ -412,6 +412,10 @@ end
 local function lantern(position: Vector3, parent: Instance): Model?
 	local model = prop("Lantern", CFrame.new(position), parent)
 	if model then
+		-- Decor: it still blocks you, but the cameras look through it and fade it while the lens
+		-- is beside it or it stands in the shot (it used to fill half the frame as the free
+		-- camera swung past one).
+		ignoreCamera(model)
 		local light = Instance.new("PointLight")
 		light.Color = Palette.Ember
 		light.Range = 14
