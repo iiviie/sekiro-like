@@ -8,7 +8,9 @@
 --
 -- Anti-farm: a fighter's kill coins pay once per match (finishing someone who rose from a
 -- cut-down pays XP only); duels against the same human pay less after the second that day
--- (EconomyConfig.AntiFarm); Whetstones and Shrine Draws from wins are capped per day.
+-- (EconomyConfig.AntiFarm); Whetstones and Shrine Draws from wins are capped per day; bots
+-- cut down in a royale pay half coins, and wins against bots only pay half after the first
+-- few of the day (AntiFarm.BotRoyale).
 --
 -- Remotes (server -> one client), on ReplicatedStorage.Remotes.Progress:
 --   "Reward"  { xp, coins, reason }         a toast
@@ -152,11 +154,12 @@ local function passXP(player: Player, amount: number, reason: string)
 	PassService.addXP(player, amount, reason)
 end
 
-local function reward(player: Player, event: string, reason: string?, factor: number?)
+-- `factor` scales the XP and coins, `coinFactor` the coins on top (bot kills).
+local function reward(player: Player, event: string, reason: string?, factor: number?, coinFactor: number?)
 	local r = Progression.Rewards[event]
 	local f = factor or 1
 	if r and f > 0 then
-		grant(player, (r.XP or 0) * f, (r.Coins or 0) * f, reason)
+		grant(player, (r.XP or 0) * f, (r.Coins or 0) * f * (coinFactor or 1), reason)
 	end
 end
 
@@ -193,6 +196,11 @@ end
 -- Called by RoundService with every human participant's place (1 = winner) among all
 -- `fighters`, bots included.
 function ProgressService.matchEnded(places: { [Player]: number }, fighters: number, winner: Player?)
+	-- A royale with one human in it was fought against bots only (AntiFarm.BotRoyale).
+	local humans = 0
+	for _ in places do
+		humans += 1
+	end
 	for player, place in places do
 		if player.Parent then
 			funnel(player, 5)
@@ -211,7 +219,12 @@ function ProgressService.matchEnded(places: { [Player]: number }, fighters: numb
 				trialEvent(player, "Top3")
 			end
 			if player == winner then
-				reward(player, "Win", "Victory")
+				local bots = EconomyConfig.AntiFarm.BotRoyale
+				local factor = 1
+				if humans <= 1 and Economy.dayCount(player, "botWins", 1) >= bots.FullWinsPerDay then
+					factor = bots.WinFactor
+				end
+				reward(player, "Win", "Victory", factor)
 				passXP(player, EconomyConfig.Pass.Win, "Victory")
 				winExtras(player, true)
 				trialEvent(player, "Win")
@@ -426,6 +439,10 @@ local function onKill(victim: Combatant, killer: Combatant?, deathblow: boolean)
 	if other and (killer :: Combatant).model:GetAttribute("InDuel") == true then
 		factor = EconomyConfig.repeatFactor(StatsService.duelsToday(player, other))
 	end
+	-- A bot cut down in a royale pays fewer coins (AntiFarm.BotRoyale; XP is unchanged).
+	local coinFactor = if other == nil and (killer :: Combatant).model:GetAttribute("InDuel") ~= true
+		then EconomyConfig.AntiFarm.BotRoyale.KillCoins
+		else 1
 	if d then
 		d.Kills += 1
 		if deathblow then
@@ -439,11 +456,11 @@ local function onKill(victim: Combatant, killer: Combatant?, deathblow: boolean)
 			report.deathblows += 1
 		end
 	end
-	reward(player, "Kill", "Cut down", factor)
+	reward(player, "Kill", "Cut down", factor, coinFactor)
 	funnel(player, 4)
 	trialEvent(player, "Kill")
 	if deathblow then
-		reward(player, "Deathblow", "Deathblow", factor)
+		reward(player, "Deathblow", "Deathblow", factor, coinFactor)
 		trialEvent(player, "Deathblow")
 	end
 	StatsService.commit(player)
