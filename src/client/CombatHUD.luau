@@ -15,6 +15,7 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
@@ -42,7 +43,7 @@ local DEATH_RED = Color3.fromRGB(190, 18, 18)
 local FRAME_INSET = 10 -- transparent shadow margin baked into the frame art
 local ENEMY_BAR_LINGER = 4
 local CONTROLS_HINT_TIME = 14
-local CONTROLS_HINT_FIGHTS = 3 -- the keycap reminder shows for your first few fights only
+local CONTROLS_HINT_FIGHTS = 3 -- the keycap reminder shows for your first few fights only (Played < 3)
 -- The posture group's bottom edge above the screen's: its bar sits in the bottom ~15%, under
 -- the fighters' feet. Coach prompts and the trainer readout sit just above it.
 local POSTURE_BOTTOM = 70
@@ -419,7 +420,13 @@ function CombatHUD.showControls()
 	if not controlsHint or Players.LocalPlayer:GetAttribute("SettingControlsHint") == false then
 		return
 	end
-	if hintFights >= CONTROLS_HINT_FIGHTS or not keyboardPlayer() then
+	-- Only a newcomer's first fights (lifetime, and at most that many per session).
+	local played = Players.LocalPlayer:GetAttribute("Played")
+	if
+		hintFights >= CONTROLS_HINT_FIGHTS
+		or (typeof(played) == "number" and played >= CONTROLS_HINT_FIGHTS)
+		or not keyboardPlayer()
+	then
 		return
 	end
 	hintFights += 1
@@ -463,6 +470,10 @@ local function refreshEnemy(model: Model, entry: EnemyEntry)
 	entry.marker.Enabled = broken
 end
 
+-- The deathblow marker on a broken body: 96 px at scale 1 (a 64 px dot read as a speck on a
+-- kneeling fighter), at the HUD's scale on phones.
+local MARKER_SIZE = 96
+
 local function makeMarker(model: Model): BillboardGui
 	local torso = model:FindFirstChild("UpperTorso") or model:FindFirstChild("HumanoidRootPart")
 	local marker = Instance.new("BillboardGui")
@@ -470,7 +481,8 @@ local function makeMarker(model: Model): BillboardGui
 	marker.Adornee = torso :: BasePart?
 	marker.AlwaysOnTop = true
 	marker.LightInfluence = 0
-	marker.Size = UDim2.fromOffset(64, 64)
+	local size = math.floor(MARKER_SIZE * Kit.hudScale())
+	marker.Size = UDim2.fromOffset(size, size)
 	marker.Enabled = false
 	local dot = image(marker, UI.DeathblowDot, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -501,8 +513,11 @@ local function showEnemy(model: Model, linger: number?)
 		gui.Adornee = head
 		gui.AlwaysOnTop = true
 		gui.LightInfluence = 0
-		gui.Size = UDim2.fromOffset(200, 50)
-		gui.StudsOffset = Vector3.new(0, 2.9, 0)
+		-- A bot carries no Roblox nameplate (BotService), so its name is the last line here: it
+		-- shows only while its bars do. Players keep Roblox's own name over their heads.
+		local named = Players:GetPlayerFromCharacter(model) == nil
+		gui.Size = UDim2.fromOffset(200, if named then 62 else 50)
+		gui.StudsOffset = Vector3.new(0, if named then 3.1 else 2.9, 0)
 		gui.MaxDistance = 90
 
 		local postureBar =
@@ -515,6 +530,20 @@ local function showEnemy(model: Model, linger: number?)
 		})
 		local vitalityBar =
 			makeBar(gui, Vector2.new(120, 4), UDim2.fromOffset(100, 22), Vector2.new(0.5, 0), false, true, CRIMSON)
+		if named then
+			Kit.label("label", {
+				Name = "FighterName",
+				AnchorPoint = Vector2.new(0.5, 0),
+				Position = UDim2.fromOffset(100, 44),
+				Size = UDim2.fromOffset(200, 17),
+				TextSize = 15,
+				TextColor3 = Kit.Theme.Bone,
+				TextStrokeColor3 = Kit.Theme.Ink,
+				TextStrokeTransparency = 0.35,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				Text = model.Name,
+			}, gui)
+		end
 		-- A boss has its own bar at the bottom of the screen (BossHUD): no floating bars over
 		-- it, but the deathblow marker on its body still shows.
 		gui.Enabled = model:GetAttribute("Boss") == nil
@@ -763,7 +792,21 @@ local function onCombatEvent(kind: string, data: { [string]: any })
 	end
 end
 
+-- Roblox's own health bar (top-right, green to red) only repeats our vitality bar, and stayed
+-- up over the match report: off for good. SetCoreGuiEnabled can fail while the CoreGui loads.
+local function hideCoreHealth()
+	task.spawn(function()
+		for _ = 1, 10 do
+			if pcall(StarterGui.SetCoreGuiEnabled, StarterGui, Enum.CoreGuiType.Health, false) then
+				return
+			end
+			task.wait(0.5)
+		end
+	end)
+end
+
 function CombatHUD.start()
+	hideCoreHealth()
 	buildScreen()
 	-- Settings: turning the reminder off hides it at once.
 	player:GetAttributeChangedSignal("SettingControlsHint"):Connect(function()
