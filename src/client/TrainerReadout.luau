@@ -1,6 +1,7 @@
 --!strict
 -- Timing feedback for the lobby's Deflect Trainer: after each of its swings at you, a
--- line under the crosshair says how early your block press was and what it earned
+-- small line low on the screen (over the Coach's prompt and the posture bar, under the
+-- fighters' feet) says how early your block press was and what it earned
 -- ("PERFECT  ·  42 ms before impact"). Teaches the deflect window, and doubles as a
 -- netcode check: the numbers are on the shared server clock the server judges with.
 
@@ -8,6 +9,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local CombatHUD = require(script.Parent.CombatHUD)
 local Config = require(ReplicatedStorage.Shared.Config)
 local LocalCombat = require(script.Parent.LocalCombat)
 local UI = require(script.Parent.UI)
@@ -19,14 +21,26 @@ local TrainerReadout = {}
 local label: TextLabel
 local group: CanvasGroup
 local pendingHitAt: { [Model]: number } = {}
+local showToken = 0
 
+-- Shown, then faded and hidden for real (a CanvasGroup out of texture budget ignores its
+-- GroupTransparency).
 local function show(text: string, color: Color3)
+	showToken += 1
+	local mine = showToken
 	label.Text = text
 	label.TextColor3 = color
+	group.Visible = true
 	group.GroupTransparency = 0
-	TweenService:Create(group, TweenInfo.new(1.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+	local fade = TweenService:Create(group, TweenInfo.new(1.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
 		GroupTransparency = 1,
-	}):Play()
+	})
+	fade.Completed:Once(function(state)
+		if state == Enum.PlaybackState.Completed and showToken == mine then
+			group.Visible = false
+		end
+	end)
+	fade:Play()
 end
 
 -- How early the press was, from the press itself (not from a window a re-press opened late).
@@ -78,29 +92,43 @@ local function outcome(kind: string, data: { [string]: any })
 end
 
 function TrainerReadout.start()
-	local screen = UI.new("ScreenGui", { Name = "TrainerReadout", ResetOnSpawn = false, DisplayOrder = 4 })
-	-- The line sits on a lacquer plate (it's over the world), fading as one.
+	local screen = UI.new("ScreenGui", {
+		Name = "TrainerReadout",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 4,
+	})
+	local fit = UI.new("UIScale", { Name = "Fit" }, screen)
+	local function refit()
+		fit.Scale = UI.hudScale()
+	end
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	player:GetAttributeChangedSignal("UIViewport"):Connect(refit)
+	refit()
+	-- The line sits on a lacquer plate (it's over the world), fading as one: low in the
+	-- middle, over the Coach's prompt, which sits on the posture bar.
 	group = UI.new("CanvasGroup", {
 		Name = "Readout",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.62),
-		Size = UDim2.fromOffset(0, 46),
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -(CombatHUD.PostureTop + 40)),
+		Size = UDim2.fromOffset(0, 36),
 		AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundTransparency = 1,
 		GroupTransparency = 1,
+		Visible = false,
 	}, screen)
 	local plate = UI.panel({
 		Name = "Plate",
 		material = "plain",
 		sliceScale = 0.4,
-		Size = UDim2.fromOffset(0, 46),
+		Size = UDim2.fromOffset(0, 36),
 		AutomaticSize = Enum.AutomaticSize.X,
 	}, group)
-	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, plate)
+	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, plate)
 	label = UI.label("label", {
 		Size = UDim2.fromScale(0, 1),
 		AutomaticSize = Enum.AutomaticSize.X,
-		TextSize = 22,
+		TextSize = 17,
 		Text = "",
 	}, plate)
 	screen.Parent = player:WaitForChild("PlayerGui")
