@@ -175,11 +175,32 @@ local function scaled(count: number): number
 	return if reducedEffects() then math.ceil(count * 0.4) else count
 end
 
+-- How much of an effect at a point is worth drawing for this camera: the arenas are hundreds
+-- of studs apart, so a lobby player doesn't build every royale exchange. 2 = full, 1 = cheap
+-- (half the particles, no lens stars, no lights), 0 = nothing. Gameplay cues (the perilous
+-- kanji and outline, the glint, sounds) aren't gated.
+local FULL_DETAIL_RANGE = 80
+local ANY_DETAIL_RANGE = 200
+local LIGHT_RANGE = 45 -- per-hit PointLights only this close
+local function detailAt(position: Vector3): number
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return 2
+	end
+	local distance = (camera.CFrame.Position - position).Magnitude
+	return if distance <= FULL_DETAIL_RANGE then 2 elseif distance <= ANY_DETAIL_RANGE then 1 else 0
+end
+
 local WHITE = Color3.new(1, 1, 1)
 
 -- A bright bloom at a point in the world (deflects, impacts, Mikiri). `star` adds a lens
 -- star: two thin crossed streaks that pinch shut as the bloom fades.
 local function flare(position: Vector3, color: Color3, size: number, star: boolean?)
+	local detail = detailAt(position)
+	if detail == 0 then
+		return
+	end
+	star = star and detail == 2
 	local anchor = anchorAt(position)
 	local gui = Instance.new("BillboardGui")
 	gui.Adornee = anchor
@@ -235,11 +256,15 @@ local function burst(
 	flashSize: number,
 	direction: Vector3?
 )
+	local detail = detailAt(position)
+	if detail == 0 then
+		return
+	end
 	local anchor = anchorAt(position)
 	if direction and direction.Magnitude > 0.01 then
 		anchor.CFrame = CFrame.lookAt(position, position + direction)
 	end
-	count = scaled(count)
+	count = scaled(if detail == 2 then count else math.ceil(count / 2))
 
 	local sparks = Instance.new("ParticleEmitter")
 	sparks.Texture = Assets.UI.Glow
@@ -272,7 +297,9 @@ local function burst(
 		sparks:Emit(count)
 	end
 
-	if not reducedEffects() then
+	local camera = workspace.CurrentCamera
+	local near = camera ~= nil and (camera.CFrame.Position - position).Magnitude <= LIGHT_RANGE
+	if near and not reducedEffects() then
 		local light = Instance.new("PointLight")
 		light.Color = color
 		light.Brightness = 3
@@ -943,7 +970,7 @@ end
 -- A cut streak: a needle of light across the point of impact along the blade's path, thrown
 -- open from the centre and pinched shut.
 local function cutStreak(position: Vector3, direction: Vector3, length: number, width: number, color: Color3)
-	if direction.Magnitude < 1e-3 then
+	if direction.Magnitude < 1e-3 or detailAt(position) == 0 then
 		return
 	end
 	local dir = direction.Unit
@@ -979,11 +1006,15 @@ end
 
 -- Stylised shards off a struck body: short white-gold streaks and a few dark chips that fall.
 local function shards(position: Vector3, direction: Vector3?, count: number, speed: number)
+	local detail = detailAt(position)
+	if detail == 0 then
+		return
+	end
 	local anchor = anchorAt(position)
 	if direction and direction.Magnitude > 0.01 then
 		anchor.CFrame = CFrame.lookAt(position, position + direction)
 	end
-	count = scaled(count)
+	count = scaled(if detail == 2 then count else math.ceil(count / 2))
 
 	local streaks = Instance.new("ParticleEmitter")
 	streaks.Texture = Assets.UI.Glow
@@ -1113,6 +1144,13 @@ end
 -- Ink: dark, unlit droplets and a few brush splats thrown along the blow and pulled down
 -- by gravity, plus a faint grey wash. Deliberately not a glowing spark burst.
 local function inkSpray(position: Vector3, direction: Vector3?, count: number, speed: number)
+	local detail = detailAt(position)
+	if detail == 0 then
+		return
+	end
+	if detail == 1 then
+		count = math.ceil(count / 2)
+	end
 	local anchor = anchorAt(position)
 	if direction and direction.Magnitude > 0.01 then
 		anchor.CFrame = CFrame.lookAt(position, position + direction)
@@ -1179,9 +1217,13 @@ local function inkSpray(position: Vector3, direction: Vector3?, count: number, s
 end
 
 -- A brush splat of ink on the floor under a deathblow, fading after a while.
+local poolParams = RaycastParams.new()
+poolParams.FilterType = Enum.RaycastFilterType.Include
 local function inkPool(position: Vector3, direction: Vector3?)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Include
+	if detailAt(position) == 0 then
+		return
+	end
+	local params = poolParams
 	params.FilterDescendantsInstances = { workspace.Terrain, workspace:FindFirstChild("Castle") :: Instance }
 	local hit = workspace:Raycast(position + Vector3.new(0, 2, 0), Vector3.new(0, -12, 0), params)
 	if not hit then
@@ -1544,7 +1586,7 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 	end
 	-- A blade line at L3 brings the defender's own deflect spark and sound.
 	local style = Cosmetics.blade(defender).deflect
-	if style and point then
+	if style and point and detailAt(point) > 0 then
 		CosmeticFX.deflect(style, point, sprayDir, perfect)
 	end
 	if isLocal(attacker) or isLocal(defender) then
@@ -1829,7 +1871,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		-- clips, hitstop, shake and camera punch, is the same for every finisher.
 		local finisher = if typeof(data.finisher) == "string" then data.finisher else Cosmetics.finisher(attacker)
 		local grade: CosmeticFX.Grade? = nil
-		if root and finisher ~= "Default" then
+		if root and finisher ~= "Default" and detailAt(root.Position) > 0 then
 			local point, blow, sweep = cutOf(attacker, defender)
 			grade = CosmeticFX.deathblow(finisher, {
 				attacker = attacker,
