@@ -51,6 +51,7 @@ end
 type Fighter = {
 	name: string,
 	title: Catalog.Item?,
+	title2: Catalog.Item?, -- the second title slot (TitleSlot pass)
 	banner: string?,
 	blade: string,
 	bladeTint: Color3,
@@ -78,9 +79,15 @@ local function fighterOf(who: Player?, model: Model?, fallbackName: string): Fig
 		local bladeItem = Catalog.get(loadout.bladeSkin)
 		local skinRef = if bladeItem and bladeItem.category == "bladeSkin" then bladeItem.ref else "Steel"
 		local rank = Ranks.of(who:GetAttribute("Rating") or Config.Rating.Start)
+		-- The second title shows only with the pass (the server also clears it without one).
+		local passes = who:GetAttribute("Passes")
+		local hasSlot = typeof(passes) == "string"
+			and string.find("," .. passes .. ",", ",pass.TitleSlot,", 1, true) ~= nil
+		local second = if hasSlot and loadout.title2 ~= loadout.title then Catalog.get(loadout.title2) else nil
 		return {
 			name = who.DisplayName,
 			title = Catalog.get(loadout.title),
+			title2 = if second and second.category == "title" then second else nil,
 			banner = Flair.ref(loadout.banner),
 			blade = if bladeItem then bladeItem.name else Progression.skin(skinRef).name,
 			bladeTint = tintOf(Progression.skin(skinRef).tint),
@@ -94,6 +101,7 @@ local function fighterOf(who: Player?, model: Model?, fallbackName: string): Fig
 	return {
 		name = fallbackName,
 		title = nil,
+		title2 = nil,
 		banner = nil,
 		blade = skin.name,
 		bladeTint = tintOf(skin.tint),
@@ -121,34 +129,39 @@ local function introLayer(): ScreenGui
 	return introGui :: ScreenGui
 end
 
+local THEME = UI.Theme
+
+local function titleColor(item: Catalog.Item?): Color3
+	return if item then UI.rarity(item.rarity).text else THEME.Bone
+end
+
+-- One fighter: a lacquer plate holding their banner cloth (part C's painted art) above a
+-- details strip: titles, name, rank and blade.
 local function half(parent: Instance, f: Fighter, left: boolean): Frame
 	local look = Flair.banner(f.banner)
-	local side = UI.new("Frame", {
+	local side = UI.panel({
 		Name = if left then "You" else "Foe",
+		material = "lacquer",
+		sliceScale = 0.6,
 		AnchorPoint = Vector2.new(if left then 1 else 0, 0.5),
 		Position = UDim2.new(0.5, if left then -46 else 46, 0.5, 0),
-		Size = UDim2.fromOffset(300, 300),
-		BackgroundColor3 = look.cloth,
-		BackgroundTransparency = 0.05,
-		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(300, 320),
 	}, parent)
-	UI.stroke(side, look.edge, 3, 0)
-	UI.new("UIGradient", {
-		Rotation = 90,
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(0.8, 0.05),
-			NumberSequenceKeypoint.new(1, 0.35),
-		}),
-	}, side)
-	-- The banner's brushed character, large and faint behind the fighter's details.
-	-- The cloth layer holds the banner art, under the fighter's details.
+	-- The cloth: the banner's colour and art, inset in the plate.
 	local cloth = UI.new("Frame", {
 		Name = "Cloth",
-		Size = UDim2.new(1, 0, 1, -150), -- the part above the details strip
-		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 12),
+		Size = UDim2.new(1, -24, 1, -170), -- the part above the details strip
+		BackgroundColor3 = look.cloth,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
 		ZIndex = 1,
 	}, side)
+	UI.new("UIStroke", { Color = look.edge, Thickness = 2 }, cloth)
+	UI.new("UIGradient", {
+		Rotation = 90,
+		Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(170, 166, 160)),
+	}, cloth)
 	local motif = UI.text({
 		Name = "Motif",
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -163,56 +176,67 @@ local function half(parent: Instance, f: Fighter, left: boolean): Frame
 	if Flair.decorateBanner(cloth, f.banner or "Plain") then
 		motif.Visible = false -- part C's painted pattern and kanji replace the text motif
 	end
-	local shade = UI.new("Frame", {
-		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.fromScale(0, 1),
-		Size = UDim2.new(1, 0, 0, 150),
-		BackgroundColor3 = UI.Ink,
-		BackgroundTransparency = 0.25,
-		BorderSizePixel = 0,
-		ZIndex = 5,
-	}, side)
 	if f.crest then
 		UI.new("ImageLabel", {
-			Position = UDim2.fromOffset(8, 8),
+			Name = "Crest",
+			AnchorPoint = Vector2.new(if left then 0 else 1, 0),
+			Position = UDim2.new(if left then 0 else 1, if left then 4 else -4, 0, 4),
 			Size = UDim2.fromOffset(64, 64),
 			BackgroundTransparency = 1,
 			Image = f.crest,
 			ZIndex = 5,
 		}, side)
 	end
+	local shade = UI.new("Frame", {
+		Name = "Details",
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 12, 1, -10),
+		Size = UDim2.new(1, -24, 0, 150),
+		BackgroundTransparency = 1,
+		ZIndex = 5,
+	}, side)
 	UI.text({
 		Name = "Title",
-		Position = UDim2.fromOffset(10, 8),
-		Size = UDim2.new(1, -20, 0, 22),
-		Font = UI.Display,
-		TextSize = 20,
-		TextColor3 = if f.title then Flair.Rarity[f.title.rarity] or UI.Gold else UI.Parchment,
+		Position = UDim2.fromOffset(0, 2),
+		Size = UDim2.new(1, 0, 0, 22),
+		FontFace = UI.Fonts.Display,
+		TextSize = 18,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextColor3 = titleColor(f.title),
 		TextTransparency = if f.title then 0 else 1,
 		Text = if f.title then f.title.name else "",
 	}, shade)
+	UI.label("label", {
+		Name = "Title2",
+		Position = UDim2.fromOffset(0, 22),
+		Size = UDim2.new(1, 0, 0, 18),
+		TextSize = 15,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextColor3 = titleColor(f.title2),
+		Visible = f.title2 ~= nil,
+		Text = if f.title2 then f.title2.name else "",
+	}, shade)
 	UI.text({
 		Name = "PlayerName",
-		Position = UDim2.fromOffset(10, 30),
-		Size = UDim2.new(1, -20, 0, 38),
-		Font = UI.Display,
-		TextSize = 34,
+		Position = UDim2.fromOffset(0, 40),
+		Size = UDim2.new(1, 0, 0, 38),
+		FontFace = UI.Fonts.Display,
+		TextSize = 32,
 		TextTruncate = Enum.TextTruncate.AtEnd,
-		TextStrokeTransparency = 0.6,
 		Text = f.name,
 	}, shade)
-	UI.text({
+	UI.label("label", {
 		Name = "Rank",
-		Position = UDim2.fromOffset(10, 70),
-		Size = UDim2.new(1, -20, 0, 22),
-		Font = UI.Bold,
-		TextSize = 18,
-		TextColor3 = f.rankColor or UI.Parchment,
+		Position = UDim2.fromOffset(0, 78),
+		Size = UDim2.new(1, 0, 0, 22),
+		TextSize = 17,
+		TextColor3 = f.rankColor or THEME.Bone,
 		Text = f.rank or "",
 	}, shade)
+	UI.divider(shade, { Position = UDim2.fromOffset(0, 100), Size = UDim2.new(1, 0, 0, 8), ornament = "none" })
 	local blade = UI.new("Frame", {
-		Position = UDim2.fromOffset(10, 98),
-		Size = UDim2.new(1, -20, 0, 40),
+		Position = UDim2.fromOffset(0, 108),
+		Size = UDim2.new(1, 0, 0, 40),
 		BackgroundTransparency = 1,
 	}, shade)
 	UI.new("UIListLayout", {
@@ -227,11 +251,12 @@ local function half(parent: Instance, f: Fighter, left: boolean): Frame
 		Image = Assets.Icons.Katana,
 		ImageColor3 = f.bladeTint,
 	}, blade)
-	UI.text({
+	UI.label("body", {
 		Name = "Blade",
 		Size = UDim2.fromOffset(0, 30),
 		AutomaticSize = Enum.AutomaticSize.X,
 		TextSize = 17,
+		TextColor3 = THEME.Dim,
 		Text = f.blade,
 	}, blade)
 	return side
@@ -241,36 +266,51 @@ local function showIntro(me: Fighter, foe: Fighter, holdFor: number)
 	if introCard then
 		introCard:Destroy()
 	end
-	local card = UI.new("Frame", {
+	-- A CanvasGroup, so the whole card fades as one at the end.
+	local card = UI.new("CanvasGroup", {
 		Name = "Intro",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.46),
-		Size = UDim2.fromOffset(780, 330),
+		Size = UDim2.fromOffset(780, 340),
 		BackgroundTransparency = 1,
 	}, introLayer())
 	local scale = UI.new("UIScale", {}, card)
 	local view = workspace.CurrentCamera.ViewportSize
-	scale.Scale = math.clamp(math.min((view.X - 24) / 780, (view.Y * 0.8) / 330), 0.4, 1)
+	scale.Scale = math.clamp(math.min((view.X - 24) / 780, (view.Y * 0.8) / 340), 0.4, 1)
 	local left = half(card, me, true)
 	local right = half(card, foe, false)
-	UI.new("ImageLabel", {
+	-- 決闘 stamped between the two plates once they meet.
+	local kanji = UI.new("ImageLabel", {
 		Name = "Kanji",
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.45),
-		Size = UDim2.fromOffset(110, 110),
+		Position = UDim2.fromScale(0.5, 0.42),
+		Size = UDim2.fromOffset(120, 120),
 		BackgroundTransparency = 1,
 		Image = Assets.UI.KanjiDuel,
+		ImageColor3 = THEME.Crimson,
+		ImageTransparency = 1,
+		ZIndex = 6,
 	}, card)
-	UI.text({
+	UI.label("caption", {
 		Name = "Info",
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0.45, 60),
-		Size = UDim2.fromOffset(110, 40),
+		Position = UDim2.new(0.5, 0, 0.42, 62),
+		Size = UDim2.fromOffset(110, 44),
 		TextWrapped = true,
-		TextSize = 14,
-		TextStrokeTransparency = 0.5,
+		TextSize = 15,
+		TextColor3 = THEME.Bone,
+		TextStrokeColor3 = THEME.Ink,
+		TextStrokeTransparency = 0.35,
 		Text = `First to {firstTo}{if rated then "\nranked" else ""}`,
+		ZIndex = 6,
 	}, card)
+	task.delay(0.3, function()
+		if kanji.Parent then
+			kanji.ImageTransparency = 0
+			UI.stamp(kanji, 0)
+			UI.sound("Stamp")
+		end
+	end)
 	-- Slide in from the sides, hold through the countdown, fade.
 	local leftHome, rightHome = left.Position, right.Position
 	left.Position = leftHome - UDim2.fromOffset(240, 0)
@@ -282,17 +322,7 @@ local function showIntro(me: Fighter, foe: Fighter, holdFor: number)
 		if introCard ~= card then
 			return
 		end
-		for _, item in card:GetDescendants() do
-			if item:IsA("TextLabel") then
-				UI.tween(item, 0.3, { TextTransparency = 1, TextStrokeTransparency = 1 })
-			elseif item:IsA("ImageLabel") then
-				UI.tween(item, 0.3, { ImageTransparency = 1 })
-			elseif item:IsA("Frame") and item.BackgroundTransparency < 1 then
-				UI.tween(item, 0.3, { BackgroundTransparency = 1 })
-			elseif item:IsA("UIStroke") then
-				UI.tween(item, 0.3, { Transparency = 1 })
-			end
-		end
+		UI.tween(card, 0.3, { GroupTransparency = 1 })
 		task.delay(0.35, function()
 			card:Destroy()
 			if introCard == card then
@@ -314,7 +344,7 @@ function DuelHUD.previewIntro(foe: Instance?, hold: number?)
 end
 
 local function refreshScore()
-	titleLabel.Text = `YOU   {mine}  —  {theirs}   {string.upper(opponent)}`
+	titleLabel.Text = `{UI.tracked("You")}    {mine}  —  {theirs}    {UI.tracked(opponent)}`
 end
 
 local function onDuel(kind: string, data: { [string]: any })
@@ -408,9 +438,11 @@ local function step()
 	banner.Visible = state == "Dueling"
 	if state == "Dueling" then
 		local t = now()
-		subLabel.Text = if t < fightAt
-			then `Fight in {math.ceil(fightAt - t)}`
-			else `First to {firstTo}{if rated then "  ·  ranked" else ""}`
+		subLabel.Text = string.upper(
+			if t < fightAt
+				then `Fight in {math.ceil(fightAt - t)}`
+				else `First to {firstTo}{if rated then "  ·  ranked" else ""}`
+		)
 	end
 	local botAt = player:GetAttribute("DuelBotAt")
 	local blocked = state == nil and onBusyPad()
@@ -439,17 +471,19 @@ function DuelHUD.start()
 		BackgroundTransparency = 1,
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 16),
-		Size = UDim2.fromOffset(560, 64),
+		Size = UDim2.fromOffset(720, 66),
 		Visible = false,
 	}, screen)
-	titleLabel = UI.text({
+	titleLabel = UI.label("banner", {
 		Name = "Score",
 		Size = UDim2.new(1, 0, 0, 28),
-		Font = UI.Display,
 		TextSize = 26,
-		TextStrokeTransparency = 0.6,
+		TextScaled = true,
+		TextStrokeColor3 = THEME.Ink,
+		TextStrokeTransparency = 0.35,
 		Text = "",
 	}, banner)
+	UI.new("UITextSizeConstraint", { MinTextSize = 18, MaxTextSize = 26 }, titleLabel)
 	UI.new("ImageLabel", {
 		BackgroundTransparency = 1,
 		Image = Assets.UI.PostureOrnament,
@@ -458,14 +492,14 @@ function DuelHUD.start()
 		Position = UDim2.new(0.5, 0, 0, 36),
 		Size = UDim2.fromOffset(200, 22),
 	}, banner)
-	subLabel = UI.text({
+	subLabel = UI.label("caption", {
 		Name = "Sub",
 		Position = UDim2.fromOffset(0, 46),
-		Size = UDim2.new(1, 0, 0, 18),
-		Font = UI.Display,
-		TextSize = 16,
-		TextTransparency = 0.3,
-		TextStrokeTransparency = 0.6,
+		Size = UDim2.new(1, 0, 0, 20),
+		TextSize = 15,
+		TextColor3 = THEME.Dim,
+		TextStrokeColor3 = THEME.Ink,
+		TextStrokeTransparency = 0.35,
 		Text = "",
 	}, banner)
 
@@ -477,7 +511,8 @@ function DuelHUD.start()
 		Font = UI.Display,
 		TextSize = 20,
 		TextColor3 = UI.Gold,
-		TextStrokeTransparency = 0.5,
+		TextStrokeColor3 = THEME.Ink,
+		TextStrokeTransparency = 0.35,
 		Visible = false,
 		Text = "",
 	}, screen)
