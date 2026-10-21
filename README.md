@@ -127,9 +127,13 @@ lobby it appears only next to the trainer or a sparring partner.
 
 **The Coach.** For a player's first 3 matches (or until 12 lifetime deflects), every swing aimed at you flashes a small
 **F / DEFLECT** key prompt in time with the glint (in the lower third, just above your posture bar or the boss's bars,
-never over the fighters), a deflect is followed by **CLICK / RIPOSTE**, a broken opponent by
-**DEATHBLOW**, and perilous attacks name their answer. Touch players see button names instead of keys. For the same
-first 10 matches the deflect window is up to 1.4× wider (perfect 1.3×), tapering to normal (`Config.NewcomerAssist`).
+never over the fighters), a deflect that recoils the attacker is followed by **CLICK / RIPOSTE**, a broken opponent by
+**DEATHBLOW**, and perilous attacks name their answer; those perilous prompts stay through the first 10 matches until
+each kind (thrust, sweep) has been prompted once. A new keyboard or gamepad player's first royale exchange is followed
+by a one-time **R / LOCK ON**. Touch and gamepad players see their own button names (client/InputNames), in the Coach,
+its death tips and the Guide. For the first 10 matches the deflect window is up to 1.2× wider, tapering to normal
+(`Config.NewcomerAssist`). A new player's first royale report points once at the duel pads and the boss shrine, and the
+Guide has an "Other fights" entry.
 
 ## Progression and monetisation
 
@@ -548,7 +552,7 @@ src/
             LeaderboardService, Telemetry, MapBuilder, Outfit, Locomotion, SwordRig, DevHooks, DuelService,
             BossService, BossAI, Economy, Monetization, PassService, ShopService, CosmeticService, Ronin
   client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, LobbyHUD, Panels, UI,
-            TrainerReadout, TitleScreen, Ambience, Coach, Toasts, Occlusion, DuelHUD, BossHUD, BossVisuals,
+            TrainerReadout, TitleScreen, Ambience, Coach, InputNames, Toasts, Occlusion, DuelHUD, BossHUD, BossVisuals,
             StorePanel, StoreUI, LockerPanel, PassPanel, Reveal, CosmeticFX, CosmeticPreview, Podium, ChatTags
 ```
 

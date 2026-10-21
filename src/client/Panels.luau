@@ -19,6 +19,7 @@ local Ranks = require(ReplicatedStorage.Shared.Ranks)
 local Season = require(ReplicatedStorage.Shared.Season)
 local Text = require(ReplicatedStorage.Shared.Text)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
+local InputNames = require(script.Parent.InputNames)
 local Toasts = require(script.Parent.Toasts)
 local UI = require(script.Parent.UI)
 
@@ -86,33 +87,59 @@ end
 
 ---------------------------------------------------------------------------------------
 
--- How to fight: the rules in the order a new player needs them.
-local GUIDE = {
-	{
-		"Deflect  ·  F",
-		"Tap F just before the enemy's blade lands. Watch for the white glint at their sword tip: press as it flashes. A deflect costs you nothing and fills THEIR posture; a perfect one (tighter timing) fills it more. Then click straight away for a fast Riposte.",
-	},
-	{
-		"Guard  ·  hold F",
-		"Holding F blocks damage but fills YOUR posture. Don't turtle: tap to deflect instead. Mashing F shrinks your deflect window.",
-	},
-	{
-		"Posture",
-		"The bar in the middle. When it's full you're Broken: open to a deathblow, which takes a big chunk of vitality and kills a wounded fighter. Posture drains back when you stop taking hits, slower when your vitality is low.",
-	},
-	{
-		"Red 危 = perilous",
-		"Can't be guarded. A thrust: deflect it, or dash INTO it with Q for a Mikiri Counter. A sweep: jump over it. Either way, reading it wrecks the attacker's posture.",
-	},
-	{
-		"Attacking  ·  click",
-		"Click on the beat for a three-hit string; it speeds up while it keeps landing. Pause before the third for a slow overhead that beats early deflects. E (thrust) or C (sweep) late in a string turns the ender perilous. Block mid-swing to feint.",
-	},
-	{
-		"Survive",
-		"Q dodges (dash into thrusts, away from sweeps). G sips your gourd (3 per life): only when you're safe. Outnumbered by two or more? You gain Resolve: faster posture and shorter stun.",
-	},
-}
+-- How to fight: the rules in the order a new player needs them, in the player's own input
+-- names (keyboard, gamepad or touch: InputNames).
+local function guideEntries(): { { string } }
+	local k = InputNames.get()
+	local scheme = InputNames.scheme()
+	local touch = scheme == "Touch"
+	-- "Dodge (Q)" on keys and pads; just "Dodge" on touch, where the button carries the word.
+	local function named(word: string, input: string): string
+		return if touch then word else `{word} ({input})`
+	end
+	-- A heading with its input, unless the input is the word itself (touch's Deflect button).
+	local function head(word: string, input: string): string
+		return if word == input then word else `{word}  ·  {input}`
+	end
+	local tap = if touch then "tap" else "press"
+	local feint = named("Deflect", k.block)
+	local morphs = `{named("Thrust", k.thrust)} or {named("Sweep", k.sweep)}`
+	local lockKey = if scheme == "Gamepad" then "R3" else "R (or the middle mouse button)"
+	local lock = if touch
+		then "On touch the camera locks on to the nearest enemy by itself; Lock lets go for a free look."
+		else `{lockKey} locks the camera on the nearest enemy, so they never slip out of view behind you. Press it again to let go.`
+	return {
+		{
+			head("Deflect", k.block),
+			`Tap {k.block} just before the enemy's blade lands. Watch for the white glint at their sword tip: {tap} as it flashes. A deflect costs you nothing and fills THEIR posture; a perfect one (tighter timing) fills it more. The first two hits of a string are only knocked aside: keep deflecting. Deflect the third hit (or a thrust) and they stagger: slash at once for a Riposte.`,
+		},
+		{
+			`Guard  ·  hold {k.block}`,
+			`Holding {k.block} blocks damage but fills YOUR posture. Don't turtle: tap to deflect instead. Re-pressing {k.block} right after letting go opens the window late: tap once per glint.`,
+		},
+		{
+			"Posture",
+			"The bar in the middle. When it's full you're Broken: open to a deathblow, which takes a big chunk of vitality and kills a wounded fighter. Posture drains back once you stop taking hits.",
+		},
+		{
+			"Red 危 = perilous",
+			`Can't be guarded. A thrust: deflect it, or dash INTO it with {named("Dodge", k.dodge)} for a Mikiri Counter. A sweep: jump over it ({k.jump}); dodging doesn't help. Either way, reading it wrecks the attacker's posture.`,
+		},
+		{
+			head("Attacking", k.attack),
+			`Slash on the beat for a three-hit string; it speeds up while it keeps landing. Pause before the third for a slow overhead that beats early deflects. {morphs} late in a string turns the ender perilous. {feint} mid-swing feints.`,
+		},
+		{
+			"Survive",
+			`{named("Dodge", k.dodge)}: dash into thrusts; jump over sweeps. {named("Heal", k.heal)} sips your gourd (3 per life): only when you're safe. Outnumbered by two or more? You gain Resolve: faster posture and shorter stun.`,
+		},
+		{ if touch then "Lock on" else head("Lock on", k.lock), lock },
+		{
+			"Other fights",
+			"Duels: stand on a gold duel pad east or west of the spawn plaza for a first-to-3 duel; a bot steps up after 8 s. Boss trials: cross the rope bridge to the back islet and step on the shrine pad. Start with the Shikigami: it teaches perilous attacks step by step.",
+		},
+	}
+end
 
 -- How to fight reads as a washi scroll: ink headings and body text on paper; the perilous
 -- entry shows the brushed 危 as an image.
@@ -131,7 +158,8 @@ local function guidePanel()
 	}, scroll)
 	UI.new("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, list)
 	UI.new("UIPadding", { PaddingRight = UDim.new(0, 12), PaddingBottom = UDim.new(0, 8) }, list)
-	for i, entry in GUIDE do
+	local guide = guideEntries()
+	for i, entry in guide do
 		local card = UI.new("Frame", {
 			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
@@ -173,7 +201,7 @@ local function guidePanel()
 			TextColor3 = UI.Theme.Ink,
 			Text = entry[2],
 		}, card)
-		if i < #GUIDE then
+		if i < #guide then
 			UI.divider(card, { LayoutOrder = 3, Size = UDim2.new(1, 0, 0, 12), color = UI.Theme.Bronze })
 		end
 	end

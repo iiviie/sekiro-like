@@ -5,14 +5,19 @@
 -- deflect is followed by
 -- "CLICK  RIPOSTE" when it recoiled the attacker; a broken opponent by "CLICK  DEATHBLOW"; perilous attacks name their
 -- answer. Nobody reads a rules screen before their first fight, so the rules come to them,
--- at the moment they matter. It retires itself once the player has the hang of it.
+-- at the moment they matter. It retires itself once the player has the hang of it; the
+-- perilous prompts stay (through the newcomer matches) until each kind has been seen once.
+-- A new PC player's first royale exchange is followed by a one-time "R · LOCK ON". Key
+-- names follow the player's controls (InputNames).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 
 local Bosses = require(ReplicatedStorage.Shared.Bosses)
+local Config = require(ReplicatedStorage.Shared.Config)
 local CombatHUD = require(script.Parent.CombatHUD)
+local InputNames = require(script.Parent.InputNames)
+local LockOn = require(script.Parent.LockOn)
 local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
@@ -27,16 +32,17 @@ local TIP_BOTTOM = 100 -- over the spectate bar; in the lobby, low in the middle
 
 -- What beat you, and the answer to it: shown when you're cut down or killed, for everyone.
 -- Losing is only useful if you learn something from it.
+-- {block} and {dodge} become the player's own input names.
 local DEATH_TIPS: { [string]: string } = {
-	Light1 = "Slashes come in strings of three. Tap F as each blade glints.",
-	Light2 = "Slashes come in strings of three. Tap F as each blade glints.",
-	Light3 = "The third slash is fast. Keep tapping F on the glints, don't swing back early.",
+	Light1 = "Slashes come in strings of three. Tap {block} as each blade glints.",
+	Light2 = "Slashes come in strings of three. Tap {block} as each blade glints.",
+	Light3 = "The third slash is fast. Keep tapping {block} on the glints, don't swing back early.",
 	Overhead = "That was a delayed overhead. Don't press early: wait for the glint.",
 	Riposte = "Your string's last hit was deflected, then countered. Strings end on the third hit: guard after it.",
-	Riposte2 = "That was a counter-string. After a riposte lands, hold F: the second cut follows fast.",
+	Riposte2 = "That was a counter-string. After a riposte lands, hold {block}: the second cut follows fast.",
 	DodgeSlash = "They dodged and cut straight back. Don't swing into a dodge: guard instead.",
 	MikiriSlash = "Your thrust was Mikiri-countered. Thrusts are a read: use them when they're not dashing in.",
-	Perilous = "Red perilous thrust: deflect it on the glint, or dash INTO it with Q for a Mikiri Counter.",
+	Perilous = "Red perilous thrust: deflect it on the glint, or dash INTO it with {dodge} for a Mikiri Counter.",
 	Sweep = "Red perilous sweep: only a jump avoids it (dodging doesn't). Press jump again over them to stomp.",
 	Deathblow = "Your posture broke. When the middle bar fills up, back off and let it drain.",
 	Mist = "The red mist hurts. Stay inside the ring.",
@@ -55,34 +61,53 @@ local promptScale: UIScale
 local keyLabel: TextLabel
 local wordLabel: TextLabel
 local token = 0
+local seenPerilous: { [string]: boolean } = {} -- perilous kinds already prompted (Perilous, Sweep)
+local lockTaught = false
+local lockPending = false
 
--- Coaching is on in a fight, or in the lobby for the Deflect Trainer's swings only
--- (`attacker`); never for anything else in the lobby.
-local function active(attacker: Model?): boolean
+-- In a fight, or in the lobby for the Deflect Trainer's swings only (`attacker`).
+local function coachable(attacker: Model?): boolean
 	local character = player.Character
 	if not character then
 		return false
 	end
 	local fighting = character:GetAttribute("InMatch") == true or character:GetAttribute("InDuel") == true
 	local training = attacker ~= nil and attacker:GetAttribute("Trainer") ~= nil
-	if not fighting and not training then
-		return false
-	end
-	return (player:GetAttribute("Played") or 0) < MATCHES and (player:GetAttribute("Deflects") or 0) < DEFLECTS
+	return fighting or training
 end
 
-local function touch(): boolean
-	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+-- Coaching is on in a fight, or in the lobby for the Deflect Trainer's swings only; never
+-- for anything else in the lobby.
+local function active(attacker: Model?): boolean
+	return coachable(attacker)
+		and (player:GetAttribute("Played") or 0) < MATCHES
+		and (player:GetAttribute("Deflects") or 0) < DEFLECTS
+end
+
+-- Perilous prompts outlast the rest: rare and punishing, they stay through the newcomer
+-- matches until each kind has been prompted once.
+local function perilousActive(attacker: Model?, kind: string): boolean
+	return active(attacker)
+		or (
+			coachable(attacker)
+			and not seenPerilous[kind]
+			and (player:GetAttribute("Played") or 0) < Config.NewcomerAssist.Matches
+		)
+end
+
+-- The key cap for an input on the player's controls: "F", "L1", "DEFLECT"...
+local function key(input: string): string
+	return string.upper((InputNames.get() :: any)[input])
 end
 
 local function now(): number
 	return workspace:GetServerTimeNow()
 end
 
-local function show(key: string, word: string, color: Color3, hold: number)
+local function show(cap: string, word: string, color: Color3, hold: number)
 	token += 1
 	local mine = token
-	keyLabel.Text = key
+	keyLabel.Text = cap
 	wordLabel.Text = word
 	wordLabel.TextColor3 = color
 	prompt.Visible = true
@@ -130,6 +155,9 @@ local function showTip()
 	if not tip then
 		return
 	end
+	local names = InputNames.get()
+	tip = string.gsub(tip, "{block}", names.block)
+	tip = string.gsub(tip, "{dodge}", names.dodge)
 	tipToken += 1
 	local mine = tipToken
 	tipLabel.Text = tip
@@ -186,22 +214,60 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			local spec = Bosses.spec(kind)
 			kind = if spec and spec.low then "Sweep" elseif spec and spec.thrust then "Perilous" else "Light1"
 		end
+		-- A new PC (or gamepad) player's first royale exchange, fought on the free camera:
+		-- once it has passed, name the lock-on key. Touch locks on by itself.
+		local character = player.Character
+		if
+			not lockTaught
+			and not lockPending
+			and not data.boss
+			and character
+			and character:GetAttribute("InMatch") == true
+			and InputNames.scheme() ~= "Touch"
+			and LockOn.target() == nil
+			and (player:GetAttribute("Played") or 0) < Config.NewcomerAssist.Matches
+		then
+			lockPending = true
+			task.delay(math.max(data.hitAt + 0.45 - now(), 0), function()
+				lockPending = false
+				-- Not over another prompt: the next exchange tries again.
+				if LockOn.target() == nil and character:GetAttribute("InMatch") == true and not prompt.Visible then
+					lockTaught = true
+					show(key("lock"), "LOCK ON", UI.Gold, 1.6)
+				end
+			end)
+		end
 		task.delay(math.max(data.hitAt - GLINT_LEAD - now(), 0), function()
-			if attacker:GetAttribute("CombatState") ~= "Windup" or not active(attacker) then
+			if attacker:GetAttribute("CombatState") ~= "Windup" then
+				return
+			end
+			local block = key("block")
+			if kind == "Sweep" or kind == "Perilous" then
+				if not perilousActive(attacker, kind) then
+					return
+				end
+				seenPerilous[kind] = true
+			elseif not active(attacker) then
 				return
 			end
 			if kind == "Sweep" then
-				show(if touch() then "JUMP" else "SPACE", "JUMP IT", UI.Theme.CrimsonText, 0.5)
+				show(key("jump"), "JUMP IT", UI.Theme.CrimsonText, 0.5)
 				-- Then a second press over their head stomps them.
 				task.delay(0.42, function()
-					if active(attacker) then
-						show(if touch() then "JUMP" else "SPACE", "STOMP", UI.Gold, 0.4)
+					if coachable(attacker) then
+						show(key("jump"), "STOMP", UI.Gold, 0.4)
 					end
 				end)
 			elseif kind == "Perilous" then
-				show(if touch() then "BLOCK" else "F", "DEFLECT THE THRUST", UI.Theme.CrimsonText, 0.5)
+				-- On touch the cap already reads DEFLECT (the button's own name).
+				show(
+					block,
+					if block == "DEFLECT" then "THE THRUST" else "DEFLECT THE THRUST",
+					UI.Theme.CrimsonText,
+					0.5
+				)
 			else
-				show(if touch() then "BLOCK" else "F", "DEFLECT", UI.Parchment, 0.4)
+				show(block, if block == "DEFLECT" then "NOW" else "DEFLECT", UI.Parchment, 0.4)
 			end
 		end)
 	end,
@@ -210,13 +276,13 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			-- Only a recoiled (or broken) attacker can be riposted; an opener's string goes on,
 			-- and the next glint prompts the next deflect.
 			if data.recoil or data.broke then
-				show(if touch() then "SLASH" else "CLICK", "RIPOSTE", UI.Gold, 0.5)
+				show(key("attack"), "RIPOSTE", UI.Gold, 0.5)
 			end
 		end
 	end,
 	Mikiri = function(data)
 		if data.defender == player.Character and active(data.attacker) then
-			show(if touch() then "SLASH" else "CLICK", "CUT", UI.Gold, 0.5)
+			show(key("attack"), "CUT", UI.Gold, 0.5)
 		end
 	end,
 	PostureBroken = function(data)
@@ -224,11 +290,10 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if model and model ~= player.Character and active() then
 			local mine, theirs = rootOf(player.Character), rootOf(model)
 			if mine and theirs and (mine.Position - theirs.Position).Magnitude < 14 then
-				show(if touch() then "SLASH" else "CLICK", "DEATHBLOW", UI.Theme.CrimsonText, 0.9)
+				show(key("attack"), "DEATHBLOW", UI.Theme.CrimsonText, 0.9)
 			end
-		elseif model == player.Character and active() then
-			show(if touch() then "DODGE" else "Q", "GET AWAY", UI.Theme.CrimsonText, 0.9)
 		end
+		-- No prompt for your own break: a Broken fighter can't dodge or act until it ends.
 	end,
 }
 
