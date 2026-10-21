@@ -12,13 +12,12 @@ local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Palette = require(ReplicatedStorage.Shared.Palette)
+local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
 
-local FONT = Enum.Font.Garamond
-local PARCHMENT = Palette.Parchment
-local BRONZE = Palette.Bronze
-local CRIMSON = Palette.Crimson
+local PARCHMENT = UI.Theme.Bone
+local GOLD = UI.Theme.Gold
 
 -- The camera sways slowly side to side at about head height in front of the duelling
 -- circle, always framing the shrine hall with the pagoda rising behind it.
@@ -30,17 +29,18 @@ local LETTERBOX = 0.1 -- each bar's share of the screen height
 
 local TitleScreen = {}
 
-local function text(parent: Instance, value: string, size: number, color: Color3, y: number): TextLabel
+local function text(parent: Instance, value: string, size: number, color: Color3, y: number, face: Font): TextLabel
 	local label = Instance.new("TextLabel")
 	label.BackgroundTransparency = 1
 	label.AnchorPoint = Vector2.new(0.5, 0.5)
 	label.Position = UDim2.new(0.5, 0, 0.5, y)
-	label.Size = UDim2.fromOffset(900, size + 12)
-	label.Font = FONT
+	label.Size = UDim2.fromOffset(1000, size + 16)
+	label.FontFace = face
 	label.TextSize = size
 	label.TextColor3 = color
 	label.Text = value
-	label.TextStrokeTransparency = 0.7
+	label.TextStrokeColor3 = UI.Theme.Ink
+	label.TextStrokeTransparency = 0.6
 	label.Parent = parent
 	return label
 end
@@ -81,27 +81,67 @@ function TitleScreen.show()
 		bar.Parent = group
 	end
 
-	-- The text sits in the sky, above the shrine roof.
+	-- The logo lockup sits in the sky, above the shrine roof: the wordmark in heavy
+	-- Merriweather, tracked, over a crimson brush swipe, with the 最後の刃 seal (an image,
+	-- when its art is uploaded) standing beside it.
 	local TOP = -130
-	text(group, Config.Title.Kanji, 46, CRIMSON, TOP - 118)
-	text(group, Config.Title.Name, 88, PARCHMENT, TOP - 46)
+	local swipe = UI.brush(group, "swipe", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, TOP - 30),
+		Size = UDim2.fromOffset(760, 130),
+		color = UI.Theme.LacquerRed,
+		ImageTransparency = 0.1,
+	})
+	swipe.ZIndex = 1
+	local wordmark = text(group, UI.tracked(Config.Title.Name), 66, PARCHMENT, TOP - 40, UI.Fonts.DisplayHeavy)
+	wordmark.ZIndex = 2
+	wordmark.TextStrokeTransparency = 0.4
+	local seal = Instance.new("ImageLabel")
+	seal.Name = "Seal"
+	seal.BackgroundTransparency = 1
+	seal.AnchorPoint = Vector2.new(0, 0.5)
+	seal.Position = UDim2.new(0.5, 400, 0.5, TOP - 10)
+	seal.Size = UDim2.fromOffset(62, 182)
+	seal.ScaleType = Enum.ScaleType.Fit
+	seal.ImageColor3 = UI.Theme.Crimson
+	seal.ZIndex = 2
+	seal.Parent = group
+	if not UI.art(seal, "KanjiTitle") then
+		seal:Destroy()
+	end
 	for _, side in { -1, 1 } do
 		local rule = Instance.new("Frame")
 		rule.AnchorPoint = Vector2.new(0.5, 0.5)
-		rule.Position = UDim2.new(0.5, side * 210, 0.5, TOP + 18)
+		rule.Position = UDim2.new(0.5, side * 210, 0.5, TOP + 26)
 		rule.Size = UDim2.fromOffset(240, 1)
-		rule.BackgroundColor3 = BRONZE
+		rule.BackgroundColor3 = GOLD
+		rule.BackgroundTransparency = 0.3
 		rule.BorderSizePixel = 0
 		rule.Parent = group
 	end
-	local tagline = text(group, Config.Title.Tagline, 22, PARCHMENT, TOP + 46)
-	tagline.TextTransparency = 0.2
-	local prompt = text(group, "Click or press any key to enter", 20, PARCHMENT, 300)
-	TweenService:Create(
-		prompt,
-		TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ TextTransparency = 0.75 }
-	):Play()
+	local diamond = Instance.new("Frame")
+	diamond.AnchorPoint = Vector2.new(0.5, 0.5)
+	diamond.Position = UDim2.new(0.5, 0, 0.5, TOP + 26)
+	diamond.Size = UDim2.fromOffset(9, 9)
+	diamond.Rotation = 45
+	diamond.BackgroundColor3 = UI.Theme.Ink
+	diamond.BorderSizePixel = 0
+	diamond.Parent = group
+	UI.new("UIStroke", { Color = GOLD, Thickness = 1 }, diamond)
+	local tagline = text(group, Config.Title.Tagline, 22, PARCHMENT, TOP + 58, UI.Fonts.Display)
+	tagline.TextTransparency = 0.1
+	local prompt = text(
+		group,
+		string.upper(if UI.isTouch() then "Tap to begin" else "Click or press any key"),
+		18,
+		PARCHMENT,
+		300,
+		UI.Fonts.Label
+	)
+	prompt.TextStrokeTransparency = 0.35
+	if not UI.reducedMotion() then
+		TweenService:Create(prompt, UI.Motion.Pulse, { TextTransparency = 0.7 }):Play()
+	end
 
 	screen.Parent = player:WaitForChild("PlayerGui")
 
