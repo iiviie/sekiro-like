@@ -23,7 +23,9 @@ local HOLD = 5 -- seconds on screen
 local WAIT_FOR_REPORT = 16 -- give up if the match report is still open this long after
 local REPORT_APPEARS = 8 -- how long a fighter's report card may take to open
 local STEP = { 64, 46, 34 } -- step heights by place
-local CARD_W, CARD_H = 636, 360
+local CARD_W, CARD_H = 636, 384
+-- The card shows at about 0.72 scale: captions at 20 come out at the 14 px floor.
+local CAPTION = 20
 local ORDER = { 2, 1, 3 } -- left to right
 local PLACE = { "1st", "2nd", "3rd" }
 local PLACE_COLOR = { THEME.GoldHi, THEME.Steel, Color3.fromRGB(196, 140, 92) }
@@ -170,7 +172,7 @@ local function stand(parent: Instance, entry: Entry, column: number)
 		AutomaticSize = Enum.AutomaticSize.Y,
 		TextWrapped = true,
 		FontFace = UI.Fonts.Display,
-		TextSize = 15,
+		TextSize = CAPTION,
 		TextColor3 = if look.title then UI.rarity(look.title.rarity).text else THEME.Ash,
 		Text = if look.title then look.title.name else "",
 		Visible = look.title ~= nil,
@@ -178,9 +180,9 @@ local function stand(parent: Instance, entry: Entry, column: number)
 	UI.text({
 		Name = "PlayerName",
 		LayoutOrder = 2,
-		Size = UDim2.fromOffset(COLUMN_W, 26),
+		Size = UDim2.fromOffset(COLUMN_W, 28),
 		FontFace = UI.Fonts.Display,
-		TextSize = 21,
+		TextSize = 23,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		TextColor3 = THEME.Bone,
 		Text = entry.name,
@@ -191,7 +193,7 @@ local function stand(parent: Instance, entry: Entry, column: number)
 		Size = UDim2.fromOffset(COLUMN_W, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		TextWrapped = true,
-		TextSize = 14,
+		TextSize = CAPTION,
 		TextColor3 = THEME.Dim,
 		Text = look.blade,
 	}, details)
@@ -318,6 +320,21 @@ function Podium.start()
 			Podium.hide()
 		end
 	end)
+	-- The moment you're taken into a fight (the royale's teleport, a duel, a boss trial) the
+	-- card goes: the start of a fight is when the middle of the screen matters most.
+	local function watchCharacter(character: Model)
+		for _, flag in { "InMatch", "InDuel" } do
+			character:GetAttributeChangedSignal(flag):Connect(function()
+				if character:GetAttribute(flag) == true then
+					Podium.hide() -- also cancels one still waiting for the report
+				end
+			end)
+		end
+	end
+	player.CharacterAdded:Connect(watchCharacter)
+	if player.Character then
+		watchCharacter(player.Character)
+	end
 end
 
 -- Studio test hook: the podium with any entries (default: you first, then two bots).
