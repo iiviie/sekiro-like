@@ -59,7 +59,8 @@ Progression.Skins = {
 		tint = Vector3.new(1.4, 0.45, 0.4),
 		outline = Color3.fromRGB(60, 6, 10),
 		fill = Color3.fromRGB(255, 80, 70),
-		trail = { Color3.fromRGB(255, 110, 90), Color3.fromRGB(190, 20, 30) },
+		-- A wine-rose lacquer smear, kept off the perilous red.
+		trail = { Color3.fromRGB(255, 206, 196), Color3.fromRGB(156, 28, 92) },
 	},
 	{
 		id = "Jade",
@@ -95,10 +96,11 @@ Progression.Skins = {
 		name = "Obsidian Oni",
 		blurb = "Black glass with a burning edge. Earned in blood.",
 		tint = Vector3.new(0.28, 0.25, 0.3),
-		outline = Color3.fromRGB(255, 50, 30),
+		-- An ember-gold burning edge over violet-black glass, kept off the perilous red.
+		outline = Color3.fromRGB(255, 150, 60),
 		fill = Color3.fromRGB(30, 10, 14),
-		trail = { Color3.fromRGB(255, 70, 40), Color3.fromRGB(40, 0, 0) },
-		glow = Color3.fromRGB(255, 60, 30),
+		trail = { Color3.fromRGB(255, 204, 120), Color3.fromRGB(52, 16, 56) },
+		glow = Color3.fromRGB(255, 150, 60),
 	},
 	{
 		id = "Moon",
@@ -264,7 +266,7 @@ Progression.Skins = {
 		tint = Vector3.new(1.5, 0.7, 0.45),
 		outline = Color3.fromRGB(60, 16, 6),
 		fill = Color3.fromRGB(255, 120, 70),
-		trail = { Color3.fromRGB(255, 200, 150), Color3.fromRGB(230, 90, 40) },
+		trail = { Color3.fromRGB(255, 214, 160), Color3.fromRGB(236, 128, 36) }, -- orange lacquer, off the peril red
 		glow = Color3.fromRGB(255, 140, 80),
 	},
 	{

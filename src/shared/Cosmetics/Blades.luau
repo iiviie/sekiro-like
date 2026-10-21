@@ -62,23 +62,17 @@ end
 
 -- Extras for the base skins, by Progression skin id: motes and a darker smear where the skin
 -- is dark. Bosses' skins are themed on the boss that drops them.
--- `trail`, `outline` and `glow` override Progression's where its colours sat on the perilous
--- red (the audit flagged Crimson and Obsidian): Crimson's smear is now a wine-rose lacquer and
--- Obsidian's burning edge is ember-gold over violet-black glass.
+-- Colours (tint, trail, outline, glow) come from Progression.Skins, the one place they live.
 type Extra = {
 	motes: Motes?,
 	dark: boolean?,
 	ribbon: Color3?,
-	trail: { Color3 }?,
-	outline: Color3?,
-	glow: Color3?,
 }
 local EXTRAS: { [string]: Extra } = {
 	Steel = { ribbon = rgb(150, 40, 40) },
 	Crimson = {
 		motes = { kind = "glints", color = rgb(255, 196, 170), rate = 3 },
 		ribbon = rgb(230, 190, 110),
-		trail = { rgb(255, 206, 196), rgb(156, 28, 92) },
 	},
 	Jade = { motes = { kind = "mist", color = rgb(170, 255, 215), rate = 2 } },
 	Sakura = { motes = { kind = "petals", color = rgb(255, 180, 210), rate = 6 } },
@@ -86,9 +80,6 @@ local EXTRAS: { [string]: Extra } = {
 	Obsidian = {
 		motes = { kind = "embers", color = rgb(255, 176, 80), rate = 6 },
 		ribbon = rgb(255, 170, 70),
-		trail = { rgb(255, 204, 120), rgb(52, 16, 56) },
-		outline = rgb(255, 150, 60),
-		glow = rgb(255, 150, 60),
 	},
 	Moon = { motes = { kind = "glints", color = rgb(200, 220, 255), rate = 4 }, ribbon = rgb(170, 200, 255) },
 	Aizome = { ribbon = rgb(235, 235, 245) },
@@ -108,10 +99,7 @@ local EXTRAS: { [string]: Extra } = {
 	Initiate = { motes = { kind = "glints", color = rgb(170, 255, 245), rate = 3 }, ribbon = rgb(40, 170, 170) },
 	-- Season 1 pass skins (Progression looks by part S).
 	S1Cedar = { motes = { kind = "embers", color = rgb(250, 210, 160), rate = 2 } },
-	S1Vermilion = {
-		motes = { kind = "glints", color = rgb(255, 210, 160), rate = 3 },
-		trail = { rgb(255, 214, 160), rgb(236, 128, 36) }, -- orange lacquer, kept off the peril red
-	},
+	S1Vermilion = { motes = { kind = "glints", color = rgb(255, 210, 160), rate = 3 } },
 	S1Hanafubuki = { motes = { kind = "petals", color = rgb(255, 196, 220), rate = 9 } },
 }
 
@@ -225,18 +213,18 @@ function Blades.look(id: string?, level: number?, mastery: number?): Look
 	end
 	local skin = Progression.skin(ref)
 	local extra: Extra = EXTRAS[skin.id] or {}
-	local trail = extra.trail or skin.trail
+	local trail = skin.trail
 	return {
 		id = `skin.{skin.id}`,
 		ref = skin.id,
 		name = skin.name,
 		tint = skin.tint,
-		outline = extra.outline or skin.outline,
+		outline = skin.outline,
 		fill = skin.fill,
 		edge = trail[1],
 		trail = trail,
 		dark = extra.dark == true,
-		glow = extra.glow or skin.glow,
+		glow = skin.glow,
 		motes = extra.motes or (if skin.petals then { kind = "petals", color = skin.petals, rate = 6 } else nil),
 		smear = nil,
 		deflect = nil,
