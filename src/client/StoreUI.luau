@@ -217,7 +217,8 @@ function StoreUI.thumb(parent: GuiObject, item: Catalog.Item, locked: boolean?)
 	elseif category == "bladeLine" then
 		image(nested("BladeLines", item.ref, ICONS.Skin))
 	elseif category == "finisher" then
-		image(nested("Finishers", item.ref, ICONS.Deathblow))
+		-- A blade line's finale has no icon of its own: it shows the line's blade.
+		image(nested("Finishers", item.ref, nested("BladeLines", item.ref, ICONS.Deathblow)))
 	elseif category == "outfit" then
 		local look = Clothing.get(item.ref)
 		if look then
@@ -251,7 +252,7 @@ function StoreUI.thumb(parent: GuiObject, item: Catalog.Item, locked: boolean?)
 				BorderSizePixel = 0,
 			}, swatch)
 		else
-			image(icon("Profile", ICONS.Profile), nil, 0.8)
+			image(nested("Tabs", "Outfits", ICONS.Profile), nil, 0.8)
 		end
 	elseif category == "title" then
 		image(nested("Tabs", "Titles", ICONS.Guide), nil, 0.62)
@@ -297,6 +298,10 @@ function StoreUI.thumb(parent: GuiObject, item: Catalog.Item, locked: boolean?)
 			Loadouts = "LoadoutPresets",
 			VictoryCry = "VictoryCry",
 		} :: { [string]: string })[item.ref]
+		if item.ref == "TitleSlot" then
+			image(nested("Tabs", "Titles", ICONS.Guide))
+			return holder
+		end
 		local fallback = ({
 			Premium = (Assets.RankCrests :: any).Gold,
 			TierSkip = ICONS.Level,
@@ -357,26 +362,11 @@ function StoreUI.bannerArt(parent: GuiObject, look: Flair.Banner, ref: string?):
 	return cloth
 end
 
--- The painted rarity frame (9-slice) around a card.
+-- The painted rarity frame (9-slice) around a card (UI.rarityFrame; uncommon is jade).
 function StoreUI.frame(parent: GuiObject, rarity: string, z: number?)
-	local frames = ICONS.RarityFrames
-	local key = Flair.Frame[rarity] or "Common"
-	local image = typeof(frames) == "table" and frames[key] or nil
-	if typeof(image) ~= "string" then
+	if not UI.rarityFrame(parent, rarity, z or 2, 0.14) then
 		UI.stroke(parent, Flair.Rarity[rarity] or UI.Bronze, 2, 0.1)
-		return
 	end
-	UI.new("ImageLabel", {
-		Name = "RarityFrame",
-		Size = UDim2.fromScale(1, 1),
-		BackgroundTransparency = 1,
-		Image = image,
-		ScaleType = Enum.ScaleType.Slice,
-		SliceCenter = Rect.new(96, 96, 416, 416),
-		SliceScale = 0.12,
-		ImageTransparency = 0.05,
-		ZIndex = z or 2,
-	}, parent)
 end
 
 function StoreUI.rarityName(rarity: string): string

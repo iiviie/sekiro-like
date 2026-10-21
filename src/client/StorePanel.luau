@@ -20,6 +20,7 @@ local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Flair = require(ReplicatedStorage.Shared.Flair)
 local Panels = require(script.Parent.Panels)
+local Reveal = require(script.Parent.Reveal)
 local StoreUI = require(script.Parent.StoreUI)
 local Toasts = require(script.Parent.Toasts)
 local UI = require(script.Parent.UI)
@@ -100,76 +101,79 @@ end
 ---------------------------------------------------------------------------------------
 -- Featured: the daily shop and the weekly set
 
+-- The purchase confirm for a coin, gem or shard price: the item in its frame, the price as
+-- the largest thing, the balance after, and "Get gems" instead when gems are short.
+local function confirmBuy(
+	item: Catalog.Item,
+	currency: string, -- "coins" | "gems" | "shards"
+	cost: number,
+	action: string,
+	arg: any,
+	done: string
+)
+	local attrName = ({ coins = "Coins", gems = "Gems", shards = "Shards" } :: { [string]: string })[currency]
+	UI.confirm(Panels.window(), {
+		title = `Unlock {item.name}?`,
+		art = function(holder: Frame)
+			StoreUI.thumb(holder, item)
+		end,
+		rarity = item.rarity,
+		price = { currency = currency, amount = cost },
+		balance = StoreUI.attr(attrName, 0),
+		yes = if currency == "shards" then "Trade" else "Unlock",
+		shortLabel = if currency == "gems" then "Get gems" else "Not enough",
+		onShort = if currency == "gems"
+			then function()
+				StorePanel.show("Gems")
+			end
+			else nil,
+		onYes = function()
+			shop(action, arg, function(result)
+				if result.ok then
+					Toasts.notice(done, UI.Gold)
+				end
+			end)
+		end,
+	})
+end
+
+local function categoryWord(item: Catalog.Item): string
+	return if item.category == "bladeSkin"
+		then "blade"
+		elseif item.category == "bladeLine" then "blade line"
+		else string.lower(item.category)
+end
+
 local function shopCard(parent: Instance, id: string, order: number, have: { [string]: boolean })
 	local item = Catalog.get(id)
 	if not item then
 		return
 	end
 	local owns = have[id] == true
-	local card = UI.panel({ Name = StoreUI.key(id), LayoutOrder = order, BackgroundColor3 = UI.PanelLight }, parent)
-	StoreUI.frame(card, item.rarity)
-	local art = UI.new("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 6),
-		Size = UDim2.fromOffset(88, 88),
-		BackgroundTransparency = 1,
-	}, card)
-	StoreUI.thumb(art, item)
-	UI.text({
-		Position = UDim2.fromOffset(8, 94),
-		Size = UDim2.new(1, -16, 0, 22),
-		Font = UI.Display,
-		TextSize = 19,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		Text = item.name,
-	}, card)
-	UI.text({
-		Position = UDim2.fromOffset(8, 116),
-		Size = UDim2.new(1, -16, 0, 16),
-		TextSize = 13,
-		TextColor3 = Flair.Rarity[item.rarity] or UI.Parchment,
-		Text = `{StoreUI.rarityName(item.rarity)} {string.lower(
-			item.category == "bladeSkin" and "blade" or item.category
-		)}`,
-	}, card)
 	local price = item.price or {}
-	local currency = if price.gems then "Gems" else "Coins"
+	local currency = if price.gems then "gems" else "coins"
 	local cost = price.gems or price.coins or 0
-	local afford = StoreUI.attr(currency, 0) >= cost
-	local button = UI.actionButton(card, {
-		Name = "Buy",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -8),
-		Size = UDim2.new(1, -16, 0, UI.Touch - 4),
-		Text = if owns then "Owned" else `{UI.number(cost)} {string.lower(currency)}`,
-		BackgroundColor3 = if owns then UI.Panel else nil,
-		TextColor3 = if owns then UI.Jade else nil,
-	}, not owns and afford)
-	button.Activated:Connect(function()
-		if owns then
-			return
-		elseif not afford then
-			if currency == "Gems" then
-				StorePanel.show("Gems")
-			else
-				Toasts.notice(`{UI.number(cost - StoreUI.attr("Coins", 0))} more coins for {item.name}`, UI.Gold)
+	UI.card({
+		Name = StoreUI.key(id),
+		LayoutOrder = order,
+		Size = UDim2.fromScale(1, 1),
+		name = item.name,
+		rarity = item.rarity,
+		caption = `{item.rarity} {categoryWord(item)}`,
+		art = function(holder: Frame)
+			StoreUI.thumb(holder, item)
+		end,
+		price = if owns then nil else { currency = currency, amount = cost },
+		status = if owns then "Owned" else nil,
+		statusColor = UI.Theme.JadeText,
+		state = if owns then "owned" else "buy",
+		onActivated = function()
+			if owns then
+				return
 			end
-			return
-		end
-		UI.confirm(
-			Panels.window(),
-			item.name,
-			`Unlock {item.name} for {UI.number(cost)} {string.lower(currency)}?`,
-			"Unlock",
-			function()
-				shop("BuyShop", id, function(result)
-					if result.ok then
-						Toasts.notice(`Unlocked  ·  {item.name}  ·  equip it in the Locker`, UI.Gold)
-					end
-				end)
-			end
-		)
-	end)
+			confirmBuy(item, currency, cost, "BuyShop", id, `Unlocked  ·  {item.name}  ·  equip it in the Locker`)
+		end,
+	}, parent)
 end
 
 local function featuredTab(list: ScrollingFrame)
@@ -188,12 +192,12 @@ local function featuredTab(list: ScrollingFrame)
 	local row = UI.new("Frame", {
 		Name = "Daily",
 		LayoutOrder = 2,
-		Size = UDim2.new(1, 0, 0, 196),
+		Size = UDim2.new(1, 0, 0, 222),
 		BackgroundTransparency = 1,
 	}, list)
 	UI.new("UIGridLayout", {
-		CellSize = UDim2.new(0.25, -8, 1, 0),
-		CellPadding = UDim2.fromOffset(8, 0),
+		CellSize = UDim2.new(0.25, -9, 1, 0),
+		CellPadding = UDim2.fromOffset(12, 0),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, row)
 	local n = 0
@@ -209,20 +213,44 @@ local function featuredTab(list: ScrollingFrame)
 		return
 	end
 	UI.heading(list, "This week's set", 3)
+	-- The hero: the stall art behind, the set's three cards, the price and one CTA.
 	local box = UI.panel({
 		Name = "Featured",
 		LayoutOrder = 4,
-		Size = UDim2.new(1, 0, 0, 150),
-		BackgroundColor3 = UI.PanelLight,
+		Size = UDim2.new(1, 0, 0, 222),
+		material = "inset",
+		tint = UI.Theme.Plate:Lerp(UI.Theme.Gold, 0.12),
+		ClipsDescendants = true,
 	}, list)
+	UI.stroke(box, UI.Theme.Gold, 1.5, 0.2)
+	local board = (Assets.Boards :: any).Store
+	if typeof(board) == "string" then
+		local bg = UI.new("ImageLabel", {
+			Name = "Board",
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromScale(0.5, 1),
+			BackgroundTransparency = 1,
+			Image = board,
+			ImageTransparency = 0.55,
+			ScaleType = Enum.ScaleType.Crop,
+		}, box)
+		UI.new("UIGradient", {
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 1),
+				NumberSequenceKeypoint.new(0.5, 0.2),
+				NumberSequenceKeypoint.new(1, 0),
+			}),
+		}, bg)
+	end
 	local strip = UI.new("Frame", {
-		Position = UDim2.fromOffset(8, 8),
-		Size = UDim2.new(0.55, 0, 1, -16),
+		Position = UDim2.fromOffset(10, 10),
+		Size = UDim2.new(0.56, 0, 1, -20),
 		BackgroundTransparency = 1,
 	}, box)
 	UI.new("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
-		Padding = UDim.new(0, 8),
+		Padding = UDim.new(0, 10),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, strip)
 	for i, id in featured.items do
@@ -230,85 +258,81 @@ local function featuredTab(list: ScrollingFrame)
 		if not item then
 			continue
 		end
-		local cell = UI.new("Frame", {
+		UI.card({
+			Name = StoreUI.key(id),
 			LayoutOrder = i,
-			Size = UDim2.new(1 / 3, -6, 1, 0),
-			BackgroundColor3 = UI.Panel,
-			BorderSizePixel = 0,
+			Size = UDim2.new(1 / 3, -7, 1, 0),
+			name = item.name,
+			rarity = item.rarity,
+			art = function(holder: Frame)
+				StoreUI.thumb(holder, item)
+			end,
+			status = if have[id] then "Owned" else nil,
+			statusColor = UI.Theme.JadeText,
 		}, strip)
-		UI.corner(cell)
-		StoreUI.frame(cell, item.rarity)
-		local art = UI.new("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0),
-			Position = UDim2.new(0.5, 0, 0, 4),
-			Size = UDim2.fromOffset(80, 80),
-			BackgroundTransparency = 1,
-		}, cell)
-		StoreUI.thumb(art, item)
-		UI.text({
-			Position = UDim2.fromOffset(4, 86),
-			Size = UDim2.new(1, -8, 0, 20),
-			Font = UI.Display,
-			TextSize = 16,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			Text = item.name,
-		}, cell)
-		UI.text({
-			Position = UDim2.fromOffset(4, 106),
-			Size = UDim2.new(1, -8, 0, 16),
-			TextSize = 13,
-			TextColor3 = if have[id] then UI.Jade else Flair.Rarity[item.rarity] or UI.Parchment,
-			Text = if have[id] then "Owned" else StoreUI.rarityName(item.rarity),
-		}, cell)
 	end
 	local price = StoreUI.attr("ShopFeaturedPrice", featured.price or 0)
 	local ownsAll = price == 0
 	local info = UI.text({
-		Position = UDim2.new(0.58, 0, 0, 10),
-		Size = UDim2.new(0.42, -14, 0, 48),
+		Position = UDim2.new(0.6, 0, 0, 14),
+		Size = UDim2.new(0.4, -16, 0, 70),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
 		TextWrapped = true,
-		TextSize = 15,
+		TextSize = 16,
 		Text = "",
 	}, box)
 	if typeof(featured.endsAt) == "number" then
 		local discount = math.floor((featured.discount or 0) * 100 + 0.5)
 		StoreUI.countdown(info, featured.endsAt, function(left)
-			return `All {#featured.items} together{if discount > 0 then `, {discount}% less than one by one` else ""}. Changes in {left}.`
+			return `All {#featured.items} together{if discount > 0 then `, {discount}% less than one by one` else ""}.\nLeaves in {left}.`
 		end)
 	end
+	if not ownsAll then
+		UI.price({
+			currency = "gems",
+			amount = price,
+			height = 40,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.new(0.6, 6, 1, -86),
+			Size = UDim2.fromOffset(150, 40),
+		}, box)
+	end
 	local afford = StoreUI.attr("Gems", 0) >= price
-	local buy = UI.actionButton(box, {
+	local buy = UI.button({
 		Name = "BuySet",
+		variant = if ownsAll then "disabled" else "primary",
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -12, 1, -12),
-		Size = UDim2.new(0.42, -14, 0, UI.Touch),
-		Text = if ownsAll then "You own the set" else `Get the set  ·  {UI.number(price)} gems`,
-		BackgroundColor3 = if ownsAll then UI.Panel else nil,
-		TextColor3 = if ownsAll then UI.Jade else nil,
-	}, not ownsAll and afford)
+		Position = UDim2.new(1, -14, 1, -14),
+		Size = UDim2.new(0.4, -18, 0, UI.Touch),
+		Text = if ownsAll then "You own the set" else "Get the set",
+		FontFace = UI.Fonts.Number,
+		TextSize = 20,
+	}, box)
 	buy.Activated:Connect(function()
 		if ownsAll then
 			return
-		elseif not afford then
-			StorePanel.show("Gems")
-			return
 		end
-		UI.confirm(
-			Panels.window(),
-			"This week's set",
-			`Spend {UI.number(price)} gems on every item in the set you don't own yet?`,
-			"Spend gems",
-			function()
+		UI.confirm(Panels.window(), {
+			title = "This week's set",
+			text = "Every item in the set you don't own yet.",
+			price = { currency = "gems", amount = price },
+			balance = StoreUI.attr("Gems", 0),
+			yes = "Get the set",
+			shortLabel = "Get gems",
+			onShort = function()
+				StorePanel.show("Gems")
+			end,
+			onYes = function()
 				shop("BuyFeatured", nil, function(result)
 					if result.ok then
 						Toasts.notice("The set is yours  ·  equip it in the Locker", UI.Gold)
 					end
 				end)
-			end
-		)
+			end,
+		})
 	end)
+	local _ = afford
 end
 
 ---------------------------------------------------------------------------------------
@@ -319,17 +343,20 @@ local function gemsTab(list: ScrollingFrame)
 	local grid = UI.new("Frame", {
 		Name = "Packs",
 		LayoutOrder = 2,
-		Size = UDim2.new(1, 0, 0, 236),
+		Size = UDim2.new(1, 0, 0, 268),
 		BackgroundTransparency = 1,
 	}, list)
 	UI.new("UIGridLayout", {
-		CellSize = UDim2.new(1 / 3, -8, 0, 114),
-		CellPadding = UDim2.fromOffset(8, 8),
+		CellSize = UDim2.new(1 / 3, -8, 0, 128),
+		CellPadding = UDim2.fromOffset(12, 12),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, grid)
 	local packs = Catalog.list("gemPack")
-	-- The bonus is measured against the smallest pack's gems per Robux.
+	-- The bonus is measured against the smallest pack's gems per Robux; the best value is
+	-- the biggest bonus, labelled as such.
 	local base: number? = nil
+	local bonuses: { number } = {}
+	local bestBonus = 0
 	for i, item in packs do
 		local key = (item.price :: Catalog.Price).product :: string
 		local gems = (item.contents :: Catalog.Contents).gems or 0
@@ -337,39 +364,80 @@ local function gemsTab(list: ScrollingFrame)
 		if i == 1 and robux then
 			base = gems / robux
 		end
-		local bonus = if base and robux then math.floor((gems / (robux * base) - 1) * 100 + 0.5) else 0
-		local card = UI.panel({ Name = StoreUI.key(item.id), LayoutOrder = i, BackgroundColor3 = UI.PanelLight }, grid)
+		bonuses[i] = if base and robux then math.floor((gems / (robux * base) - 1) * 100 + 0.5) else 0
+		bestBonus = math.max(bestBonus, bonuses[i])
+	end
+	for i, item in packs do
+		local key = (item.price :: Catalog.Price).product :: string
+		local gems = (item.contents :: Catalog.Contents).gems or 0
+		local robux = StoreUI.robux(key)
+		local bonus = bonuses[i]
+		local best = bonus > 0 and bonus == bestBonus
+		local card = UI.panel({
+			Name = StoreUI.key(item.id),
+			LayoutOrder = i,
+			material = "inset",
+			tint = if best then UI.Theme.Plate:Lerp(UI.Theme.Gold, 0.15) else nil,
+		}, grid)
+		if best then
+			UI.stroke(card, UI.Theme.GoldHi, 2, 0)
+		end
+		UI.rarityGlow(card, "uncommon", 1)
 		local art = UI.new("Frame", {
-			Position = UDim2.fromOffset(4, 4),
-			Size = UDim2.fromOffset(84, 84),
+			Position = UDim2.fromOffset(4, 6),
+			Size = UDim2.fromOffset(92, 92),
 			BackgroundTransparency = 1,
+			ZIndex = 2,
 		}, card)
 		StoreUI.thumb(art, item)
-		UI.text({
-			Position = UDim2.fromOffset(92, 4),
-			Size = UDim2.new(1, -100, 0, 32),
+		UI.label("number", {
+			Position = UDim2.fromOffset(100, 8),
+			Size = UDim2.new(1, -108, 0, 32),
 			TextXAlignment = Enum.TextXAlignment.Left,
-			Font = UI.Bold,
-			TextSize = 30,
-			TextColor3 = UI.Jade,
+			TextSize = 28,
+			TextColor3 = UI.Theme.JadeText,
 			Text = UI.number(gems),
+			ZIndex = 2,
 		}, card)
-		UI.text({
-			Position = UDim2.fromOffset(92, 36),
-			Size = UDim2.new(1, -100, 0, 18),
+		UI.label("caption", {
+			Position = UDim2.fromOffset(100, 40),
+			Size = UDim2.new(1, -108, 0, 18),
 			TextXAlignment = Enum.TextXAlignment.Left,
-			TextSize = 15,
-			TextTransparency = 0.2,
-			Text = if bonus > 0 then `gems  ·  +{bonus}% bonus` else "gems",
+			TextColor3 = if bonus > 0 then UI.Theme.GoldHi else UI.Theme.Dim,
+			Text = if bonus > 0 then `gems  ·  +{bonus}%` else "gems",
+			ZIndex = 2,
 		}, card)
+		if best then
+			-- An honest ribbon: the biggest bonus of the six.
+			local ribbon = UI.new("Frame", {
+				Name = "BestValue",
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -8, 0, 8),
+				Size = UDim2.fromOffset(0, 22),
+				AutomaticSize = Enum.AutomaticSize.X,
+				BackgroundColor3 = UI.Theme.Gold,
+				ZIndex = 3,
+			}, card)
+			UI.new("UICorner", { CornerRadius = UDim.new(0, 4) }, ribbon)
+			UI.new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, ribbon)
+			UI.label("caption", {
+				Size = UDim2.fromOffset(0, 22),
+				AutomaticSize = Enum.AutomaticSize.X,
+				TextColor3 = UI.Theme.Ink,
+				Text = "Best value",
+				ZIndex = 4,
+			}, ribbon)
+		end
 		local button = UI.button({
 			Name = "Buy",
+			variant = "premium",
 			AnchorPoint = Vector2.new(1, 1),
 			Position = UDim2.new(1, -8, 1, -8),
-			Size = UDim2.new(1, -100, 0, 50),
+			Size = UDim2.new(1, -104, 0, 56),
 			Text = if robux then `R$ {UI.number(robux)}` else "See price",
+			FontFace = UI.Fonts.Number,
 			TextSize = 20,
-			BackgroundColor3 = UI.Crimson,
+			ZIndex = 2,
 		}, card)
 		button.Activated:Connect(function()
 			StoreUI.purchase(key)
@@ -389,56 +457,66 @@ local function offerCard(
 	extra: ((TextLabel) -> ())?
 )
 	local key = (item.price :: Catalog.Price).product :: string
+	local hero = item.category == "bundle"
 	local card = UI.panel({
 		Name = StoreUI.key(item.id),
 		LayoutOrder = order,
-		Size = UDim2.new(1, 0, 0, 112),
-		BackgroundColor3 = UI.PanelLight,
+		Size = UDim2.new(1, 0, 0, if hero then 132 else 116),
+		material = "inset",
+		tint = if hero then UI.Theme.Plate:Lerp(UI.Theme.Gold, 0.14) else nil,
 	}, list)
-	StoreUI.frame(card, item.rarity)
+	if hero then
+		UI.stroke(card, UI.Theme.Gold, 1.5, 0.15)
+	end
+	UI.rarityGlow(card, item.rarity, 1)
 	local art = UI.new("Frame", {
-		Position = UDim2.fromOffset(6, 6),
+		Position = UDim2.fromOffset(8, 8),
 		Size = UDim2.fromOffset(100, 100),
 		BackgroundTransparency = 1,
+		ZIndex = 2,
 	}, card)
 	StoreUI.thumb(art, item)
 	UI.text({
-		Position = UDim2.fromOffset(116, 8),
-		Size = UDim2.new(1, -310, 0, 28),
+		Position = UDim2.fromOffset(120, 10),
+		Size = UDim2.new(1, -320, 0, 30),
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = UI.Display,
-		TextSize = 24,
+		FontFace = UI.Fonts.Display,
+		TextSize = 22,
+		TextColor3 = if hero then UI.Theme.GoldHi else UI.Theme.Bone,
 		Text = item.name,
+		ZIndex = 2,
 	}, card)
 	local text = UI.text({
-		Position = UDim2.fromOffset(116, 38),
-		Size = UDim2.new(1, -310, 0, 66),
+		Position = UDim2.fromOffset(120, 42),
+		Size = UDim2.new(1, -320, 0, 66),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
 		TextWrapped = true,
-		TextSize = 15,
-		TextTransparency = 0.1,
+		TextSize = 16,
+		TextColor3 = UI.Theme.Dim,
 		Text = table.concat(lines, "\n"),
+		ZIndex = 2,
 	}, card)
 	local robux = StoreUI.robux(key)
-	local button = UI.actionButton(card, {
+	local button = UI.button({
 		Name = "Buy",
+		variant = if owned then "disabled" else "premium",
 		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -14, 0.5, if extra then 10 else 0),
-		Size = UDim2.fromOffset(170, UI.Touch),
+		Position = UDim2.new(1, -14, 0.5, if extra then 12 else 0),
+		Size = UDim2.fromOffset(180, UI.Touch),
 		Text = if owned then "Owned" elseif robux then `R$ {UI.number(robux)}` else "See price",
+		FontFace = UI.Fonts.Number,
 		TextSize = 20,
-		BackgroundColor3 = if owned then UI.Panel else nil,
-		TextColor3 = if owned then UI.Jade else nil,
-	}, not owned)
+		ZIndex = 2,
+	}, card)
 	if extra then
-		local sub = UI.text({
+		local sub = UI.label("caption", {
 			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.new(1, -14, 0, 10),
-			Size = UDim2.fromOffset(170, 18),
-			TextSize = 14,
-			TextColor3 = UI.Gold,
+			Position = UDim2.new(1, -14, 0, 12),
+			Size = UDim2.fromOffset(180, 18),
+			TextColor3 = UI.Theme.GoldHi,
 			Text = "",
+			ZIndex = 2,
 		}, card)
 		extra(sub)
 	end
@@ -513,13 +591,6 @@ local function outcomeName(outcome: { [string]: any }): string
 	return outcome.label or `{UI.number(outcome.amount or 0)} {string.lower(tostring(outcome.kind))}`
 end
 
-local CURRENCY_ICON: { [string]: string } = {
-	Coins = ICONS.Coin,
-	Gems = ICONS.Gem,
-	Whetstones = ICONS.Whetstone or ICONS.Skin,
-	Shards = ICONS.Shard or ICONS.Gem,
-}
-
 -- The full odds table: every outcome with its percent, owned items marked with what a
 -- duplicate pays, the tier totals and (capsule) the pity rules.
 local function showOdds(odds: { [string]: any }, title: string, confirm: { label: string, run: () -> () }?)
@@ -530,11 +601,12 @@ local function showOdds(odds: { [string]: any }, title: string, confirm: { label
 			list.Size = UDim2.new(1, 0, 1, -UI.Touch - 10)
 			local go = UI.button({
 				Name = "Confirm",
+				variant = "primary",
 				AnchorPoint = Vector2.new(0.5, 1),
 				Position = UDim2.fromScale(0.5, 1),
 				Size = UDim2.new(0.6, 0, 0, UI.Touch),
 				Text = confirm.label,
-				BackgroundColor3 = UI.Crimson,
+				FontFace = UI.Fonts.Number,
 			}, content)
 			go.Activated:Connect(function()
 				UI.closeSheet()
@@ -556,27 +628,31 @@ local function showOdds(odds: { [string]: any }, title: string, confirm: { label
 		local dup = odds.dupShards or {}
 		for i, outcome in odds.outcomes or {} do
 			local owns = outcome.kind == "item" and have[outcome.id] == true
+			local style = UI.rarity(outcome.rarity)
 			local row = UI.new("Frame", {
+				Name = `Row{i}`,
 				LayoutOrder = 10 + i,
-				Size = UDim2.new(1, 0, 0, 26),
-				BackgroundColor3 = if i % 2 == 0 then UI.PanelLight else UI.Panel,
+				Size = UDim2.new(1, 0, 0, 28),
+				BackgroundColor3 = UI.Theme.Bronze,
+				BackgroundTransparency = if i % 2 == 0 then 0.9 else 1,
 				BorderSizePixel = 0,
 			}, list)
 			UI.text({
 				Position = UDim2.fromOffset(8, 0),
-				Size = UDim2.new(0.6, -8, 1, 0),
+				Size = UDim2.new(0.55, -8, 1, 0),
 				TextXAlignment = Enum.TextXAlignment.Left,
-				TextSize = 15,
+				FontFace = UI.Fonts.Label,
+				TextSize = 16,
 				TextTruncate = Enum.TextTruncate.AtEnd,
-				TextColor3 = Flair.Rarity[outcome.rarity] or UI.Parchment,
+				TextColor3 = if (outcome.rarity or "common") == "common" then UI.Theme.Ink else style.dark,
 				Text = outcomeName(outcome),
 			}, row)
 			UI.text({
-				Position = UDim2.fromScale(0.6, 0),
-				Size = UDim2.fromScale(0.25, 1),
+				Position = UDim2.fromScale(0.55, 0),
+				Size = UDim2.fromScale(0.3, 1),
 				TextXAlignment = Enum.TextXAlignment.Left,
-				TextSize = 13,
-				TextColor3 = UI.Jade,
+				TextSize = 15,
+				TextColor3 = UI.Theme.JadeDeep,
 				Text = if owns then `owned → {dup[outcome.rarity] or 0} shards` else "",
 			}, row)
 			UI.text({
@@ -584,90 +660,51 @@ local function showOdds(odds: { [string]: any }, title: string, confirm: { label
 				Position = UDim2.new(1, -8, 0, 0),
 				Size = UDim2.fromScale(0.15, 1),
 				TextXAlignment = Enum.TextXAlignment.Right,
-				Font = UI.Bold,
-				TextSize = 15,
+				FontFace = UI.Fonts.Number,
+				TextSize = 16,
+				TextColor3 = UI.Theme.Ink,
 				Text = string.format("%.2f%%", outcome.pct or 0),
 			}, row)
 		end
 	end, Vector2.new(640, 340))
 end
 
--- What a draw (or ten) gave.
-local function showResults(results: { { [string]: any } }, title: string)
-	UI.sheet(Panels.window(), title, function(content)
-		local grid = UI.new("ScrollingFrame", {
-			Size = UDim2.fromScale(1, 1),
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			ScrollBarThickness = 6,
-			AutomaticCanvasSize = Enum.AutomaticSize.Y,
-			CanvasSize = UDim2.new(),
-		}, content)
-		UI.new("UIGridLayout", {
-			CellSize = UDim2.fromOffset(112, 128),
-			CellPadding = UDim2.fromOffset(8, 8),
-			SortOrder = Enum.SortOrder.LayoutOrder,
-		}, grid)
-		for i, outcome in results do
-			local cell = UI.new("Frame", {
-				LayoutOrder = i,
-				BackgroundColor3 = UI.PanelLight,
-				BorderSizePixel = 0,
-			}, grid)
-			UI.corner(cell)
-			StoreUI.frame(cell, outcome.rarity or "common")
-			local art = UI.new("Frame", {
-				AnchorPoint = Vector2.new(0.5, 0),
-				Position = UDim2.new(0.5, 0, 0, 4),
-				Size = UDim2.fromOffset(72, 72),
-				BackgroundTransparency = 1,
-			}, cell)
-			local item = outcome.kind == "item" and Catalog.get(outcome.id) or nil
-			if item then
-				StoreUI.thumb(art, item)
-			else
-				UI.new("ImageLabel", {
-					Size = UDim2.fromScale(1, 1),
-					BackgroundTransparency = 1,
-					Image = CURRENCY_ICON[outcome.kind] or ICONS.Rewards,
-				}, art)
-			end
-			UI.text({
-				Position = UDim2.fromOffset(4, 78),
-				Size = UDim2.new(1, -8, 0, 20),
-				TextSize = 15,
-				Font = UI.Bold,
-				TextTruncate = Enum.TextTruncate.AtEnd,
-				TextColor3 = Flair.Rarity[outcome.rarity or "common"] or UI.Parchment,
-				Text = if item then item.name else `+{UI.number(outcome.amount or 0)} {string.lower(outcome.kind)}`,
-			}, cell)
-			UI.text({
-				Position = UDim2.fromOffset(4, 100),
-				Size = UDim2.new(1, -8, 0, 18),
-				TextSize = 13,
-				TextColor3 = UI.Jade,
-				Text = if outcome.dup
-					then `owned → +{outcome.shards or 0} shards`
-					elseif outcome.pity then "pity"
-					elseif item then "New!"
-					else "",
-			}, cell)
-		end
-	end, Vector2.new(640, 330))
-end
+local drawNow: (number) -> ()
+local capsuleNow: (number, number) -> ()
 
-local function drawNow(count: number)
+function drawNow(count: number)
 	shop("Draw", count, function(result)
 		if result.ok and typeof(result.results) == "table" then
-			showResults(result.results, if count == 1 then "Shrine Draw" else `{count} Shrine Draws`)
+			-- Draw again (same count, if enough draws are left) straight from the reveal.
+			local left = StoreUI.attr("Draws", 0)
+			local again = math.min(count, left)
+			Reveal.play(result.results, {
+				again = if again > 0
+					then {
+						label = if again == 1 then "Open 1 more" else `Open {again} more`,
+						run = function()
+							drawNow(again)
+						end,
+					}
+					else nil,
+			})
 		end
 	end)
 end
 
-local function capsuleNow(count: number, cost: number)
+function capsuleNow(count: number, cost: number)
 	shop("Capsule", count, function(result)
 		if result.ok and typeof(result.results) == "table" then
-			showResults(result.results, `Shrine Capsule  ·  -{UI.number(cost)} gems`)
+			Reveal.play(result.results, {
+				again = if StoreUI.attr("Gems", 0) >= cost
+					then {
+						label = `Again  ·  {UI.number(cost)} gems`,
+						run = function()
+							capsuleNow(count, cost)
+						end,
+					}
+					else nil,
+			})
 		end
 	end)
 end
@@ -698,8 +735,9 @@ local function shrinePanel(parent: Instance, order: number, width: UDim): Frame
 	local box = UI.panel({
 		LayoutOrder = order,
 		Size = UDim2.new(width.Scale, width.Offset, 1, 0),
-		BackgroundColor3 = UI.PanelLight,
+		material = "inset",
 	}, parent)
+	UI.rarityGlow(box, "legendary", 1)
 	return box
 end
 
@@ -763,8 +801,8 @@ local function shrineTab(list: ScrollingFrame)
 		Padding = UDim.new(0, 8),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, buttons)
-	local odds = UI.button({ Name = "Odds", LayoutOrder = 1, Size = quarter, Text = "Odds", TextSize = 18 }, buttons)
-	UI.stroke(odds)
+	local odds =
+		UI.tertiary({ Name = "Odds", LayoutOrder = 1, Size = quarter, Text = "View odds", TextSize = 17 }, buttons)
 	odds.Activated:Connect(function()
 		oddsSeen = true
 		showOdds(drawOdds, "Shrine Draw odds")
@@ -807,13 +845,12 @@ local function shrineTab(list: ScrollingFrame)
 	end)
 	local historyButton = UI.button({
 		Name = "History",
+		variant = "ghost",
 		LayoutOrder = 4,
 		Size = quarter,
 		Text = "History",
 		TextSize = 16,
-		BackgroundColor3 = UI.Panel,
 	}, buttons)
-	UI.stroke(historyButton, UI.Bronze, 1, 0.5)
 	historyButton.Activated:Connect(history)
 
 	-- The gem Shrine Capsule: only when the server says it may be shown to this player.
@@ -876,8 +913,8 @@ local function shrineTab(list: ScrollingFrame)
 			Padding = UDim.new(0, 8),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}, row)
-		local capOdds = UI.button({ Name = "Odds", LayoutOrder = 1, Size = half, Text = "Odds", TextSize = 18 }, row)
-		UI.stroke(capOdds)
+		local capOdds =
+			UI.tertiary({ Name = "Odds", LayoutOrder = 1, Size = half, Text = "View odds", TextSize = 17 }, row)
 		capOdds.Activated:Connect(function()
 			showOdds(cap.odds or {}, "Shrine Capsule odds")
 		end)
@@ -942,9 +979,10 @@ local function shrineTab(list: ScrollingFrame)
 		local row = UI.panel({
 			Name = StoreUI.key(id),
 			LayoutOrder = 10 + i,
-			Size = UDim2.new(1, 0, 0, 72),
-			BackgroundColor3 = UI.PanelLight,
+			Size = UDim2.new(1, 0, 0, 76),
+			material = "inset",
 		}, list)
+		UI.rarityGlow(row, item.rarity, 1)
 		local art = UI.new("Frame", {
 			Position = UDim2.fromOffset(6, 4),
 			Size = UDim2.fromOffset(60, 60),
@@ -985,19 +1023,7 @@ local function shrineTab(list: ScrollingFrame)
 				Toasts.notice(`{UI.number(shardCost - shards)} more shards for {item.name}`, UI.Parchment)
 				return
 			end
-			UI.confirm(
-				Panels.window(),
-				item.name,
-				`Trade {UI.number(shardCost)} shards for {item.name}?`,
-				"Trade",
-				function()
-					shop("ShardBuy", id, function(result)
-						if result.ok then
-							Toasts.notice(`Unlocked  ·  {item.name}`, UI.Gold)
-						end
-					end)
-				end
-			)
+			confirmBuy(item, "shards", shardCost, "ShardBuy", id, `Unlocked  ·  {item.name}`)
 		end)
 		local price = direct[id]
 		if typeof(price) == "table" and (price.gems or price.coins) then
@@ -1011,11 +1037,8 @@ local function shrineTab(list: ScrollingFrame)
 				Size = UDim2.fromOffset(160, 58),
 				TextSize = 16,
 				Text = `{UI.number(cost)} {string.lower(currency)}`,
-				BackgroundColor3 = if afford then UI.PanelLight else nil,
+				variant = if afford then "secondary" else "disabled",
 			}, afford)
-			if afford then
-				UI.stroke(buy, UI.Jade, 1.5, 0.2)
-			end
 			buy.Activated:Connect(function()
 				if not afford then
 					if currency == "Gems" then
@@ -1023,19 +1046,7 @@ local function shrineTab(list: ScrollingFrame)
 					end
 					return
 				end
-				UI.confirm(
-					Panels.window(),
-					item.name,
-					`Unlock {item.name} for {UI.number(cost)} {string.lower(currency)}?`,
-					"Unlock",
-					function()
-						shop("DirectBuy", id, function(result)
-							if result.ok then
-								Toasts.notice(`Unlocked  ·  {item.name}`, UI.Gold)
-							end
-						end)
-					end
-				)
+				confirmBuy(item, string.lower(currency), cost, "DirectBuy", id, `Unlocked  ·  {item.name}`)
 			end)
 		end
 	end
