@@ -38,12 +38,33 @@ local FRAMING = {
 local SIDE_SWITCH = 1.5 -- studs past the pair line
 local SIDE_RATE = 3
 -- Thin set dressing (fence posts and rails, ropes, lantern poles) never pulls the camera in: the
--- probe passes through it and it fades on this screen while it's in the shot. Tag anything else
--- that should behave so with CameraIgnore.
+-- probe passes through it, and Occlusion fades it while it's in the shot (as it does canopies and
+-- other non-colliding props the lens enters). Tag anything else that should behave so with
+-- CameraIgnore.
 local IGNORE_TAG = "CameraIgnore"
 local THIN = 1.5 -- studs: a part whose two smaller sides are both under this may be thin (isThin)
-local PROP_FADE = 0.75
-local PROP_RATE = 12
+-- When a wall, rock, roof post or the arena's edge shortens the arm, the lens doesn't slide down
+-- the arm into your head: it cranes up over you as the arm shortens (CRANE studs at a fully
+-- pulled-in arm), and never comes within MIN_HEAD studs of your head, looking down past it.
+local CRANE = 2.5
+local MIN_HEAD = 4.2
+-- Fenced terraces (duel and boss): the lens keeps EDGE_IN studs inside the rope instead of
+-- riding outside the ring over the drop, behind the rope, posts and rim rocks. Only when you're
+-- backed onto the rope may it go past it (never more than EDGE_OUT, over the terrace's own rim),
+-- so it still stays MIN_BACK studs behind you and you stay in the shot.
+local EDGE_IN = 1.2
+local EDGE_OUT = 4
+-- Near the rope the arm first swings round you along it (up to EDGE_SWING, tested in
+-- EDGE_SWING_STEPS steps each way, settling at EDGE_YAW_RATE) until EDGE_ENOUGH of its length
+-- fits; only what still doesn't fit is shortened, never below MIN_BACK studs behind you.
+local EDGE_SWING = math.rad(70)
+local EDGE_SWING_STEPS = 14
+local EDGE_ENOUGH = 0.8
+local EDGE_YAW_RATE = 3
+local MIN_BACK = 7
+-- As the arm is shortened, the look point slides up to FOCUS_SELF of the way to your head, so
+-- you stay in the bottom of the shot.
+local FOCUS_SELF = 0.4
 local probeParams = RaycastParams.new()
 probeParams.FilterType = Enum.RaycastFilterType.Exclude
 probeParams.RespectCanCollide = true
@@ -55,7 +76,7 @@ local armLength: number? = nil
 local ARM_OUT_RATE = 4
 local side = 1 -- which shoulder the camera sits over (1 right, -1 left)
 local sideBlend = 1
-local fadedProps: { [BasePart]: number } = {}
+local edgeYaw = 0 -- radians the arm is swung round you along an arena's rope
 local reticle: BillboardGui? = nil
 local listeners: { (Model?) -> () } = {}
 
@@ -244,7 +265,8 @@ local function framing(name: string): number
 	return value
 end
 
-local function isThin(part: BasePart): boolean
+-- Whether `part` is thin set dressing the camera looks through (Occlusion fades these too).
+function LockOn.isThin(part: BasePart): boolean
 	if part:IsA("Terrain") then
 		return false
 	end
@@ -259,34 +281,113 @@ local function isThin(part: BasePart): boolean
 	local middle = math.max(math.min(a, b), math.min(math.max(a, b), c))
 	return middle < THIN and smallest >= middle * 0.5
 end
+local isThin = LockOn.isThin
 
--- Fades the thin props in the shot (`inShot`) and restores the ones that left it.
-local function fadeProps(inShot: { [BasePart]: boolean }, dt: number)
-	local alpha = math.min(1, dt * PROP_RATE)
-	for part in inShot do
-		if not fadedProps[part] then
-			fadedProps[part] = 0
+-- The fenced terraces (LobbyBuilder publishes each one's walk-surface centre as an Arena
+-- attribute): duel grounds at Config.Duel.ArenaRadius, the boss terrace at Config.Bosses'.
+type Arena = { centre: Vector3, radius: number }
+local arenas: { Arena } = {}
+local arenasAt = -math.huge
+local function findArenas()
+	arenasAt = os.clock()
+	table.clear(arenas)
+	local lobby = workspace:FindFirstChild("Lobby")
+	if not lobby then
+		return
+	end
+	local function add(holder: Instance, radius: number)
+		local centre = holder:GetAttribute("Arena")
+		if typeof(centre) == "Vector3" then
+			table.insert(arenas, { centre = centre, radius = radius })
 		end
 	end
-	for part, amount in fadedProps do
-		local goal = if inShot[part] then PROP_FADE else 0
-		amount += (goal - amount) * alpha
-		if goal == 0 and amount < 0.02 or not part.Parent then
-			part.LocalTransparencyModifier = 0
-			fadedProps[part] = nil
-		else
-			part.LocalTransparencyModifier = amount
-			fadedProps[part] = amount
+	local grounds = lobby:FindFirstChild("DuelGrounds")
+	if grounds then
+		for _, ground in grounds:GetChildren() do
+			add(ground, Config.Duel.ArenaRadius)
 		end
 	end
+	local shrine = lobby:FindFirstChild("BossShrine")
+	if shrine then
+		add(shrine, Config.Bosses.ArenaRadius)
+	end
+end
+
+-- The fenced terrace `position` stands on, if any.
+local function arenaAround(position: Vector3): Arena?
+	if #arenas == 0 and os.clock() - arenasAt > 2 then
+		findArenas()
+	end
+	for _, arena in arenas do
+		local d = position - arena.centre
+		if math.abs(d.Y) < 14 and Vector2.new(d.X, d.Z).Magnitude < arena.radius + 2 then
+			return arena
+		end
+	end
+	return nil
+end
+
+-- How far (0-1) along `arm` from `from` the lens may go before leaving the arena's circle
+-- grown by `margin` (negative: inside the rope), measured on the ground plane; 0 when `from` is
+-- already past it.
+local function insideFraction(arena: Arena, from: Vector3, arm: Vector3, margin: number): number
+	local px, pz = from.X - arena.centre.X, from.Z - arena.centre.Z
+	local dx, dz = arm.X, arm.Z
+	local r = arena.radius + margin
+	local a = dx * dx + dz * dz
+	local c = px * px + pz * pz - r * r
+	if c >= 0 then
+		return 0
+	end
+	if a < 1e-6 then
+		return 1
+	end
+	local b = 2 * (px * dx + pz * dz)
+	local t = (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
+	return math.clamp(t, 0, 1)
+end
+
+-- The lens `length` studs along `arm` (unit `dir`, full length `full`), craned up over your head
+-- as the arm shortens and kept MIN_HEAD studs from it; a roof caps the rise.
+local function crane(pivot: Vector3, dir: Vector3, full: number, length: number, head: Vector3): Vector3
+	local lens = pivot + dir * length
+	local lift = CRANE * math.clamp(1 - length / math.max(full, 1e-3), 0, 1)
+	local rel = lens + Vector3.yAxis * lift - head
+	if rel.Magnitude < MIN_HEAD then
+		local flat = Vector2.new(rel.X, rel.Z).Magnitude
+		local rise = math.sqrt(math.max(MIN_HEAD * MIN_HEAD - flat * flat, 0))
+		lift = math.max(lift, head.Y + rise - lens.Y)
+	end
+	if lift > 0.05 then
+		local hit = workspace:Raycast(lens, Vector3.yAxis * (lift + 0.4), probeParams)
+		if hit then
+			lift = math.max(hit.Distance - 0.4, 0)
+		end
+	end
+	return lens + Vector3.yAxis * lift
+end
+
+-- `lens` (on the arm from `pivot`) kept inside the arena: shortened to EDGE_IN inside the rope,
+-- or as far as MIN_BACK behind you allows (EDGE_OUT past it at most), and craned.
+local function fitArena(arena: Arena, pivot: Vector3, lens: Vector3, head: Vector3): Vector3
+	local arm = lens - pivot
+	local soft = insideFraction(arena, pivot, arm, -EDGE_IN)
+	if soft >= 1 or arm.Magnitude < 0.5 then
+		return lens
+	end
+	local ground = Vector2.new(arm.X, arm.Z).Magnitude
+	local keep = math.min(MIN_BACK / math.max(ground, 1e-3), 1)
+	local fraction = math.max(soft, math.min(keep, insideFraction(arena, pivot, arm, EDGE_OUT)))
+	if fraction >= 1 then
+		return lens
+	end
+	return crane(pivot, arm.Unit, arm.Magnitude, arm.Magnitude * fraction, head)
 end
 
 local function updateCamera(dt: number)
 	if not target then
 		eye, lookDir, armLength = nil, nil, nil
-		if next(fadedProps) then
-			fadeProps({}, 1)
-		end
+		edgeYaw = 0
 		return
 	end
 	if not isValid(target, settings.BreakRange) then
@@ -313,8 +414,9 @@ local function updateCamera(dt: number)
 	local close = math.clamp((settings.CloseRange - distance) / (settings.CloseRange - 3), 0, 1)
 	close = close * close * (3 - 2 * close) -- smoothstep, so the framing eases in
 
-	-- Keep to the shoulder the camera is already over unless the fight turned it well across.
-	if eye then
+	-- Keep to the shoulder the camera is already over unless the fight turned it well across
+	-- (not while the arm is swung along a rope: that swing moves the eye across on purpose).
+	if eye and math.abs(edgeYaw) < 0.1 then
 		local across = (eye - mine.Position):Dot(right)
 		if across * side < -SIDE_SWITCH then
 			side = -side
@@ -343,6 +445,63 @@ local function updateCamera(dt: number)
 	local focus = mine.Position:Lerp(theirs.Position, 0.55 + 0.2 * close)
 		+ Vector3.yAxis * (1.2 + (0.6 * scale - framing("FocusDrop")) * close)
 
+	-- Fighters are always ignored by the probes; what they see through is added as they meet it
+	-- (one filter for every probe, set once a frame).
+	probeParams.FilterDescendantsInstances = Tagged.list(Types.Tag)
+	local headPart = character and character:FindFirstChild("Head")
+	local head = if headPart and headPart:IsA("BasePart")
+		then headPart.Position
+		else mine.Position + Vector3.yAxis * 1.5
+	-- On a fenced terrace the arm stops short of the rope and cranes up over you instead. This
+	-- shapes where the arm wants to be (before the lag), so backing toward the rope eases the
+	-- lens in and up rather than popping it.
+	local fullArm = Vector2.new(desiredEye.X - pivot.X, desiredEye.Z - pivot.Z).Magnitude
+	local arena = arenaAround(mine.Position)
+	local wantYaw = 0
+	if arena then
+		local arm = desiredEye - pivot
+		if insideFraction(arena, pivot, arm, -EDGE_IN) < 1 then
+			-- First swing the arm round you along the rope (the smallest turn that keeps most of its
+			-- length inside, staying on the side it already swung to unless the other is much
+			-- nearer), then shorten and crane what's still past the edge.
+			local best, bestFraction = 0, insideFraction(arena, pivot, arm, -EDGE_IN)
+			local preferred = if edgeYaw ~= 0 then math.sign(edgeYaw) else sideBlend >= 0 and 1 or -1
+			local found: { [number]: number } = {}
+			for step = 1, EDGE_SWING_STEPS do
+				for _, sign in { preferred, -preferred } do
+					if not found[sign] then
+						local yaw = sign * step * EDGE_SWING / EDGE_SWING_STEPS
+						local fraction =
+							insideFraction(arena, pivot, CFrame.Angles(0, yaw, 0):VectorToWorldSpace(arm), -EDGE_IN)
+						if fraction >= EDGE_ENOUGH then
+							found[sign] = yaw
+						elseif fraction > bestFraction + 0.02 then
+							best, bestFraction = yaw, fraction
+						end
+					end
+				end
+			end
+			local mineYaw, otherYaw = found[preferred], found[-preferred]
+			if mineYaw and (not otherYaw or math.abs(mineYaw) <= math.abs(otherYaw) + math.rad(20)) then
+				wantYaw = mineYaw
+			elseif otherYaw then
+				wantYaw = otherYaw
+			else
+				wantYaw = best
+			end
+		end
+	end
+	edgeYaw += (wantYaw - edgeYaw) * (1 - math.exp(-dt * EDGE_YAW_RATE))
+	if math.abs(edgeYaw) < 1e-3 and wantYaw == 0 then
+		edgeYaw = 0
+	end
+	if edgeYaw ~= 0 then
+		desiredEye = pivot + CFrame.Angles(0, edgeYaw, 0):VectorToWorldSpace(desiredEye - pivot)
+	end
+	if arena then
+		desiredEye = fitArena(arena, pivot, desiredEye, head)
+	end
+
 	-- Kannagi's lag: the eye trails its arm at speed 7 (never more than MaxLag behind), and
 	-- the view turns toward the target at speed 5.
 	local current = eye or desiredEye
@@ -356,10 +515,6 @@ local function updateCamera(dt: number)
 	-- eye pulls the camera in front of it at once (fighters never do), and it eases back out.
 	local reach = current - pivot
 	local allowed = reach.Magnitude
-	local inShot: { [BasePart]: boolean } = {}
-	-- Fighters are always ignored; what the probes see through is added as they meet it (one
-	-- filter for both probes, set once a frame).
-	probeParams.FilterDescendantsInstances = Tagged.list(Types.Tag)
 	if reach.Magnitude > 0.5 then
 		for _ = 1, 8 do
 			local hit = workspace:Spherecast(pivot, PROBE_RADIUS, reach, probeParams)
@@ -367,11 +522,10 @@ local function updateCamera(dt: number)
 				break
 			end
 			local part = hit.Instance
-			if part:IsA("BasePart") and part.Transparency >= 0.9 then
-				probeParams:AddToFilter(part) -- invisible fence walls keep players in, not the camera
-			elseif part:IsA("BasePart") and isThin(part) then
-				probeParams:AddToFilter(part) -- a post or rail: see through it instead of pulling in
-				inShot[part] = true
+			-- Invisible fence walls keep players in, not the camera; a post or rail is seen
+			-- through (Occlusion fades it) instead of pulling the lens in.
+			if part:IsA("BasePart") and (part.Transparency >= 0.9 or isThin(part)) then
+				probeParams:AddToFilter(part)
 			else
 				allowed = math.max(hit.Distance - 0.1, 1.5)
 				break
@@ -385,25 +539,24 @@ local function updateCamera(dt: number)
 		length += (allowed - length) * (1 - math.exp(-dt * ARM_OUT_RATE))
 	end
 	armLength = length
-	if reach.Magnitude > 0.5 and length < reach.Magnitude then
-		current = pivot + reach.Unit * length
+	if reach.Magnitude > 0.5 and length < reach.Magnitude - 0.01 then
+		-- Pulled in by a wall or rock: crane up over your head rather than into it.
+		current = crane(pivot, reach.Unit, reach.Magnitude, length, head)
 	end
-	-- Thin props between the eye and the target fade too (a post right in front of the lens).
-	do
-		local line = theirs.Position - current
-		for _ = 1, 4 do
-			local hit = workspace:Raycast(current, line, probeParams)
-			local part = hit and hit.Instance
-			if not part or not part:IsA("BasePart") or not (part.Transparency >= 0.9 or isThin(part)) then
-				break
-			end
-			probeParams:AddToFilter(part)
-			if part.Transparency < 0.9 then
-				inShot[part] = true
-			end
-		end
+	-- The lagged lens trails a moving arm: keep it inside the ring and off your head too.
+	if arena then
+		current = fitArena(arena, pivot, current, head)
 	end
-	fadeProps(inShot, dt)
+	if (current - head).Magnitude < MIN_HEAD and (current - pivot).Magnitude > 0.5 then
+		local arm = current - pivot
+		current = crane(pivot, arm.Unit, arm.Magnitude, arm.Magnitude, head)
+	end
+	-- A shortened arm looks a little down toward you, so you stay in the shot.
+	local shown = Vector2.new(current.X - pivot.X, current.Z - pivot.Z).Magnitude
+	local short = math.clamp(1 - shown / math.max(fullArm, 1e-3), 0, 1)
+	if short > 0 then
+		focus = focus:Lerp(head, FOCUS_SELF * short)
+	end
 	local wantLook = (focus - current).Unit
 	local look = lookDir or wantLook
 	look = look:Lerp(wantLook, 1 - math.exp(-dt * settings.RotationLag))
