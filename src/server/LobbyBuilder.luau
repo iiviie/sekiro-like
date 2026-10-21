@@ -165,8 +165,21 @@ local pendingSeats: { () -> () } = {}
 -- that must stay clear there (a path, stair or bridge landing). A boulder is skipped when
 -- any part of it would reach into that clearance, not just when its centre is in the gap.
 type Gap = { angle: number, clear: number }
+-- A stretch of rim kept low (a row of knee-high stones rather than boulders): any boulder whose
+-- centre falls within `reach` studs of `at` (horizontally). The duel pads stand near the rim,
+-- and a full-size boulder there overlapped a pad and filled the camera behind it.
+type Low = { at: Vector3, reach: number }
+local LOW_ROCK = 5 -- radius of a low rim stone; it sits 3 below the rim's top (its top ~2 above)
 
-local function rimRocks(center: Vector3, radius: number, top: number, count: number, gaps: { Gap }, seed: number)
+local function rimRocks(
+	center: Vector3,
+	radius: number,
+	top: number,
+	count: number,
+	gaps: { Gap },
+	seed: number,
+	low: { Low }?
+)
 	local random = Random.new(seed)
 	for i = 1, count do
 		local angle = (i / count) * math.pi * 2 + random:NextNumber(-0.08, 0.08)
@@ -181,6 +194,15 @@ local function rimRocks(center: Vector3, radius: number, top: number, count: num
 			local r = radius - random:NextNumber(1, 4)
 			local size = random:NextNumber(5, 9)
 			local y = top - random:NextNumber(1, 4)
+			-- (The draws above are made either way, so the rest of the rim keeps its layout.)
+			for _, zone in low or {} do
+				local spot = Vector3.new(center.X + math.cos(angle) * r, zone.at.Y, center.Z + math.sin(angle) * r)
+				if (spot - zone.at).Magnitude < zone.reach then
+					r = radius - 1
+					size = math.min(size, LOW_ROCK)
+					y = top - 3
+				end
+			end
 			for _, gap in gaps do
 				local diff = math.abs((angle - gap.angle + math.pi) % (math.pi * 2) - math.pi)
 				-- Distance from the boulder's centre to the line the gap's path runs in on.
@@ -195,6 +217,49 @@ local function rimRocks(center: Vector3, radius: number, top: number, count: num
 					Enum.Material.Rock
 				)
 			end
+		end
+	end
+end
+
+-- An invisible wall along a stretch of rim (angles `from` to `to`, radians, at `radius` from
+-- `center`), standing from `bottom` to `top`: like the duel terraces' FenceWall, it keeps
+-- players on the island (a lock-on backpedal walked off the dojo wing) and never the camera
+-- (no queries). Left open across `gaps` (a bridge).
+local function rimWall(
+	parent: Instance,
+	center: Vector3,
+	radius: number,
+	from: number,
+	to: number,
+	bottom: number,
+	top: number,
+	gaps: { Gap }
+)
+	local segments = math.max(1, math.ceil((to - from) * radius / 4))
+	local step = (to - from) / segments
+	for i = 0, segments - 1 do
+		local a0, a1 = from + step * i, from + step * (i + 1)
+		local mid = (a0 + a1) / 2
+		local open = false
+		for _, gap in gaps do
+			local diff = math.abs((mid - gap.angle + math.pi) % (math.pi * 2) - math.pi)
+			if math.sin(math.min(diff, math.pi / 2)) * radius < gap.clear + 3 then
+				open = true
+			end
+		end
+		if not open then
+			local p0 =
+				Vector3.new(center.X + math.cos(a0) * radius, (bottom + top) / 2, center.Z + math.sin(a0) * radius)
+			local p1 =
+				Vector3.new(center.X + math.cos(a1) * radius, (bottom + top) / 2, center.Z + math.sin(a1) * radius)
+			part({
+				Name = "RimWall",
+				Size = Vector3.new(0.5, top - bottom, (p1 - p0).Magnitude + 0.5),
+				CFrame = CFrame.lookAt((p0 + p1) / 2, p1),
+				Transparency = 1,
+				CanQuery = false,
+				CastShadow = false,
+			}, parent)
 		end
 	end
 end
@@ -392,16 +457,24 @@ local function bossToriiSpot(): Vector2
 	return pad - away * BOSS_TORII_BACK
 end
 
+-- Where the main island's rim stays open: the bridges and the waterfalls.
+local MAIN_GAPS: { Gap } = {
+	{ angle = math.atan2(BRIDGE_LEFT.from.Y, BRIDGE_LEFT.from.X), clear = 5 },
+	{ angle = math.atan2(BRIDGE_BACK.from.Y, BRIDGE_BACK.from.X), clear = 5 },
+	{ angle = math.atan2(-36, 60), clear = 4 }, -- right waterfall
+	{ angle = math.atan2(-42, -56), clear = 4 }, -- left waterfall
+}
+-- The rim stays low around each pair of duel pads (see Low).
+local DUEL_RIM_REACH = 24
+
 local function landforms()
 	-- Main island (lower tier) with a lumpy rock rim, open where bridges and falls leave.
 	plateau(at(0, 0, 0), MAIN_RADIUS, O.Y, 26)
-	local gaps = {
-		{ angle = math.atan2(BRIDGE_LEFT.from.Y, BRIDGE_LEFT.from.X), clear = 5 },
-		{ angle = math.atan2(BRIDGE_BACK.from.Y, BRIDGE_BACK.from.X), clear = 5 },
-		{ angle = math.atan2(-36, 60), clear = 4 }, -- right waterfall
-		{ angle = math.atan2(-42, -56), clear = 4 }, -- left waterfall
-	}
-	rimRocks(at(0, 0, 0), MAIN_RADIUS, O.Y + 2, 44, gaps, 3)
+	local low: { Low } = {}
+	for _, ground in DUEL_GROUNDS do
+		table.insert(low, { at = at(ground.pads.X, LOWER, ground.pads.Y), reach = DUEL_RIM_REACH })
+	end
+	rimRocks(at(0, 0, 0), MAIN_RADIUS, O.Y + 2, 44, MAIN_GAPS, 3, low)
 	underside(at(0, 0, 0), MAIN_RADIUS, O.Y - 26, 44, 5)
 
 	-- Upper tier: the torii terrace, and two wings.
@@ -1222,6 +1295,33 @@ local function pedestal(parent: Instance, base: Vector3, faceToward: Vector3)
 end
 
 -- An open dojo pavilion: four lacquered posts and a tiled roof over a wooden deck.
+-- Edge stops on the main island's rim where you're likely to back off it without looking: the
+-- two wings (a lock-on backpedal at the deflect trainer walked straight off the dojo wing) and
+-- the low rim by the duel pads. Each stretch spans the wing or the pad pair and a margin.
+local RIM_WALL_RADIUS = MAIN_RADIUS - 2
+local RIM_WALL_SPAN = math.rad(22) -- either side of the wing's or the pad pair's bearing
+local function rimWalls(parent: Instance)
+	local bearings = {
+		math.atan2(-2, -48), -- the dojo wing
+		math.atan2(-2, 48), -- the hall of champions
+	}
+	for _, ground in DUEL_GROUNDS do
+		table.insert(bearings, math.atan2(ground.pads.Y, ground.pads.X))
+	end
+	for _, bearing in bearings do
+		rimWall(
+			parent,
+			at(0, 0, 0),
+			RIM_WALL_RADIUS,
+			bearing - RIM_WALL_SPAN,
+			bearing + RIM_WALL_SPAN,
+			O.Y - 6,
+			WING + 10,
+			MAIN_GAPS
+		)
+	end
+end
+
 local function pavilion(parent: Instance, center: Vector3, facing: Vector3)
 	local look = CFrame.lookAt(center, center + facing)
 	local w, d, h = 16, 10, 9
@@ -1361,6 +1461,7 @@ function LobbyBuilder.build(): Folder
 	lobby.Parent = workspace
 
 	landforms()
+	rimWalls(lobby)
 
 	-- Spawn plaza.
 	local spawnPoint = at(0, LOWER, 30)
