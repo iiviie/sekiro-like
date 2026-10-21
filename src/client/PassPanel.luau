@@ -34,8 +34,8 @@ local centeredOn: number? = nil
 local detail: string? = nil
 
 local T = UI.Theme
-local PREMIUM_TINT = T.Lacquer:Lerp(T.Gold, 0.18) -- the premium row's plates (gold-brown lacquer)
-local DONE_TINT = T.Lacquer:Lerp(T.Jade, 0.18) -- a finished mission's plate
+local PREMIUM_TINT = T.Plate:Lerp(T.Gold, 0.22) -- the premium row's plates (gold-brown lacquer)
+local DONE_TINT = T.Plate:Lerp(T.Jade, 0.25) -- a finished mission's plate
 local HEADER_H = 60
 local ROW2_Y = 68 -- tabs, Claim all and the tier skips (60 px tall: >= 45 pt on a phone)
 local CONTENT_Y = 136
@@ -508,7 +508,7 @@ local function trackView(body: Frame, size: Vector2, info: TextLabel?)
 		local label = UI.panel({
 			Name = `{name}Label`,
 			material = "inset",
-			tint = if isPremium then PREMIUM_TINT else T.Lacquer,
+			tint = if isPremium then PREMIUM_TINT else T.Plate,
 			Position = UDim2.fromOffset(0, y),
 			Size = UDim2.fromOffset(gutter - 8, cell),
 		}, body)
@@ -660,7 +660,7 @@ local function trackView(body: Frame, size: Vector2, info: TextLabel?)
 			local base = UI.panel({
 				Name = "Base",
 				material = "inset",
-				tint = if isPremium then PREMIUM_TINT else T.Lacquer,
+				tint = if isPremium then PREMIUM_TINT else T.Plate,
 				Size = UDim2.fromScale(1, 1),
 			}, card)
 			if not reached then
@@ -813,7 +813,7 @@ local function missionRow(parent: Instance, entry: any, height: number, order: n
 	local row = UI.panel({
 		Name = m.id,
 		material = "inset",
-		tint = if done then DONE_TINT else T.Lacquer,
+		tint = if done then DONE_TINT else T.Plate,
 		Size = UDim2.new(1, -6, 0, height),
 		LayoutOrder = order,
 	}, parent)

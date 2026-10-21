@@ -36,6 +36,7 @@ UI.Theme = {
 	Ink = rgb(26, 23, 24),
 	Lacquer = rgb(36, 30, 32),
 	LacquerHi = rgb(52, 43, 45),
+	Plate = rgb(74, 62, 63), -- inset plate tint (rows, chips, cards on a lacquer window)
 	Bone = rgb(237, 227, 207),
 	Washi = rgb(230, 218, 192),
 	Dim = rgb(168, 159, 146),
@@ -277,7 +278,7 @@ end
 local MATERIAL = {
 	lacquer = { key = "PanelLacquer", scale = 0.5, fill = T.LacquerHi, edge = T.Gold, edgeT = 0.35, corner = 6 },
 	plain = { key = "PanelPlain", scale = 0.5, fill = T.LacquerHi, edge = T.Bronze, edgeT = 0.25, corner = 6 },
-	inset = { key = "PanelInset", scale = 0.5, fill = T.LacquerHi, edge = rgb(90, 74, 60), edgeT = 0.2, corner = 4 },
+	inset = { key = "PanelInset", scale = 0.5, fill = T.Plate, edge = rgb(90, 74, 60), edgeT = 0.2, corner = 4 },
 	washi = { key = "PanelWashi", scale = 1, fill = T.Washi, edge = T.Bronze, edgeT = 0.1, corner = 3 },
 	button = { key = "ButtonBase", scale = 1, fill = T.LacquerHi, edge = T.Ink, edgeT = 0, corner = 5 },
 	pill = { key = "Pill", scale = 1, fill = T.Ink, edge = T.Gold, edgeT = 0.45, corner = -1 },
@@ -393,6 +394,14 @@ end
 function UI.stroke(parent: Instance, color: Color3?, thickness: number?, transparency: number?)
 	if parent:GetAttribute("Skinned") then
 		if color == nil or color == UI.Bronze then
+			return
+		end
+		-- Lacquer and washi art carry their own gold or bronze rim.
+		local material = parent:GetAttribute("Material")
+		if
+			parent:GetAttribute("ArtMode") == true
+			and (material == "lacquer" or material == "plain" or material == "washi")
+		then
 			return
 		end
 		local edge = parent:FindFirstChild("_Edge")
@@ -1967,7 +1976,7 @@ function UI.card(props: CardProps, parent: Instance?): TextButton
 	local base = UI.panel({
 		Name = "Base",
 		material = "inset",
-		tint = if props.selected then rgb(70, 54, 42) else T.Lacquer,
+		tint = if props.selected then rgb(92, 70, 52) else T.Plate,
 		Size = UDim2.fromScale(1, 1),
 	}, card)
 	UI.rarityGlow(base, props.rarity, 1)
