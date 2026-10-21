@@ -365,7 +365,21 @@ local function publish(player: Player, d: Data)
 	end
 	if premium and not st.premiumSeen then
 		st.premiumSeen = true
-		tell(player, "PassPremium", { claimable = claimable })
+		if claimable > 0 then
+			tell(player, "PassPremium", { claimable = claimable })
+		else
+			-- Bought before tier 1: nothing to claim yet, so say what comes first and how far.
+			local def = Season.get(st.season)
+			local entry = def and def.tiers[tier + 1]
+			local first = entry and entry.premium[1]
+			local away = (tier + 1) * Season.TierXP - d.PassXP
+			notice(
+				player,
+				if first
+					then `Premium unlocked  ·  {Season.rewardText(first, itemName)} waits at tier {tier + 1}, {away} Pass XP away`
+					else "Premium unlocked"
+			)
+		end
 	end
 	local function missions(ids: { string }, progress: { [string]: number })
 		local out = {}
