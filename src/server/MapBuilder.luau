@@ -534,20 +534,34 @@ local function fallingLeaves(parent: Instance)
 end
 
 -- A few weathered boulders in the courtyard: cover to break line-of-sight in the ring.
--- Sandstone rather than rock: terrain rock reads lilac and mossy on the pale sand at midday.
--- Narrow (radius 3-3.5) and raised so they still stand about chest high (the 4-stud voxels
--- shave a small ball's top): cover the camera sees over instead of a wall it pulls in behind.
-local function boulders()
-	local t = workspace.Terrain
-	local spots = {
-		{ Vector3.new(-34, 1.6, 22), 3.4 },
-		{ Vector3.new(38, 1.5, -18), 3.5 },
-		{ Vector3.new(12, 1.9, 40), 3 },
-		{ Vector3.new(-26, 1.7, -38), 3.2 },
-	}
-	for _, spot in spots do
-		t:FillBall(spot[1], spot[2], Enum.Material.Sandstone)
-		t:FillBall(spot[1] + Vector3.new(spot[2] * 0.7, -0.8, 0.4), spot[2] * 0.55, Enum.Material.Sandstone)
+-- Low and wide (about chest high, 8 studs across), so the camera sees over them instead of
+-- pulling in behind a wall. Stone balls sunk into the sand, a big one and a smaller one leaning
+-- on it: a small terrain ball comes out of the 4-stud voxels as a cone, not a rounded stone.
+-- Sandstone tinted Palette.Rock (terrain rock reads lilac and mossy on the pale sand).
+local BOULDERS = {
+	-- centre on the floor, diameter of the main stone, bearing of the smaller one (degrees)
+	{ Vector3.new(-34, FLOOR_Y, 22), 8.4, 30 },
+	{ Vector3.new(38, FLOOR_Y, -18), 8.6, 200 },
+	{ Vector3.new(12, FLOOR_Y, 40), 7.6, 110 },
+	{ Vector3.new(-26, FLOOR_Y, -38), 8, 290 },
+}
+local function boulders(parent: Instance)
+	for i, spec in BOULDERS do
+		local base, size, bearing = spec[1], spec[2], math.rad(spec[3])
+		local side = Vector3.new(math.cos(bearing), 0, math.sin(bearing))
+		-- (offset from the main stone's foot, diameter, depth sunk below the floor as a share of it)
+		for j, stone in { { Vector3.zero, size, 0.53 }, { side * size * 0.5, size * 0.62, 0.55 } } do
+			local d = stone[2]
+			part({
+				Name = "Boulder",
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.one * d,
+				CFrame = CFrame.new(base + stone[1] + Vector3.new(0, d * (0.5 - stone[3]), 0))
+					* CFrame.Angles(0, math.rad(i * 71 + j * 23), math.rad(j * 17)),
+				Material = Enum.Material.Sandstone,
+				Color = Palette.Rock,
+			}, parent)
+		end
 	end
 end
 
@@ -593,7 +607,6 @@ end
 
 function MapBuilder.build()
 	terrain()
-	boulders()
 	EnvironmentProfile.dressProps()
 	task.wait() -- terrain filled this frame isn't hit by raycasts until the next
 	seatProps()
@@ -606,6 +619,7 @@ function MapBuilder.build()
 	local map = Instance.new("Folder")
 	map.Name = "Castle"
 	walls(map)
+	boulders(map)
 	shrine(map)
 	duelCircle(map)
 	banners(map)
