@@ -17,6 +17,17 @@ local TitleScreen = require(script.TitleScreen)
 local Toasts = require(script.Toasts)
 local TrainerReadout = require(script.TrainerReadout)
 
+-- Owner-only profile fields (server/StatsService.setPrivate) become local attributes on the
+-- LocalPlayer, so the panels read them like the replicated ones.
+local localPlayer = game:GetService("Players").LocalPlayer
+local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+local profilePrivate = remotes:WaitForChild("ProfilePrivate") :: RemoteEvent
+profilePrivate.OnClientEvent:Connect(function(name: unknown, value: unknown)
+	if typeof(name) == "string" then
+		localPlayer:SetAttribute(name, value)
+	end
+end)
+
 Audio.start()
 Motion.start()
 Movement.start()

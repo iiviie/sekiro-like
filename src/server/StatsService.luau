@@ -172,6 +172,9 @@ local saving: { [Player]: boolean } = {}
 local changedListeners: { (Player) -> () } = {}
 local publishHooks: { (Player, Data) -> () } = {}
 local loadedListeners: { (Player, Data) -> () } = {}
+local queued: { [Player]: boolean } = {} -- a deferred publish is pending (see `republish`)
+local privateSent: { [Player]: { [string]: any } } = {} -- what `setPrivate` last sent the owner
+local privateRemote: RemoteEvent? = nil
 
 -- In-memory DataStore for Studio: values are JSON round-tripped like the real thing.
 local function memoryStore(): Store
@@ -420,13 +423,38 @@ local function refOf(d: Data, slot: string): string
 	return if item then item.ref else ""
 end
 
-local function publish(player: Player)
-	local d = data[player]
-	if not d then
+-- Sets a replicated attribute only when it changed.
+local function put(player: Player, name: string, value: any)
+	if player:GetAttribute(name) ~= value then
+		player:SetAttribute(name, value)
+	end
+end
+
+-- Sends a profile field to its owner only (Remotes.ProfilePrivate; client/init sets it as a
+-- local attribute on the LocalPlayer, so the panels read it like any other attribute). For the
+-- large per-player blobs no other client needs: player attributes replicate to everyone.
+local function setPrivate(player: Player, name: string, value: any)
+	local remote = privateRemote
+	if not remote then
 		return
 	end
+	local sent = privateSent[player]
+	if not sent then
+		sent = {}
+		privateSent[player] = sent
+	end
+	if sent[name] == value then
+		return
+	end
+	sent[name] = value
+	remote:FireClient(player, name, value)
+end
+
+-- The cheap public attributes other code reads straight after a change (Weapon, Skin, the
+-- wallet): written at once.
+local function publishCore(player: Player, d: Data)
 	for _, field in NUMBERS do
-		player:SetAttribute(field, (d :: any)[field])
+		put(player, field, (d :: any)[field])
 	end
 	-- Owned catalogue items (unknown ids stay saved but aren't shown).
 	local owned = {}
@@ -436,25 +464,18 @@ local function publish(player: Player)
 		end
 	end
 	table.sort(owned)
-	player:SetAttribute("Inventory", table.concat(owned, ","))
-	player:SetAttribute("Loadout", HttpService:JSONEncode(d.Loadout))
-	player:SetAttribute("LineLevels", HttpService:JSONEncode(d.LineLevels))
+	put(player, "Inventory", table.concat(owned, ","))
+	put(player, "Loadout", HttpService:JSONEncode(d.Loadout))
+	put(player, "LineLevels", HttpService:JSONEncode(d.LineLevels))
 	-- The runtime keys the rig, combat and older panels read.
-	player:SetAttribute("Weapon", refOf(d, "weapon"))
-	player:SetAttribute("Skin", refOf(d, "bladeSkin"))
-	player:SetAttribute("OwnedWeapons", joinedRefs(d, "weapon"))
-	player:SetAttribute("OwnedSkins", joinedRefs(d, "bladeSkin"))
-	player:SetAttribute("WeaponUses", HttpService:JSONEncode(d.WeaponUses))
-	player:SetAttribute("XPToNext", Progression.xpToNext(d.Level))
-	player:SetAttribute("TrialProgress", HttpService:JSONEncode(d.TrialProgress))
-	player:SetAttribute("BossClears", HttpService:JSONEncode(d.BossClears))
-	player:SetAttribute("BossNoHit", HttpService:JSONEncode(d.BossNoHit))
-	player:SetAttribute("DataLoaded", loaded[player] == true)
-	player:SetAttribute("DataFailed", failed[player] ~= nil)
-	player:SetAttribute("DataError", failed[player])
-	for _, hook in publishHooks do
-		hook(player, d)
-	end
+	put(player, "Weapon", refOf(d, "weapon"))
+	put(player, "Skin", refOf(d, "bladeSkin"))
+	put(player, "OwnedWeapons", joinedRefs(d, "weapon"))
+	put(player, "OwnedSkins", joinedRefs(d, "bladeSkin"))
+	put(player, "XPToNext", Progression.xpToNext(d.Level))
+	put(player, "DataLoaded", loaded[player] == true)
+	put(player, "DataFailed", failed[player] ~= nil)
+	put(player, "DataError", failed[player])
 
 	local stats = player:FindFirstChild("leaderstats")
 	if stats then
@@ -465,9 +486,54 @@ local function publish(player: Player)
 			end
 		end
 	end
+end
+
+-- The owner-only blobs, the publish hooks (unlock progress walks the whole catalogue) and the
+-- change listeners.
+local function publishRest(player: Player, d: Data)
+	setPrivate(player, "WeaponUses", HttpService:JSONEncode(d.WeaponUses))
+	setPrivate(player, "TrialProgress", HttpService:JSONEncode(d.TrialProgress))
+	setPrivate(player, "BossClears", HttpService:JSONEncode(d.BossClears))
+	setPrivate(player, "BossNoHit", HttpService:JSONEncode(d.BossNoHit))
+	for _, hook in publishHooks do
+		hook(player, d)
+	end
 	for _, listener in changedListeners do
 		task.spawn(listener, player)
 	end
+end
+
+local function publish(player: Player)
+	local d = data[player]
+	if not d then
+		return
+	end
+	queued[player] = nil
+	publishCore(player, d)
+	publishRest(player, d)
+end
+
+-- A change: the core attributes now, the rest once per player at the end of this frame's
+-- step, so a burst of grants (a round's end pays 8-10 of them) publishes once.
+local function republish(player: Player)
+	local d = data[player]
+	if not d then
+		return
+	end
+	publishCore(player, d)
+	if queued[player] then
+		return
+	end
+	queued[player] = true
+	task.defer(function()
+		if queued[player] then
+			queued[player] = nil
+			local now = data[player]
+			if now and player.Parent then
+				publishRest(player, now)
+			end
+		end
+	end)
 end
 
 -- Writes the profile, refreshing the lock (or releasing it). Returns true once the write has
@@ -651,7 +717,13 @@ end
 
 -- Republishes after a caller changed the table returned by `get` directly.
 function StatsService.commit(player: Player)
-	publish(player)
+	republish(player)
+end
+
+-- Sends `value` (a string or number) to `player`'s client only, as a local attribute `name` on
+-- their Player. For per-player data no other client needs (unlock progress, missions).
+function StatsService.setPrivate(player: Player, name: string, value: any)
+	setPrivate(player, name, value)
 end
 
 -- Saves now and returns true once the write has committed (Monetization grants on this).
@@ -684,7 +756,7 @@ function StatsService.add(player: Player, field: string, amount: number)
 	local d = data[player]
 	if d and typeof((d :: any)[field]) == "number" then
 		(d :: any)[field] += amount
-		publish(player)
+		republish(player)
 	end
 end
 
@@ -708,7 +780,7 @@ function StatsService.recordNoHit(player: Player, bossId: string)
 	local d = data[player]
 	if d then
 		d.BossNoHit[bossId] = (d.BossNoHit[bossId] or 0) + 1
-		publish(player)
+		republish(player)
 	end
 end
 
@@ -753,7 +825,7 @@ function StatsService.recordMatch(placements: { Player }, weapons: { [Player]: s
 			if weapon then
 				d.WeaponUses[weapon] = (d.WeaponUses[weapon] or 0) + 1
 			end
-			publish(player)
+			republish(player)
 		end
 	end
 end
@@ -824,7 +896,7 @@ function StatsService.recordDuel(winner: Player?, loser: Player?, weapons: { [Pl
 		if weapon then
 			d.WeaponUses[weapon] = (d.WeaponUses[weapon] or 0) + 1
 		end
-		publish(player)
+		republish(player)
 	end
 	count(winner, dw, true)
 	count(loser, dl, false)
@@ -908,6 +980,10 @@ function StatsService.start()
 		legacyStore = nil
 	end
 	ReplicatedStorage:SetAttribute("SaveMode", if storeIsReal then "DataStore" elseif store then "Memory" else "None")
+	local remote = Instance.new("RemoteEvent")
+	remote.Name = "ProfilePrivate"
+	remote.Parent = ReplicatedStorage:WaitForChild("Remotes")
+	privateRemote = remote
 
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do
@@ -920,6 +996,8 @@ function StatsService.start()
 		failed[player] = nil
 		tainted[player] = nil
 		duelBefore[player] = nil
+		queued[player] = nil
+		privateSent[player] = nil
 	end)
 	game:BindToClose(function()
 		local pending = 0

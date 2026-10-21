@@ -522,7 +522,7 @@ local function publishDerived(player: Player, d: Data)
 			unlocks[item.id] = { math.min(have, need), need }
 		end
 	end
-	player:SetAttribute("UnlockProgress", HttpService:JSONEncode(unlocks))
+	StatsService.setPrivate(player, "UnlockProgress", HttpService:JSONEncode(unlocks)) -- owner only
 	local onOffer, ends = Economy.initiateOffer(player)
 	player:SetAttribute("InitiateEndsAt", if onOffer then ends else 0)
 	player:SetAttribute("CanTransact", StatsService.canTransact(player))

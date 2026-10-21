@@ -39,7 +39,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
-local HttpService = game:GetService("HttpService")
 
 local Bosses = require(ReplicatedStorage.Shared.Bosses)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
@@ -761,16 +760,8 @@ end
 -- The shrine pad and the picker
 
 local function pickList(player: Player): { { [string]: any } }
-	local clears = {}
-	local raw = player:GetAttribute("BossClears")
-	if typeof(raw) == "string" then
-		local ok, decoded = pcall(function()
-			return HttpService:JSONDecode(raw)
-		end)
-		if ok and typeof(decoded) == "table" then
-			clears = decoded
-		end
-	end
+	local d = StatsService.get(player)
+	local clears: { [string]: number } = if d then d.BossClears else {} -- (an owner-only attribute now)
 	local list = {}
 	for _, id in Bosses.List do
 		local def = Bosses.def(id) :: Bosses.BossDef

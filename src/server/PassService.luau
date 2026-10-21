@@ -395,8 +395,14 @@ local function publish(player: Player, d: Data)
 	player:SetAttribute("PassPremium", premium)
 	player:SetAttribute("PassClaimable", claimable)
 	player:SetAttribute("PassTierSkips", d.PassTierSkips)
-	player:SetAttribute("PassClaimed", HttpService:JSONEncode({ free = listOf(st.free), premium = listOf(st.premium) }))
-	player:SetAttribute(
+	-- Owner-only blobs (StatsService.setPrivate): no other client reads them.
+	StatsService.setPrivate(
+		player,
+		"PassClaimed",
+		HttpService:JSONEncode({ free = listOf(st.free), premium = listOf(st.premium) })
+	)
+	StatsService.setPrivate(
+		player,
 		"Missions",
 		HttpService:JSONEncode({
 			daily = missions(st.daily.ids, d.TrialProgress),
@@ -408,7 +414,7 @@ local function publish(player: Player, d: Data)
 	-- The legacy daily-Trials attributes, now today's daily missions.
 	player:SetAttribute("Trials", table.concat(st.daily.ids, ","))
 	player:SetAttribute("TrialDay", d.TrialDay)
-	player:SetAttribute("TrialProgress", HttpService:JSONEncode(d.TrialProgress))
+	StatsService.setPrivate(player, "TrialProgress", HttpService:JSONEncode(d.TrialProgress))
 end
 
 --------------------------------------------------------------------------------------------
