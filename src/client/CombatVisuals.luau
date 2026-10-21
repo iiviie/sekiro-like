@@ -4,6 +4,7 @@
 -- Nothing here affects outcomes.
 
 local CollectionService = game:GetService("CollectionService")
+local ContentProvider = game:GetService("ContentProvider")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -2156,6 +2157,19 @@ end
 
 function CombatVisuals.start()
 	Animator.start()
+	-- The textures of the first glint, 危, deflect and deathblow, so a slow phone doesn't draw
+	-- the first one blank (the glint is a timing cue). Not blocking; sounds preload in Audio.
+	task.spawn(function()
+		local images = {}
+		for _, id in { Assets.UI.Glow, Assets.UI.KanjiPeril, Assets.UI.KanjiDeath, Assets.Cosmetics.InkSplats } do
+			local image = Instance.new("ImageLabel")
+			image.Image = id
+			table.insert(images, image)
+		end
+		pcall(function()
+			ContentProvider:PreloadAsync(images)
+		end)
+	end)
 	CosmeticFX.init({
 		flare = flare,
 		burst = burst,
