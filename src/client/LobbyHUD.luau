@@ -12,7 +12,12 @@
 -- Also: the lobby's Store and Season boards open their panels (ProximityPrompt or click),
 -- and the one contextual offer: after your first level-up or first loss, a small card
 -- for the Initiate's Bundle, once per account (only the first of the two can trigger it:
--- a level-up shows it only with no losses yet, a loss only at level 1).
+-- a level-up shows it only with no losses yet, a loss only at level 1). It waits for the
+-- second lobby visit after that fight, never the one straight after it.
+--
+-- A brand-new player (Played 0, not queued) starts here, not in a match: PLAY gets a calm,
+-- slow glow and a one-line Coach-style plate beside it, "Your first fight". No pop-up; both
+-- go the moment they queue.
 
 local Players = game:GetService("Players")
 local SocialService = game:GetService("SocialService")
@@ -68,6 +73,8 @@ local storeBadge: GuiObject
 local passBadge: GuiObject?
 local playButton: TextButton
 local playSwipe: ImageLabel
+local playGlow: ImageLabel -- the first-visit glow behind PLAY
+local firstHint: Frame -- "Your first fight", beside PLAY on a first visit
 local playSub: TextLabel
 local playSubStrip: Frame
 local leaveButton: TextButton
@@ -115,6 +122,8 @@ local CELL = HUD.NavCell
 local RAIL_TOP = 76 -- under the Mastery plate
 local RAIL_GAP = 2
 local JUMP_CLEAR = 170 -- a phone's jump button owns the bottom-right ~120 pt (156 at 0.77)
+-- The first-visit glow's breath: 2.4 s each way, slower than the queued swipe's pulse.
+local FIRST_BREATH = TweenInfo.new(2.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 
 local function badge(parent: Instance): GuiObject
 	local seal = UI.badge(parent, "new", 20)
@@ -166,6 +175,16 @@ local function applyLayout()
 	leaveButton.Size = UDim2.fromOffset(130, subH)
 	playButton.Position = UDim2.fromScale(0.5, 1)
 	playSwipe.Position = UDim2.new(0.5, 0, 1, -HUD.Play.Y / 2)
+	playGlow.Position = playSwipe.Position
+	-- The first-fight plate: left of PLAY on a wide screen (low in the corner, clear of the
+	-- character); on a phone, where left of PLAY is the middle of the view, over the cluster.
+	if compact then
+		firstHint.AnchorPoint = Vector2.new(1, 1)
+		firstHint.Position = UDim2.new(1, 0, 0, -8)
+	else
+		firstHint.AnchorPoint = Vector2.new(1, 0.5)
+		firstHint.Position = UDim2.new(0, -18, 1, -HUD.Play.Y / 2)
+	end
 
 	-- The "+" next to the gems: a touch-sized hit area around a small disc.
 	addGems.Size = UDim2.fromOffset(if touch then UI.Touch else 44, if touch then UI.Touch else 44)
@@ -364,6 +383,18 @@ local function build()
 		Size = UDim2.fromOffset(HUD.Play.X, 160),
 		BackgroundTransparency = 1,
 	}, bottom)
+	-- A soft warm glow behind the swipe, only on a brand-new player's first visit.
+	playGlow = UI.new("ImageLabel", {
+		Name = "FirstGlow",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(HUD.Play.X + 110, HUD.Play.Y + 80),
+		BackgroundTransparency = 1,
+		Image = Assets.UI.Glow,
+		ImageColor3 = UI.Theme.GoldHi,
+		ImageTransparency = 1,
+		Visible = false,
+		ZIndex = 0,
+	}, playCluster)
 	playSwipe = UI.brush(playCluster, "swipe", {
 		Name = "PlaySwipe",
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -405,6 +436,27 @@ local function build()
 	playButton.Activated:Connect(function()
 		lobbyAction:FireServer("Queue", player:GetAttribute("Queued") ~= true)
 	end)
+	-- The first-fight hint: the Coach's tip plate (small plain plate, gold Display text), one
+	-- line, beside PLAY. Not a button and not a pop-up.
+	firstHint = UI.panel({
+		Name = "FirstFight",
+		material = "plain",
+		sliceScale = 0.4,
+		Size = UDim2.fromOffset(0, 40),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Visible = false,
+	}, playCluster)
+	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16) }, firstHint)
+	UI.text({
+		Name = "Text",
+		Size = UDim2.fromScale(0, 1),
+		AutomaticSize = Enum.AutomaticSize.X,
+		FontFace = UI.Fonts.Display,
+		TextSize = 17,
+		TextColor3 = UI.Theme.GoldHi,
+		Text = "Your first fight",
+		ZIndex = 2,
+	}, firstHint)
 	leaveButton = UI.tertiary({
 		Name = "LeaveQueue",
 		AnchorPoint = Vector2.new(1, 0.5),
@@ -571,11 +623,12 @@ end
 
 local lastCoins, lastGems, lastStones = -1, -1, -1
 
--- "QUEUED · 0:04" while the royale counts down.
+-- "QUEUED · 0:04" while the royale counts down: rounded down, as RoundHUD's "ROYALE IN 0:04"
+-- is, so the two clocks agree.
 local function queueLabel(): string
 	local state = Round.state()
 	if state:GetAttribute("Waiting") == false and Round.phase() == "Intermission" then
-		local left = math.max(0, math.ceil(Round.endsAt() - workspace:GetServerTimeNow()))
+		local left = math.max(0, math.floor(Round.endsAt() - workspace:GetServerTimeNow()))
 		return string.format("QUEUED · %d:%02d", left // 60, left % 60)
 	end
 	return "QUEUED"
@@ -628,8 +681,30 @@ function refresh()
 			tween.Parent = playSwipe
 		end
 	end
-	-- The line over PLAY says only what the round banner doesn't.
+	-- A brand-new player, not queued: the calm first-visit glow and the "Your first fight"
+	-- plate. A slow breath (4.8 s a cycle), no countdown; still under reduced motion.
 	local duelState = player:GetAttribute("DuelState")
+	local firstVisit = player:GetAttribute("DataLoaded") == true
+		and player:GetAttribute("Played") == 0
+		and not queued
+		and duelState ~= "Waiting"
+	if firstVisit ~= playGlow.Visible then
+		playGlow.Visible = firstVisit
+		firstHint.Visible = firstVisit
+		local existing = playGlow:FindFirstChild("BreathTween")
+		if existing then
+			existing:Destroy()
+		end
+		if firstVisit then
+			playGlow.ImageTransparency = 0.55
+			if not UI.reducedMotion() then
+				local tween = UI.play(playGlow, FIRST_BREATH, { ImageTransparency = 0.85 })
+				tween.Name = "BreathTween"
+				tween.Parent = playGlow
+			end
+		end
+	end
+	-- The line over PLAY says only what the round banner doesn't.
 	local sub = if duelState == "Waiting"
 		then "On a duel pad: the royale skips you"
 		elseif queued and touch then "Tap QUEUED to leave"
@@ -667,6 +742,9 @@ end
 
 local pickerOpen = false -- the boss picker is a modal window: the HUD steps aside under it
 local dismissOffer: () -> ()
+local wasFighting = false -- the character was in a match or duel at the last check
+local lobbyVisits = 0 -- returns to the lobby from a fight this session
+local offerVisit = math.huge -- the lobby visit the offer card may show on
 
 local function refreshVisibility()
 	local character = player.Character
@@ -677,7 +755,19 @@ local function refreshVisibility()
 	-- The large panels (Store, Locker, Pass) and the boss picker take the screen: the HUD
 	-- steps aside under them.
 	screen.Enabled = visible and not Panels.isLarge() and not pickerOpen
+	-- On a phone or touch tablet a normal panel is centred over PLAY and the pills: they step
+	-- aside under it; the rail stays (it shows which panel is open and switches with one tap).
+	local covered = compact and Panels.isOpen()
+	playCluster.Visible = not covered
+	top.Visible = not covered
 	CombatHUD.setLobbyMode(inLobby)
+	-- Count the lobby visits after a fight (the offer card waits for the second one).
+	if inLobby and wasFighting then
+		lobbyVisits += 1
+	end
+	if character then
+		wasFighting = not inLobby
+	end
 	if not visible then
 		Panels.closeAll()
 		-- A fight starting takes the offer card with it; it doesn't wait behind the HUD.
@@ -691,8 +781,9 @@ end
 ---------------------------------------------------------------------------------------
 -- The one contextual offer: after the first level-up or the first loss (whichever comes
 -- first, so once per account), a small dismissible card for the Initiate's Bundle while it
--- is on offer. It waits for a calm lobby moment: no panel, match report, podium or Coach
--- tip on screen, and not a royale about to start. It sits on the right edge, goes away by
+-- is on offer. It waits for the second lobby visit after that fight (the first one belongs
+-- to what was earned), then for a calm lobby moment: no panel, match report, podium, Coach
+-- tip or NEW item card on screen, and not a royale about to start. It sits on the right edge, goes away by
 -- itself after a while, and is never shown on a phone (the chip is).
 
 local OFFER_LIFE = 15
@@ -722,6 +813,11 @@ local function busy(): boolean
 	local coach = gui and gui:FindFirstChild("Coach")
 	local tip = coach and coach:FindFirstChild("Tip")
 	if tip and tip:IsA("GuiObject") and tip.Visible then
+		return true
+	end
+	-- An earned NEW item card (client/NewItems) has the moment.
+	local newItems = gui and gui:FindFirstChild("NewItems")
+	if newItems and newItems:FindFirstChild("NewItem") then
 		return true
 	end
 	-- Queued with the royale about to start: the card would only flash up and vanish.
@@ -831,7 +927,7 @@ function LobbyHUD.offerCheck()
 			if compact or not StoreUI.initiateOpen() then
 				break
 			end
-			calm = if busy() then 0 else calm + 1
+			calm = if busy() or lobbyVisits < offerVisit then 0 else calm + 1
 			if calm >= 4 then
 				showOfferCard()
 				break
@@ -854,8 +950,14 @@ local function watchMilestones()
 	if lastLevel and lastLosses and not offerShown then
 		local firstLevelUp = lastLevel <= 1 and level >= 2 and losses == 0
 		local firstLoss = lastLosses == 0 and losses >= 1 and lastLevel <= 1
-		if firstLevelUp or firstLoss then
+		if (firstLevelUp or firstLoss) and not offerPending then
 			offerPending = true
+			-- The second lobby visit after this fight: if the result arrived after the return,
+			-- the visit under way is the first.
+			local character = player.Character
+			local fighting = character ~= nil
+				and (character:GetAttribute("InMatch") == true or character:GetAttribute("InDuel") == true)
+			offerVisit = lobbyVisits + (if fighting then 2 else 1)
 		end
 	end
 	lastLevel, lastLosses = level, losses
@@ -911,8 +1013,9 @@ LobbyHUD.entered = false -- set once the title card is dismissed
 function LobbyHUD.setEntered()
 	LobbyHUD.entered = true
 	refreshVisibility()
-	-- No rules screen before the first fight: new players are queued straight into a match
-	-- against novice bots, and the fight itself teaches the deflect (CombatHUD prompts).
+	-- No rules screen before the first fight: a new player starts unqueued in the lobby with
+	-- PLAY glowing softly (refresh), fights novice bots, and the fight itself teaches the
+	-- deflect (CombatHUD prompts).
 end
 
 function LobbyHUD.start()
@@ -941,14 +1044,15 @@ function LobbyHUD.start()
 	player.AttributeChanged:Connect(watchMilestones)
 	watchMilestones()
 	task.spawn(watchBoards)
-	-- The offer chip counts down in hours: refresh it now and then; the queue label every
-	-- second while queued.
+	-- The offer chip counts down in hours: refresh it now and then; the queue label four
+	-- times a second while queued (RoundHUD's banner ticks at the same rate, so the two never
+	-- show different seconds).
 	task.spawn(function()
 		local n = 0
 		while true do
-			task.wait(1)
+			task.wait(0.25)
 			n += 1
-			if n % 30 == 0 then
+			if n % 120 == 0 then
 				refresh()
 			elseif player:GetAttribute("Queued") == true then
 				playButton.Text = queueLabel()
