@@ -55,32 +55,43 @@ local lobbyAction = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Lobb
 local LobbyHUD = {}
 
 local screen: ScreenGui
-local coinsLabel: TextLabel
-local gemsLabel: TextLabel
-local stonesLabel: TextLabel
+local coinsPill: UI.Pill
+local gemsPill: UI.Pill
+local stonesPill: UI.Pill
+local top: Frame
 local offerChip: TextButton
 local offerText: TextLabel
-local storeBadge: Frame
-local passBadge: Frame?
+local storeBadge: GuiObject
+local passBadge: GuiObject?
 local playButton: TextButton
+local playSwipe: ImageLabel
 local playSub: TextLabel
+local playSubStrip: Frame
+local leaveButton: TextButton
 local pvpButton: TextButton
-local rewardsBadge: Frame
-local trialsBadge: Frame?
+local pvpPip: Frame
+local rewardsBadge: GuiObject
+local trialsBadge: GuiObject?
 local levelLabel: TextLabel
-local xpFill: Frame
-local xpText: TextLabel
+local xpBar: UI.Progress
 local saveNotice: TextLabel
 
 local inviteButton: TextButton
 local bottom: Frame
+local playCluster: Frame
+local nav: ScrollingFrame
+local navPlate: Frame
+local navLayout: UIListLayout
+local navItems: { [string]: TextButton } = {}
 local trialsSeen = false -- the Trials badge shows until the panel is opened once
+local compact = false -- phone layout: nav rail on the left, PLAY on the right
 
 local ICONS = Assets.Icons
 local PASS_ICON = (PassPanel and PassPanel.Icon) or (ICONS :: any).SeasonPass or Assets.RankCrests.Gold
+local LOCKER_ICON = ((ICONS :: any).Tabs and (ICONS :: any).Tabs.Outfits) or ICONS.Weapons
 local NAV = {
-	{ id = "Guide", icon = ICONS.Guide, label = "How to fight" },
-	{ id = "Locker", icon = ICONS.Weapons, label = "Locker" },
+	{ id = "Guide", icon = ICONS.Guide, label = "Guide" },
+	{ id = "Locker", icon = LOCKER_ICON, label = "Locker" },
 	if PassPanel
 		then { id = "Pass", icon = PASS_ICON, label = "Pass" }
 		else { id = "Trials", icon = ICONS.Trials, label = "Trials" },
@@ -90,48 +101,100 @@ local NAV = {
 	{ id = "Settings", icon = ICONS.Settings, label = "Settings" },
 }
 
-local function badge(parent: Instance): Frame
-	local dot = UI.new("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(1, -6, 0, 6),
-		Size = UDim2.fromOffset(16, 16),
-		BackgroundColor3 = UI.Crimson,
-		BorderSizePixel = 0,
-		Visible = false,
-		ZIndex = 3,
-	}, parent)
-	UI.corner(dot, UDim.new(1, 0))
-	UI.stroke(dot, UI.Parchment, 1.5, 0)
-	return dot
-end
+-- Nav geometry at scale 1: desktop bar items (icon over label) and phone rail items.
+local BAR_ITEM = Vector2.new(92, 92)
+local RAIL_ITEM = Vector2.new(76, 70)
 
-local function currencyPill(parent: Instance, order: number, color: Color3, icon: string, width: number?): TextLabel
-	local pill = UI.panel({
-		Size = UDim2.fromOffset(width or 170, 40),
-		LayoutOrder = order,
-		BackgroundColor3 = UI.Ink,
-		BackgroundTransparency = 0.15,
-	}, parent)
-	UI.new("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Size = UDim2.fromOffset(46, 46),
-		Position = UDim2.fromOffset(20, 20),
-		BackgroundTransparency = 1,
-		Image = icon,
-		ZIndex = 2,
-	}, pill)
-	return UI.text({
-		Size = UDim2.new(1, -52, 1, 0),
-		Position = UDim2.fromOffset(48, 0),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = UI.Bold,
-		TextSize = 22,
-		TextColor3 = color,
-		Text = "0",
-	}, pill)
+local function badge(parent: Instance): GuiObject
+	local seal = UI.badge(parent, "new", 26)
+	seal.Position = UDim2.new(1, -16, 0, 4)
+	seal.Visible = false
+	return seal
 end
 
 local refresh: () -> ()
+
+-- Lays the HUD out for the screen: the bottom bar on desktop and console, the left rail
+-- and right-hand PLAY on phones (clear of the thumbstick and the jump button).
+local function applyLayout()
+	local viewport = workspace.CurrentCamera.ViewportSize
+	compact = UI.compact(viewport)
+	local scale = UI.lobbyScale(viewport)
+	local height = viewport.Y / scale -- the HUD's height in scale-1 units
+	if compact then
+		local railTop = 92
+		local visible = math.max(3, math.min(#NAV, math.floor((height - railTop - 12) / (RAIL_ITEM.Y + 4))))
+		navLayout.FillDirection = Enum.FillDirection.Vertical
+		navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		navLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+		navLayout.Padding = UDim.new(0, 4)
+		nav.AnchorPoint = Vector2.zero
+		nav.Position = UDim2.fromOffset(14, railTop + 6)
+		nav.Size = UDim2.fromOffset(RAIL_ITEM.X, visible * (RAIL_ITEM.Y + 4))
+		nav.ScrollingDirection = Enum.ScrollingDirection.Y
+		nav.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		navPlate.AnchorPoint = Vector2.zero
+		navPlate.Position = UDim2.fromOffset(8, railTop)
+		navPlate.Size = UDim2.fromOffset(RAIL_ITEM.X + 12, visible * (RAIL_ITEM.Y + 4) + 12)
+		playCluster.AnchorPoint = Vector2.new(1, 0.5)
+		playCluster.Position = UDim2.new(1, -20, 0.5, -20)
+		-- Invite and PvP under PLAY, the leave link under them.
+		inviteButton.AnchorPoint = Vector2.new(1, 0)
+		inviteButton.Position = UDim2.new(0.5, -4, 0, 112)
+		inviteButton.Size = UDim2.fromOffset(138, 56)
+		pvpButton.AnchorPoint = Vector2.new(0, 0)
+		pvpButton.Position = UDim2.new(0.5, 4, 0, 112)
+		pvpButton.Size = UDim2.fromOffset(138, 56)
+		leaveButton.Position = UDim2.new(0.5, 0, 0, 170)
+	else
+		navLayout.FillDirection = Enum.FillDirection.Horizontal
+		navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		navLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+		navLayout.Padding = UDim.new(0, 0)
+		local width = #NAV * BAR_ITEM.X
+		nav.AnchorPoint = Vector2.new(0.5, 1)
+		nav.Position = UDim2.new(0.5, 0, 1, -10)
+		nav.Size = UDim2.fromOffset(width, BAR_ITEM.Y + 24)
+		nav.ScrollingDirection = Enum.ScrollingDirection.X
+		nav.AutomaticCanvasSize = Enum.AutomaticSize.None
+		navPlate.AnchorPoint = Vector2.new(0.5, 1)
+		navPlate.Position = UDim2.new(0.5, 0, 1, -8)
+		navPlate.Size = UDim2.fromOffset(width + 28, 70)
+		playCluster.AnchorPoint = Vector2.new(0.5, 1)
+		playCluster.Position = UDim2.new(0.5, 0, 1, -BAR_ITEM.Y + 34)
+		inviteButton.AnchorPoint = Vector2.new(1, 0)
+		inviteButton.Position = UDim2.new(0.5, -152, 0, 10)
+		inviteButton.Size = UDim2.fromOffset(150, 56)
+		pvpButton.AnchorPoint = Vector2.new(0, 0)
+		pvpButton.Position = UDim2.new(0.5, 152, 0, 10)
+		pvpButton.Size = UDim2.fromOffset(150, 56)
+		leaveButton.Position = UDim2.new(0.5, 0, 0, 104)
+	end
+	for _, item in NAV do
+		local button = navItems[item.id]
+		local icon = button:FindFirstChild("Icon") :: ImageLabel
+		local label = button:FindFirstChild("Caption") :: TextLabel
+		local swipe = button:FindFirstChild("Swipe") :: ImageLabel
+		if compact then
+			button.Size = UDim2.fromOffset(RAIL_ITEM.X, RAIL_ITEM.Y)
+			icon.Size = UDim2.fromOffset(48, 48)
+			icon.Position = UDim2.fromScale(0.5, 0)
+			label.Position = UDim2.new(0, 0, 1, -20)
+			label.TextSize = 14
+			swipe.Position = UDim2.new(0.5, 0, 1, -10)
+			swipe.Size = UDim2.new(1, 4, 0, 26)
+		else
+			button.Size = UDim2.fromOffset(BAR_ITEM.X, BAR_ITEM.Y + 24)
+			icon.Size = UDim2.fromOffset(70, 70)
+			icon.Position = UDim2.fromScale(0.5, 0)
+			label.Position = UDim2.new(0, 0, 1, -30)
+			label.TextSize = 15
+			swipe.Position = UDim2.new(0.5, 0, 1, -20)
+			swipe.Size = UDim2.new(1, 20, 0, 30)
+		end
+		button:SetAttribute("IconSize", icon.Size.X.Offset)
+	end
+end
 
 local function build()
 	screen = UI.new("ScreenGui", {
@@ -143,213 +206,244 @@ local function build()
 		Enabled = false,
 	})
 
-	-- Top-right: coins and gems, with "+" opening the store.
-	local top = UI.new("Frame", {
+	-- Top-right: Whetstones (when you have any), coins, gems and the gold "+".
+	top = UI.new("Frame", {
+		Name = "Currencies",
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -16, 0, 12),
-		Size = UDim2.fromOffset(600, 40),
+		Position = UDim2.new(1, -16, 0, 14),
+		Size = UDim2.fromOffset(640, 46),
 		BackgroundTransparency = 1,
 	}, screen)
 	UI.new("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
 		HorizontalAlignment = Enum.HorizontalAlignment.Right,
-		Padding = UDim.new(0, 10),
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 22),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, top)
-	coinsLabel = currencyPill(top, 1, UI.Gold, ICONS.Coin, 140)
-	gemsLabel = currencyPill(top, 2, UI.Jade, ICONS.Gem, 130)
-	stonesLabel = currencyPill(top, 0, UI.Parchment, (ICONS :: any).Whetstone or ICONS.Skin, 104)
-	stonesLabel.Parent.Name = "Whetstones"
+	stonesPill =
+		UI.currencyPill({ Name = "Whetstones", currency = "stones", width = 110, height = 40, LayoutOrder = 0 }, top)
+	coinsPill = UI.currencyPill({ Name = "Coins", currency = "coins", width = 156, height = 40, LayoutOrder = 1 }, top)
+	gemsPill = UI.currencyPill({ Name = "Gems", currency = "gems", width = 140, height = 40, LayoutOrder = 2 }, top)
+	local plus = UI.iconButton({
+		Name = "AddGems",
+		kind = "plus",
+		fill = UI.Theme.Gold,
+		visual = 40,
+		hit = 62,
+		LayoutOrder = 3,
+	}, top)
+	plus.Activated:Connect(function()
+		StorePanel.show("Gems")
+	end)
 
 	-- One calm chip while the Initiate's Bundle is on offer (its real 72 h window).
-	offerChip = UI.button({
+	offerChip = UI.new("TextButton", {
 		Name = "OfferChip",
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -16, 0, 62),
-		Size = UDim2.fromOffset(280, 60),
+		Position = UDim2.new(1, -16, 0, 70),
+		Size = UDim2.fromOffset(290, 62),
+		BackgroundTransparency = 1,
+		AutoButtonColor = false,
 		Text = "",
-		BackgroundColor3 = UI.Ink,
 		Visible = false,
 	}, screen)
-	UI.stroke(offerChip, UI.Gold, 1.5, 0.3)
+	local chipPlate = UI.panel({ Name = "Plate", material = "lacquer", Size = UDim2.fromScale(1, 1) }, offerChip)
+	UI.stroke(chipPlate, UI.Theme.Gold, 1.5, 0.2)
 	UI.new("ImageLabel", {
-		Position = UDim2.fromOffset(4, 4),
-		Size = UDim2.fromOffset(52, 52),
+		Position = UDim2.fromOffset(2, 1),
+		Size = UDim2.fromOffset(60, 60),
 		BackgroundTransparency = 1,
 		Image = (ICONS :: any).InitiateBundle or ICONS.Katana,
+		ZIndex = 2,
+	}, offerChip)
+	UI.label("label", {
+		Position = UDim2.fromOffset(66, 8),
+		Size = UDim2.new(1, -78, 0, 22),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = UI.Theme.GoldHi,
+		TextSize = 16,
+		Text = "Initiate's Bundle",
+		ZIndex = 2,
 	}, offerChip)
 	offerText = UI.text({
-		Position = UDim2.fromOffset(56, 0),
-		Size = UDim2.new(1, -64, 1, 0),
+		Position = UDim2.fromOffset(66, 30),
+		Size = UDim2.new(1, -78, 0, 22),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextSize = 15,
-		TextWrapped = true,
+		TextColor3 = UI.Theme.Dim,
 		Text = "",
+		ZIndex = 2,
 	}, offerChip)
+	UI.juice(offerChip, { hover = 1.03 })
 	offerChip.Activated:Connect(function()
 		StorePanel.show("Offers")
 	end)
 
 	-- The profile didn't load (or another server took it): say so, plainly and for as long as
 	-- it's true. The server also blocks purchases and spends for the session.
-	saveNotice = UI.text({
-		Name = "SaveNotice",
+	local noticePlate = UI.panel({
+		Name = "SaveNoticePlate",
+		material = "plain",
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -16, 0, 128),
+		Position = UDim2.new(1, -16, 0, 140),
 		Size = UDim2.fromOffset(420, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		TextWrapped = true,
-		TextXAlignment = Enum.TextXAlignment.Right,
-		TextSize = 15,
-		TextColor3 = UI.Danger,
-		TextStrokeTransparency = 0.4,
 		Visible = false,
-		Text = "",
 	}, screen)
+	UI.new("Frame", {
+		Name = "Edge",
+		Size = UDim2.new(0, 3, 1, -12),
+		Position = UDim2.fromOffset(6, 6),
+		BackgroundColor3 = UI.Theme.LacquerRed,
+		BorderSizePixel = 0,
+	}, noticePlate)
+	saveNotice = UI.text({
+		Name = "SaveNotice",
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextSize = 16,
+		TextColor3 = UI.Danger,
+		Text = "",
+	}, noticePlate)
 	UI.new("UIPadding", {
-		PaddingLeft = UDim.new(0, 10),
-		PaddingRight = UDim.new(0, 10),
-		PaddingTop = UDim.new(0, 6),
-		PaddingBottom = UDim.new(0, 6),
+		PaddingLeft = UDim.new(0, 18),
+		PaddingRight = UDim.new(0, 12),
+		PaddingTop = UDim.new(0, 10),
+		PaddingBottom = UDim.new(0, 10),
 	}, saveNotice)
+	saveNotice:GetPropertyChangedSignal("Visible"):Connect(function()
+		noticePlate.Visible = saveNotice.Visible
+	end)
+	saveNotice.Visible = false
 
-	-- Top-left: Mastery level and the XP bar toward the next one.
+	-- Top-left: the Mastery plate, its medallion overlapping the left end.
 	local mastery = UI.panel({
-		Position = UDim2.fromOffset(16, 12),
-		Size = UDim2.fromOffset(300, 54),
-		BackgroundColor3 = UI.Ink,
-		BackgroundTransparency = 0.15,
+		Name = "Mastery",
+		material = "plain",
+		Position = UDim2.fromOffset(40, 14),
+		Size = UDim2.fromOffset(290, 64),
 	}, screen)
 	local medal = UI.new("ImageLabel", {
+		Name = "Medal",
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromOffset(28, 27),
-		Size = UDim2.fromOffset(62, 62),
+		Position = UDim2.fromOffset(4, 32),
+		Size = UDim2.fromOffset(74, 74),
 		BackgroundTransparency = 1,
 		Image = ICONS.Level,
-		ZIndex = 2,
-	}, mastery)
-	local plate = UI.new("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.86),
-		Size = UDim2.fromOffset(34, 22),
-		BackgroundColor3 = UI.Ink,
-		BorderSizePixel = 0,
 		ZIndex = 3,
-	}, medal)
-	UI.corner(plate, UDim.new(1, 0))
-	UI.stroke(plate, UI.Gold, 1.5, 0)
-	levelLabel = UI.text({
-		Size = UDim2.fromScale(1, 1),
-		Font = UI.Bold,
-		TextSize = 16,
-		TextColor3 = UI.Gold,
-		Text = "1",
-		ZIndex = 4,
-	}, plate)
-	UI.text({
-		Position = UDim2.fromOffset(64, 5),
-		Size = UDim2.new(1, -74, 0, 22),
+	}, mastery)
+	UI.label("caption", {
+		Position = UDim2.fromOffset(50, 9),
+		Size = UDim2.new(1, -66, 0, 18),
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = UI.Display,
-		TextSize = 20,
-		Text = "MASTERY",
-	}, mastery)
-	local track = UI.new("Frame", {
-		Position = UDim2.fromOffset(64, 30),
-		Size = UDim2.new(1, -76, 0, 14),
-		BackgroundColor3 = Color3.fromRGB(12, 10, 12),
-		BorderSizePixel = 0,
-	}, mastery)
-	UI.corner(track, UDim.new(1, 0))
-	UI.stroke(track, UI.Bronze, 1, 0.4)
-	xpFill = UI.new("Frame", {
-		Size = UDim2.fromScale(0, 1),
-		BackgroundColor3 = UI.Gold,
-		BorderSizePixel = 0,
-	}, track)
-	UI.corner(xpFill, UDim.new(1, 0))
-	xpText = UI.text({
-		Size = UDim2.fromScale(1, 1),
-		TextSize = 12,
-		Font = UI.Bold,
-		TextStrokeTransparency = 0.3,
-		Text = "",
+		TextColor3 = UI.Theme.GoldHi,
+		TextSize = 15,
+		Text = "Mastery",
 		ZIndex = 2,
-	}, track)
-	local plus = UI.button({
-		Size = UDim2.fromOffset(40, 40),
-		LayoutOrder = 3,
-		Text = "+",
-		TextSize = 26,
-		BackgroundColor3 = UI.Crimson,
-	}, top)
-	-- A bigger invisible hit area, so "+" is a comfortable tap on a phone.
-	local plusHit = UI.new("TextButton", {
-		Name = "Hit",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(62, 62),
-		BackgroundTransparency = 1,
-		Text = "",
-		ZIndex = 3,
-	}, plus)
-	plus.Name = "AddGems"
-	plus.Size = UDim2.fromOffset(46, 46)
-	plusHit.Activated:Connect(function()
-		StorePanel.show("Gems")
-	end)
+	}, mastery)
+	levelLabel = UI.label("number", {
+		Name = "Level",
+		Position = UDim2.fromOffset(50, 7),
+		Size = UDim2.new(1, -66, 0, 22),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		TextSize = 18,
+		Text = "Lv 1",
+		ZIndex = 2,
+	}, mastery)
+	xpBar = UI.progress({
+		Name = "XP",
+		Position = UDim2.fromOffset(50, 31),
+		Size = UDim2.new(1, -66, 0, 30),
+		height = 8,
+		tone = "gold",
+		label = "below",
+		textSize = 14,
+		format = function(v: number, m: number): string
+			return `{UI.number(v)} / {UI.number(m)} XP`
+		end,
+	}, mastery)
+	local _ = medal
 
-	-- Bottom: PLAY over the nav bar.
+	-- PLAY with Invite and Lobby PvP: one cluster, at the bottom centre on desktop and on the
+	-- right on phones.
 	bottom = UI.new("Frame", {
 		Name = "Bottom",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -14),
-		Size = UDim2.fromOffset(760, 170),
+		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1,
 	}, screen)
-
+	playCluster = UI.new("Frame", {
+		Name = "PlayCluster",
+		Size = UDim2.fromOffset(300, 214),
+		BackgroundTransparency = 1,
+	}, bottom)
+	playSwipe = UI.brush(playCluster, "swipe", {
+		Name = "PlaySwipe",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0, 40),
+		Size = UDim2.fromOffset(400, 104),
+		color = UI.Theme.LacquerRed,
+		ImageTransparency = 0.05,
+	})
 	playButton = UI.button({
 		Name = "Play",
+		variant = "primary",
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.fromScale(0.5, 0),
-		Size = UDim2.fromOffset(260, 58),
+		Size = UDim2.fromOffset(280, 76),
 		Text = "PLAY",
-		Font = UI.Display,
-		TextSize = 34,
-		BackgroundColor3 = UI.Crimson,
-	}, bottom)
-	UI.stroke(playButton, UI.Parchment, 2, 0.35)
-	playSub = UI.text({
+		FontFace = UI.Fonts.Display,
+		TextSize = 40,
+		ZIndex = 2,
+	}, playCluster)
+	playSubStrip = UI.new("Frame", {
+		Name = "SubStrip",
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 60),
-		Size = UDim2.fromOffset(300, 18),
+		Position = UDim2.new(0.5, 0, 0, 80),
+		Size = UDim2.fromOffset(0, 24),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = UI.Theme.Ink,
+		BackgroundTransparency = 0.45,
+		BorderSizePixel = 0,
+	}, playCluster)
+	UI.new("UICorner", { CornerRadius = UDim.new(1, 0) }, playSubStrip)
+	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, playSubStrip)
+	playSub = UI.text({
+		Name = "Sub",
+		Size = UDim2.fromOffset(0, 24),
+		AutomaticSize = Enum.AutomaticSize.X,
 		TextSize = 15,
-		TextTransparency = 0.25,
+		TextColor3 = UI.Theme.Bone,
 		Text = "",
-	}, bottom)
+	}, playSubStrip)
 	playButton.Activated:Connect(function()
 		lobbyAction:FireServer("Queue", player:GetAttribute("Queued") ~= true)
 	end)
+	leaveButton = UI.tertiary({
+		Name = "LeaveQueue",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 104),
+		Size = UDim2.fromOffset(160, 44),
+		Text = "Leave queue",
+		TextSize = 16,
+		Visible = false,
+	}, playCluster)
+	leaveButton.Activated:Connect(function()
+		lobbyAction:FireServer("Queue", false)
+	end)
 
-	pvpButton = UI.button({
-		AnchorPoint = Vector2.new(0, 0),
-		Position = UDim2.new(0.5, 140, 0, 0),
-		Size = UDim2.fromOffset(112, 58),
-		TextSize = 14,
-		Text = "Lobby PvP: Off",
-	}, bottom)
-	UI.stroke(pvpButton)
 	-- Fights are better with friends: invite from the lobby, nudged when you're queued alone.
 	local invite = UI.button({
 		Name = "Invite",
+		variant = "secondary",
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(0.5, -140, 0, 0),
-		Size = UDim2.fromOffset(112, 58),
-		TextSize = 14,
+		Position = UDim2.new(0.5, -152, 0, 10),
+		Size = UDim2.fromOffset(150, 56),
+		TextSize = 17,
 		Text = "Invite friends",
-		BackgroundColor3 = Color3.fromRGB(40, 70, 58),
-	}, bottom)
-	UI.stroke(invite, UI.Jade)
+	}, playCluster)
 	invite.Activated:Connect(function()
 		local ok, can = pcall(SocialService.CanSendGameInviteAsync, SocialService, player)
 		if ok and can then
@@ -364,54 +458,93 @@ local function build()
 	end)
 	inviteButton = invite
 
+	pvpButton = UI.button({
+		Name = "PvP",
+		variant = "secondary",
+		AnchorPoint = Vector2.new(0, 0),
+		Position = UDim2.new(0.5, 152, 0, 10),
+		Size = UDim2.fromOffset(150, 56),
+		TextSize = 17,
+		Text = "Lobby PvP",
+	}, playCluster)
+	pvpPip = UI.new("Frame", {
+		Name = "Pip",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.fromOffset(10, 10),
+		BackgroundColor3 = UI.Theme.Ash,
+		ZIndex = 3,
+	}, pvpButton)
+	UI.new("UICorner", { CornerRadius = UDim.new(1, 0) }, pvpPip)
+	UI.new("UIStroke", { Color = UI.Theme.Ink, Thickness = 1.5 }, pvpPip)
 	pvpButton.Activated:Connect(function()
 		local on = player:GetAttribute("LobbyPvP")
 		lobbyAction:FireServer("PvP", on ~= true and on ~= "Pending")
 	end)
 
-	local nav = UI.new("Frame", {
+	-- The nav: one lacquer strip, icons over labels; a crimson swipe under the open panel.
+	navPlate = UI.panel({ Name = "NavPlate", material = "plain" }, bottom)
+	nav = UI.new("ScrollingFrame", {
 		Name = "Nav",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.fromScale(0.5, 1),
-		Size = UDim2.fromOffset(760, 76),
 		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 0,
+		CanvasSize = UDim2.new(),
+		ElasticBehavior = Enum.ElasticBehavior.Never,
+		ClipsDescendants = false,
+		ZIndex = 2,
 	}, bottom)
-	UI.new("UIListLayout", {
-		FillDirection = Enum.FillDirection.Horizontal,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
-		Padding = UDim.new(0, 10),
-		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, nav)
+	navLayout = UI.new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, nav)
 	for i, item in NAV do
-		local button = UI.button({
+		local button = UI.new("TextButton", {
 			Name = item.id,
-			Size = UDim2.fromOffset(92, 76),
 			LayoutOrder = i,
+			BackgroundTransparency = 1,
+			AutoButtonColor = false,
 			Text = "",
-			BackgroundColor3 = UI.Panel,
+			ZIndex = 2,
 		}, nav)
-		UI.stroke(button)
+		local swipe = UI.brush(button, "swipe", {
+			Name = "Swipe",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			color = UI.Theme.Crimson,
+			ZIndex = 2,
+			Visible = false,
+		})
+		local _ = swipe
 		local icon = UI.new("ImageLabel", {
+			Name = "Icon",
 			AnchorPoint = Vector2.new(0.5, 0),
-			Position = UDim2.new(0.5, 0, 0, -10),
-			Size = UDim2.fromOffset(62, 62),
 			BackgroundTransparency = 1,
 			Image = item.icon,
-			ZIndex = 2,
+			ZIndex = 3,
+		}, button)
+		UI.label("label", {
+			Name = "Caption",
+			Size = UDim2.new(1, 0, 0, 20),
+			TextSize = 15,
+			TextColor3 = UI.Theme.Dim,
+			TextStrokeColor3 = UI.Theme.Ink,
+			TextStrokeTransparency = 0.5,
+			Text = item.label,
+			ZIndex = 4,
 		}, button)
 		-- A little lift on hover, like picking the item up.
 		button.MouseEnter:Connect(function()
-			UI.tween(icon, 0.12, { Size = UDim2.fromOffset(70, 70), Position = UDim2.new(0.5, 0, 0, -16) })
+			if UI.isTouch() then
+				return
+			end
+			local size = button:GetAttribute("IconSize") or 70
+			UI.play(icon, UI.Motion.Hover, {
+				Size = UDim2.fromOffset(size * 1.1, size * 1.1),
+				Position = UDim2.new(0.5, 0, 0, -6),
+			})
 		end)
 		button.MouseLeave:Connect(function()
-			UI.tween(icon, 0.12, { Size = UDim2.fromOffset(62, 62), Position = UDim2.new(0.5, 0, 0, -10) })
+			local size = button:GetAttribute("IconSize") or 70
+			UI.play(icon, UI.Motion.Hover, { Size = UDim2.fromOffset(size, size), Position = UDim2.fromScale(0.5, 0) })
 		end)
-		UI.text({
-			Size = UDim2.new(1, 0, 0, 20),
-			Position = UDim2.new(0, 0, 1, -24),
-			TextSize = 15,
-			Text = item.label,
-		}, button)
+		UI.juice(button, { hover = 1, press = 0.92 })
 		button.Activated:Connect(function()
 			if item.id == "Trials" then
 				trialsSeen = true
@@ -419,6 +552,7 @@ local function build()
 			end
 			Panels.toggle(item.id)
 		end)
+		navItems[item.id] = button
 		if item.id == "Rewards" then
 			rewardsBadge = badge(button)
 		elseif item.id == "Trials" then
@@ -431,18 +565,49 @@ local function build()
 	end
 
 	UI.new("UIScale", { Name = "Fit" }, screen)
+	applyLayout()
 	screen.Parent = player:WaitForChild("PlayerGui")
 end
 
+-- The open panel's nav item gets the crimson swipe and a Bone label.
+local function markOpen()
+	local open = Panels.current()
+	for id, button in navItems do
+		local on = id == open
+		local swipe = button:FindFirstChild("Swipe") :: ImageLabel
+		local caption = button:FindFirstChild("Caption") :: TextLabel
+		swipe.Visible = on
+		caption.TextColor3 = if on then UI.Theme.Bone else UI.Theme.Dim
+		caption.FontFace = if on then UI.Fonts.Number else UI.Fonts.Label
+	end
+end
+
+local lastCoins, lastGems, lastStones = -1, -1, -1
+
+-- "QUEUED · 0:04" while the royale counts down.
+local function queueLabel(): string
+	local state = Round.state()
+	if state:GetAttribute("Waiting") == false and Round.phase() == "Intermission" then
+		local left = math.max(0, math.ceil(Round.endsAt() - workspace:GetServerTimeNow()))
+		return string.format("QUEUED · %d:%02d", left // 60, left % 60)
+	end
+	return "QUEUED"
+end
+
 function refresh()
-	coinsLabel.Text = UI.number(player:GetAttribute("Coins") or 0)
-	gemsLabel.Text = UI.number(player:GetAttribute("Gems") or 0)
-	stonesLabel.Text = UI.number(player:GetAttribute("Whetstones") or 0)
+	local coins = player:GetAttribute("Coins") or 0
+	local gems = player:GetAttribute("Gems") or 0
+	local stones = player:GetAttribute("Whetstones") or 0
+	coinsPill.set(coins, lastCoins >= 0)
+	gemsPill.set(gems, lastGems >= 0)
+	stonesPill.set(stones, lastStones >= 0)
+	stonesPill.frame.Visible = stones > 0
+	lastCoins, lastGems, lastStones = coins, gems, stones
 	local offerOpen = StoreUI.initiateOpen()
 	offerChip.Visible = offerOpen
 	if offerOpen then
 		local left = StoreUI.duration(StoreUI.attr("InitiateEndsAt", 0) - StoreUI.now())
-		offerText.Text = `Initiate's Bundle  ·  {left} left`
+		offerText.Text = `{left} left  ·  take a look`
 	end
 	local loaded = player:GetAttribute("DataLoaded") == true
 	storeBadge.Visible = loaded and StorePanel.badge()
@@ -453,31 +618,47 @@ function refresh()
 		passBadge.Visible = loaded and ok and typeof(count) == "number" and count > 0
 	end
 
+	-- Queued, PLAY stays crimson: its label counts down and the swipe breathes; a quiet
+	-- "Leave queue" link sits under it.
 	local queued = player:GetAttribute("Queued") == true
-	playButton.Text = if queued then "QUEUED" else "PLAY"
-	UI.setButtonColor(playButton, if queued then UI.PanelLight else UI.Crimson)
+	playButton.Text = if queued then queueLabel() else "PLAY"
+	playButton.TextSize = if queued then 30 else 40
+	leaveButton.Visible = queued
+	if queued ~= (playSwipe:GetAttribute("Pulsing") == true) then
+		playSwipe:SetAttribute("Pulsing", queued)
+		local existing = playSwipe:FindFirstChild("PulseTween")
+		if existing then
+			existing:Destroy()
+		end
+		playSwipe.ImageTransparency = 0.05
+		if queued and not UI.reducedMotion() then
+			local tween = UI.play(playSwipe, UI.Motion.Pulse, { ImageTransparency = 0.55 })
+			tween.Name = "PulseTween"
+			tween.Parent = playSwipe
+		end
+	end
 	local state = Round.state()
 	local duelState = player:GetAttribute("DuelState")
 	if duelState == "Waiting" then
 		playSub.Text = "On a duel pad  ·  the royale skips you until you step off"
 	elseif queued then
 		playSub.Text = if state:GetAttribute("Waiting") == false and Round.phase() == "Intermission"
-			then "The royale is about to begin  ·  click to leave the queue"
-			else "Waiting for the next royale  ·  click to leave the queue"
+			then "The royale is about to begin"
+			else "Waiting for the next royale  ·  bots fill empty seats"
 	else
 		playSub.Text = "Queue for the royale"
 	end
-	-- Alone in the server: the invite button glows.
+	-- Alone in the server: the invite button says so in gold.
 	local alone = #Players:GetPlayers() <= 1
-	inviteButton.Text = if alone then "Invite a friend!" else "Invite friends"
-	inviteButton.TextColor3 = if alone then UI.Gold else UI.Parchment
+	inviteButton.Text = if alone then "Invite a friend" else "Invite friends"
+	inviteButton.TextColor3 = if alone then UI.Theme.GoldHi else UI.Theme.Bone
 
 	local pvp = player:GetAttribute("LobbyPvP")
 	pvpButton.Text = if pvp == true
 		then "Lobby PvP: On"
 		elseif pvp == "Pending" then "Lobby PvP: ..."
 		else "Lobby PvP: Off"
-	pvpButton.TextColor3 = if pvp == true then UI.Crimson else UI.Parchment
+	pvpPip.BackgroundColor3 = if pvp == true then UI.Theme.JadeText else UI.Theme.Ash
 
 	rewardsBadge.Visible = player:GetAttribute("DataLoaded") == true and player:GetAttribute("DailyClaimed") == false
 	local failed = player:GetAttribute("DataFailed") == true
@@ -491,9 +672,8 @@ function refresh()
 
 	local xp = player:GetAttribute("XP") or 0
 	local need = player:GetAttribute("XPToNext") or 1
-	levelLabel.Text = tostring(player:GetAttribute("Level") or 1)
-	xpText.Text = `{UI.number(xp)} / {UI.number(need)} XP`
-	UI.tween(xpFill, 0.4, { Size = UDim2.fromScale(math.clamp(xp / need, 0.02, 1), 1) })
+	levelLabel.Text = `Lv {player:GetAttribute("Level") or 1}`
+	xpBar.set(xp, need, true)
 end
 
 local function refreshVisibility()
@@ -538,69 +718,69 @@ local function showOfferCard()
 	offerPending = false
 	local card = UI.panel({
 		Name = "OfferCard",
+		material = "lacquer",
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -16, 0.45, 0),
-		Size = UDim2.fromOffset(330, 184),
-		BackgroundColor3 = UI.Ink,
+		Size = UDim2.fromOffset(340, 196),
 	}, screen)
-	UI.stroke(card, UI.Gold, 1.5, 0.2)
+	UI.stroke(card, UI.Theme.Gold, 1.5, 0.15)
 	UI.new("ImageLabel", {
-		Position = UDim2.fromOffset(6, 2),
-		Size = UDim2.fromOffset(56, 56),
+		Position = UDim2.fromOffset(8, 4),
+		Size = UDim2.fromOffset(64, 64),
 		BackgroundTransparency = 1,
 		Image = (ICONS :: any).InitiateBundle or ICONS.Katana,
 	}, card)
 	UI.text({
-		Position = UDim2.fromOffset(68, 16),
-		Size = UDim2.new(1, -130, 0, 26),
+		Position = UDim2.fromOffset(78, 18),
+		Size = UDim2.new(1, -140, 0, 28),
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = UI.Display,
+		FontFace = UI.Fonts.Display,
 		TextSize = 22,
-		TextColor3 = UI.Gold,
+		TextColor3 = UI.Theme.GoldHi,
 		Text = "Initiate's Bundle",
 	}, card)
 	UI.text({
-		Position = UDim2.fromOffset(14, 60),
-		Size = UDim2.new(1, -28, 0, 50),
+		Position = UDim2.fromOffset(18, 70),
+		Size = UDim2.new(1, -36, 0, 48),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
 		TextWrapped = true,
-		TextSize = 14,
+		TextSize = 15,
 		Text = "A blade of your own, the Initiate title, 300 gems and 1,500 coins. Only during your first 72 hours.",
 	}, card)
-	local close = UI.button({
+	local close = UI.iconButton({
 		Name = "Dismiss",
+		kind = "close",
+		visual = 38,
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -6, 0, 6),
-		Size = UDim2.fromOffset(46, 46),
-		Text = "X",
-		TextSize = 18,
-		BackgroundColor3 = UI.PanelLight,
+		Position = UDim2.new(1, -2, 0, 2),
 	}, card)
 	close.Activated:Connect(dismissOffer)
 	local later = UI.button({
 		Name = "NotNow",
+		variant = "secondary",
 		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.new(0, 10, 1, -10),
-		Size = UDim2.new(0.5, -15, 0, 52),
-		Text = "Not now",
+		Position = UDim2.new(0, 14, 1, -14),
+		Size = UDim2.new(0.5, -18, 0, 56),
+		Text = "Later",
 		TextSize = 17,
+		sound = "Cancel",
 	}, card)
-	UI.stroke(later)
 	later.Activated:Connect(dismissOffer)
 	local look = UI.button({
 		Name = "Look",
+		variant = "premium",
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -10, 1, -10),
-		Size = UDim2.new(0.5, -15, 0, 52),
+		Position = UDim2.new(1, -14, 1, -14),
+		Size = UDim2.new(0.5, -18, 0, 56),
 		Text = "Take a look",
 		TextSize = 17,
-		BackgroundColor3 = UI.Crimson,
 	}, card)
 	look.Activated:Connect(function()
 		dismissOffer()
 		StorePanel.show("Offers")
 	end)
+	UI.openMotion(card)
 	offerCard = card
 end
 
@@ -706,6 +886,7 @@ function LobbyHUD.start()
 	end
 	build()
 	Panels.onChange(function()
+		markOpen()
 		refreshVisibility()
 		if offerCard and Panels.isOpen() then
 			dismissOffer()
@@ -720,11 +901,18 @@ function LobbyHUD.start()
 	player.AttributeChanged:Connect(watchMilestones)
 	watchMilestones()
 	task.spawn(watchBoards)
-	-- The offer chip counts down in hours: refresh it now and then.
+	-- The offer chip counts down in hours: refresh it now and then; the queue label every
+	-- second while queued.
 	task.spawn(function()
+		local n = 0
 		while true do
-			task.wait(30)
-			refresh()
+			task.wait(1)
+			n += 1
+			if n % 30 == 0 then
+				refresh()
+			elseif player:GetAttribute("Queued") == true then
+				playButton.Text = queueLabel()
+			end
 		end
 	end)
 	Round.state().AttributeChanged:Connect(refresh)
@@ -743,7 +931,8 @@ function LobbyHUD.start()
 	local camera = workspace.CurrentCamera
 	local function fit()
 		local fitScale = screen:FindFirstChild("Fit") :: UIScale
-		fitScale.Scale = math.clamp(camera.ViewportSize.X / 1100, 0.6, 1)
+		fitScale.Scale = UI.lobbyScale(camera.ViewportSize)
+		applyLayout()
 	end
 	camera:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
 	fit()
