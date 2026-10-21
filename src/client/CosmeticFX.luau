@@ -39,8 +39,6 @@ export type Kit = {
 	) -> (),
 	cutStreak: (position: Vector3, direction: Vector3, length: number, width: number, color: Color3) -> (),
 	shards: (position: Vector3, direction: Vector3?, count: number, speed: number) -> (),
-	bloodSpray: (position: Vector3, direction: Vector3?, count: number, speed: number) -> (),
-	bloodPool: (position: Vector3, direction: Vector3?) -> (),
 	vfxSlow: () -> number,
 	scaled: (count: number) -> number,
 	reduced: () -> boolean,
@@ -155,8 +153,10 @@ end
 
 -- A brush-kanji stamp that slams down over the fallen and fades: the finisher's signature,
 -- readable from the kill-cam and the spectator view.
-local function stamp(defender: Model, key: string, color: Color3, halo: Color3)
+local function stamp(defender: Model, key: string, color: Color3, halo: Color3, attacker: Model?)
 	local head = defender:FindFirstChild("Head") or defender:FindFirstChild("HumanoidRootPart")
+	local mine = player.Character ~= nil and (player.Character == defender or player.Character == attacker)
+	local see = if mine then 0 else 0.4 -- onlookers: a lighter stamp they can see through
 	local image = C.Kanji[key]
 	if not head or not head:IsA("BasePart") or not image then
 		return
@@ -166,14 +166,15 @@ local function stamp(defender: Model, key: string, color: Color3, halo: Color3)
 	gui.Adornee = head
 	gui.AlwaysOnTop = true
 	gui.LightInfluence = 0
-	gui.Size = UDim2.fromScale(if wide then 8.6 else 5.2, 5.2) -- studs
+	local studs = if mine then 1 else 0.7
+	gui.Size = UDim2.fromScale((if wide then 8.6 else 5.2) * studs, 5.2 * studs) -- studs
 	gui.StudsOffsetWorldSpace = Vector3.new(0, 3.4, 0)
 	gui.MaxDistance = 240
 	local glow = Instance.new("ImageLabel")
 	glow.BackgroundTransparency = 1
 	glow.Image = GLOW
 	glow.ImageColor3 = halo
-	glow.ImageTransparency = 0.25
+	glow.ImageTransparency = 0.25 + see * 0.6
 	glow.AnchorPoint = Vector2.new(0.5, 0.5)
 	glow.Position = UDim2.fromScale(0.5, 0.5)
 	glow.Size = UDim2.fromScale(1.3, 1.5)
@@ -192,7 +193,7 @@ local function stamp(defender: Model, key: string, color: Color3, halo: Color3)
 	local s = slow()
 	TweenService:Create(glyph, TweenInfo.new(0.16 / s, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 		Size = UDim2.fromScale(1, 1),
-		ImageTransparency = 0,
+		ImageTransparency = see,
 	}):Play()
 	task.delay(0.95 / s, function()
 		local fade = TweenInfo.new(0.45 / s)
@@ -253,8 +254,8 @@ local function bolt(from: Vector3, to: Vector3, width: number, color: Color3, li
 	local a0 = Instance.new("Attachment")
 	a0.Parent = anchor
 	local a1 = Instance.new("Attachment")
+	a1.Parent = anchor -- parented first: WorldPosition on a loose attachment is just an offset
 	a1.WorldPosition = to
-	a1.Parent = anchor
 	local beam = Instance.new("Beam")
 	beam.Attachment0 = a0
 	beam.Attachment1 = a1
@@ -288,13 +289,21 @@ local function bolt(from: Vector3, to: Vector3, width: number, color: Color3, li
 end
 
 -- A camera-facing image in the world (crescents, brush strokes), rotated to `angle` on screen.
-local function sprite(position: Vector3, image: string, color: Color3, studs: Vector2, angle: number, life: number)
+local function sprite(
+	position: Vector3,
+	image: string,
+	color: Color3,
+	studs: Vector2,
+	angle: number,
+	life: number,
+	brightness: number?
+)
 	local anchor = anchorAt(position, life + 0.1)
 	local gui = Instance.new("BillboardGui")
 	gui.Adornee = anchor
 	gui.AlwaysOnTop = false
 	gui.LightInfluence = 0
-	gui.Brightness = 1.6
+	gui.Brightness = brightness or 1.6
 	gui.Size = UDim2.fromScale(studs.X, studs.Y)
 	gui.Parent = anchor
 	local label = Instance.new("ImageLabel")
@@ -320,15 +329,17 @@ local function grade(spec: Grade)
 	cc.Brightness = spec.brightness
 	cc.TintColor = spec.tint
 	cc.Parent = camera
-	task.delay(spec.hold, function()
-		TweenService:Create(cc, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+	-- The same length as the default's red grade: a finisher may not hold the screen longer.
+	local hold = math.min(spec.hold, 0.25)
+	task.delay(hold, function()
+		TweenService:Create(cc, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			Saturation = 0,
 			Contrast = 0,
 			Brightness = 0,
 			TintColor = WHITE,
 		}):Play()
 	end)
-	Debris:AddItem(cc, spec.hold + 0.9)
+	Debris:AddItem(cc, hold + 0.8)
 end
 
 -- An X of two cut streaks across the point (the default's shape, in the finisher's colour).
@@ -342,15 +353,6 @@ local function crossCut(ctx: Ctx, color: Color3, length: number)
 		1,
 		color
 	)
-end
-
-local function blood(ctx: Ctx, count: number)
-	kit.bloodSpray(ctx.root.Position + Vector3.new(0, 0.6, 0), ctx.blow, count, 30)
-	task.delay(0.12, function()
-		if ctx.root.Parent then
-			kit.bloodPool(ctx.root.Position, ctx.blow)
-		end
-	end)
 end
 
 -- Random body parts of a model, for arcs crawling over it.
@@ -370,14 +372,15 @@ end
 ---------------------------------------------------------------------------------------
 -- Finishers
 
--- Ink Brush (墨): the cut is a stroke of sumi ink; the blood is ink.
+-- Ink Brush (墨): the cut is a stroke of sumi ink, and ink is what it throws.
 local function inkBrush(ctx: Ctx): Grade
 	local ink = Color3.fromRGB(14, 11, 13)
 	local angle = screenAngle(ctx.sweep)
 	-- Two great brush strokes in an X, wiped on along the cut.
-	for i, spec in { { angle, 13, 0 }, { angle + 62, 10, 0.07 } } do
+	for i, spec in { { angle, 11, 0 }, { angle + 62, 8.5, 0.07 } } do
 		task.delay(spec[3] / slow(), function()
-			local label = sprite(ctx.point, Assets.UI.InkBand, ink, Vector2.new(spec[2], spec[2] * 0.3), spec[1], 1.5)
+			local label =
+				sprite(ctx.point, Assets.UI.InkBand, ink, Vector2.new(spec[2], spec[2] * 0.26), spec[1], 1.5, 1)
 			label.ImageTransparency = 0.02
 			local wipe = Instance.new("UIGradient")
 			wipe.Transparency = NumberSequence.new({
@@ -459,14 +462,14 @@ local function inkBrush(ctx: Ctx): Grade
 		sound("InkSplash", pool, 0.45, 1.5, 0.8)
 	end)
 	kit.flare(ctx.point, Color3.fromRGB(245, 240, 230), 14, true)
-	stamp(ctx.defender, "Ink", ink, Color3.fromRGB(245, 240, 230))
+	stamp(ctx.defender, "Ink", ink, Color3.fromRGB(245, 240, 230), ctx.attacker)
 	return { saturation = -1, contrast = 0.4, brightness = 0.02, tint = WHITE, hold = 0.35 }
 end
 
 local function petalStorm(ctx: Ctx, color: Color3, count: number, glow: number)
-	emit(ctx.point, count, 3.2, function(e)
+	emit(ctx.point, count, 2.6, function(e)
 		petals(e, color, glow)
-		e.Lifetime = NumberRange.new(1.6, 2.6)
+		e.Lifetime = NumberRange.new(1.2, 2)
 		e.Speed = NumberRange.new(10, 24)
 		e.SpreadAngle = Vector2.new(180, 180)
 		e.Drag = 3.6
@@ -489,7 +492,7 @@ local function petalStorm(ctx: Ctx, color: Color3, count: number, glow: number)
 		e.Drag = 1.2
 		e.Acceleration = Vector3.new(1.5, -3, 0.5)
 	end, Vector3.yAxis)
-	fall.Rate = if kit.reduced() then 12 else 34
+	fall.Rate = if kit.reduced() then 8 else 22
 	task.delay(1.2 / slow(), function()
 		fall.Enabled = false
 	end)
@@ -500,9 +503,8 @@ local function sakuraScatter(ctx: Ctx): Grade
 	local pink = Color3.fromRGB(252, 156, 198)
 	crossCut(ctx, Color3.fromRGB(255, 190, 215), 13)
 	kit.flare(ctx.point, Color3.fromRGB(255, 214, 230), 18, true)
-	petalStorm(ctx, pink, 150, 0.25)
-	blood(ctx, 40)
-	stamp(ctx.defender, "Sakura", pink, WHITE)
+	petalStorm(ctx, pink, 90, 0.25)
+	stamp(ctx.defender, "Sakura", pink, WHITE, ctx.attacker)
 	sound("Chimes", ctx.root, 0.75, 1, 2.6)
 	return { saturation = -0.25, contrast = 0.15, brightness = 0.03, tint = Color3.fromRGB(255, 226, 236), hold = 0.3 }
 end
@@ -510,14 +512,14 @@ end
 local function featherBurst(ctx: Ctx, color: Color3, count: number)
 	emit(ctx.point, count, 3, function(e)
 		feathers(e, color)
-		e.Lifetime = NumberRange.new(1.6, 2.4)
+		e.Lifetime = NumberRange.new(1.2, 2)
 		e.Speed = NumberRange.new(14, 30)
 		e.SpreadAngle = Vector2.new(180, 180)
 		e.Drag = 2.8
 		e.Acceleration = Vector3.new(0.5, -4, 0)
 	end)
 	-- A few big dark shapes beat upward and away, like crows taking off.
-	emit(ctx.root.Position + Vector3.new(0, 1, 0), 10, 2.5, function(e)
+	emit(ctx.root.Position + Vector3.new(0, 1, 0), 8, 2.5, function(e)
 		feathers(e, color)
 		e.Size = seq(1.2, 1.5, 0.8)
 		e.Lifetime = NumberRange.new(0.9, 1.4)
@@ -526,11 +528,11 @@ local function featherBurst(ctx: Ctx, color: Color3, count: number)
 		e.Acceleration = Vector3.new(0, 14, 0)
 		e.RotSpeed = NumberRange.new(-500, 500)
 	end, Vector3.yAxis)
-	emit(ctx.root.Position + Vector3.new(0, 1, 0), 10, 2, function(e)
+	emit(ctx.root.Position + Vector3.new(0, 1, 0), 6, 2, function(e)
 		e.Texture = GLOW
 		e.Color = ColorSequence.new(Color3.fromRGB(26, 20, 34))
-		e.Size = seq(2.5, 5, 6.5)
-		e.Transparency = seq(0.35, 0.6, 1)
+		e.Size = seq(1.6, 3.2, 4.2)
+		e.Transparency = seq(0.55, 0.75, 1)
 		e.Lifetime = NumberRange.new(0.6, 1)
 		e.Speed = NumberRange.new(3, 7)
 		e.SpreadAngle = Vector2.new(180, 180)
@@ -543,9 +545,8 @@ local function crowFeathers(ctx: Ctx): Grade
 	local black = Color3.fromRGB(24, 20, 32)
 	crossCut(ctx, Color3.fromRGB(220, 212, 255), 12)
 	kit.flare(ctx.point, Color3.fromRGB(200, 190, 255), 14, true)
-	featherBurst(ctx, black, 90)
-	blood(ctx, 50)
-	stamp(ctx.defender, "Crow", black, Color3.fromRGB(150, 125, 230))
+	featherBurst(ctx, black, 60)
+	stamp(ctx.defender, "Crow", black, Color3.fromRGB(150, 125, 230), ctx.attacker)
 	sound("Wings", ctx.root, 0.85, 1, 2)
 	task.delay(0.15, function()
 		sound("Caw", ctx.root, 0.55, 1, 2)
@@ -586,23 +587,26 @@ local function lightningSheath(ctx: Ctx): Grade
 	crossCut(ctx, Color3.fromRGB(235, 228, 255), 12)
 	strike(ctx, violet, Vector3.zero, 2.6)
 	kit.burst(ctx.point, violet, 80, 46, 8, ctx.blow)
-	kit.flare(ctx.root.Position, Color3.fromRGB(230, 225, 255), 26, true)
-	light(ctx.root, violet, 26, 7, 0.4)
+	kit.flare(ctx.root.Position, Color3.fromRGB(230, 225, 255), 20, true)
+	light(ctx.root, violet, 18, 2.5, 0.4)
 	crawl(ctx, violet, 6)
-	blood(ctx, 50)
-	stamp(ctx.defender, "Thunder", violet, WHITE)
+	stamp(ctx.defender, "Thunder", violet, WHITE, ctx.attacker)
 	sound("Thunder", ctx.root, 0.9, 1, 2.6)
 	sound("Zap", ctx.root, 0.6, 1.1, 1)
-	return { saturation = -0.5, contrast = 0.35, brightness = 0.3, tint = Color3.fromRGB(225, 220, 255), hold = 0.12 }
+	return { saturation = -0.5, contrast = 0.3, brightness = 0.15, tint = Color3.fromRGB(225, 220, 255), hold = 0.12 }
 end
 
--- A crescent of moonlight drawn across the cut.
+-- A crescent drawn across the cut. Centred a little past the fallen (along the blow) so it
+-- frames them instead of washing over the attacker, and lit at 1x so it keeps its colour in
+-- daylight instead of blowing out to white.
 local function crescentCut(ctx: Ctx, color: Color3, size: number)
 	local angle = screenAngle(ctx.sweep)
 	local s = slow()
+	local blow = ctx.blow or Vector3.zero
+	local centre = ctx.point + Vector3.new(blow.X, 0, blow.Z) * 1.2
 	for i, spec in { { size, 0 }, { size * 0.7, 0.05 } } do
 		task.delay(spec[2] / s, function()
-			local label = sprite(ctx.point, C.Crescent, color, Vector2.new(spec[1], spec[1]), angle - 45, 1.3)
+			local label = sprite(centre, C.Crescent, color, Vector2.new(spec[1], spec[1]), angle - 45, 1.3, 1)
 			label.Size = UDim2.fromScale(0.55, 0.55)
 			label.ImageTransparency = if i == 1 then 0 else 0.35
 			TweenService:Create(label, TweenInfo.new(0.14 / s, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -638,7 +642,7 @@ end
 local function moonCrescent(ctx: Ctx): Grade
 	local moon = Color3.fromRGB(214, 228, 255)
 	kit.cutStreak(ctx.point, ctx.sweep, 17, 1.2, moon)
-	crescentCut(ctx, moon, 15)
+	crescentCut(ctx, moon, 10)
 	-- A pale full moon rises over the fallen for a moment.
 	local orb =
 		sprite(ctx.root.Position + Vector3.new(0, 9, 0), GLOW, Color3.fromRGB(225, 235, 255), Vector2.new(9, 9), 0, 1.8)
@@ -650,9 +654,8 @@ local function moonCrescent(ctx: Ctx): Grade
 	end)
 	moonGlints(ctx, Color3.fromRGB(170, 200, 255), 60)
 	kit.flare(ctx.point, Color3.fromRGB(220, 232, 255), 20, true)
-	light(ctx.root, Color3.fromRGB(170, 195, 255), 22, 4, 1)
-	blood(ctx, 50)
-	stamp(ctx.defender, "Moon", moon, Color3.fromRGB(120, 155, 255))
+	light(ctx.root, Color3.fromRGB(170, 195, 255), 16, 1.5, 0.8)
+	stamp(ctx.defender, "Moon", moon, Color3.fromRGB(120, 155, 255), ctx.attacker)
 	sound("TempleBell", ctx.root, 0.8, 1, 2.8)
 	sound("MoonHum", ctx.root, 0.35, 1.2, 1.4)
 	return { saturation = -0.55, contrast = 0.25, brightness = -0.12, tint = Color3.fromRGB(192, 208, 255), hold = 0.4 }
@@ -661,9 +664,9 @@ end
 -- Yozakura Finale (夜桜): night falls, a pink crescent and a storm of glowing petals.
 local function yozakura(ctx: Ctx): Grade
 	local pink = Color3.fromRGB(240, 128, 182)
-	crescentCut(ctx, Color3.fromRGB(255, 196, 228), 15)
+	crescentCut(ctx, Color3.fromRGB(246, 150, 202), 10)
 	kit.cutStreak(ctx.point, ctx.sweep, 15, 1.2, Color3.fromRGB(255, 205, 228))
-	petalStorm(ctx, pink, 190, 0.3)
+	petalStorm(ctx, pink, 110, 0.3)
 	-- A spiral column of petals rising off the fallen.
 	local column = emit(ctx.root.Position + Vector3.new(0, -2, 0), 0, 2.8, function(e)
 		petals(e, pink, 0.3)
@@ -673,14 +676,13 @@ local function yozakura(ctx: Ctx): Grade
 		e.Acceleration = Vector3.new(0, 4, 0)
 		e.Drag = 0.5
 	end, Vector3.yAxis)
-	column.Rate = if kit.reduced() then 18 else 60
+	column.Rate = if kit.reduced() then 14 else 40
 	task.delay(0.8 / slow(), function()
 		column.Enabled = false
 	end)
-	light(ctx.root, pink, 20, 4, 1.2)
+	light(ctx.root, pink, 16, 1.5, 0.8)
 	kit.flare(ctx.point, Color3.fromRGB(255, 220, 238), 22, true)
-	blood(ctx, 30)
-	stamp(ctx.defender, "Yozakura", pink, Color3.fromRGB(120, 40, 120))
+	stamp(ctx.defender, "Yozakura", pink, Color3.fromRGB(120, 40, 120), ctx.attacker)
 	sound("Chimes", ctx.root, 0.8, 0.9, 2.8)
 	sound("TempleBell", ctx.root, 0.45, 1.2, 2.4)
 	return { saturation = -0.2, contrast = 0.3, brightness = -0.14, tint = Color3.fromRGB(232, 196, 240), hold = 0.45 }
@@ -723,27 +725,25 @@ local function raijin(ctx: Ctx): Grade
 	local ground = ctx.root.Position - Vector3.new(0, 2.6, 0)
 	shockRing(ground, violet, 16)
 	kit.burst(ctx.point, violet, 110, 52, 9, ctx.blow)
-	kit.flare(ctx.root.Position, Color3.fromRGB(235, 230, 255), 30, true)
-	light(ctx.root, violet, 30, 8, 0.5)
+	kit.flare(ctx.root.Position, Color3.fromRGB(235, 230, 255), 22, true)
+	light(ctx.root, violet, 20, 3, 0.45)
 	crawl(ctx, violet, 9)
-	blood(ctx, 40)
-	stamp(ctx.defender, "Raijin", violet, WHITE)
+	stamp(ctx.defender, "Raijin", violet, WHITE, ctx.attacker)
 	sound("Thunder", ctx.root, 1, 0.9, 3)
 	sound("Zap", ctx.root, 0.7, 1, 1.2)
-	return { saturation = -0.45, contrast = 0.4, brightness = 0.35, tint = Color3.fromRGB(222, 215, 255), hold = 0.15 }
+	return { saturation = -0.45, contrast = 0.35, brightness = 0.18, tint = Color3.fromRGB(222, 215, 255), hold = 0.15 }
 end
 
 -- Karasu Finale (烏): a black crescent, a murder of crows, the light going out.
 local function karasu(ctx: Ctx): Grade
 	local black = Color3.fromRGB(22, 18, 30)
-	crescentCut(ctx, Color3.fromRGB(205, 210, 238), 14)
-	featherBurst(ctx, black, 120)
+	crescentCut(ctx, Color3.fromRGB(24, 20, 34), 10) -- an ink-black crescent
+	featherBurst(ctx, black, 70)
 	task.delay(0.12 / slow(), function()
-		featherBurst(ctx, black, 50)
+		featherBurst(ctx, black, 30)
 	end)
 	kit.flare(ctx.point, Color3.fromRGB(190, 195, 230), 14, true)
-	blood(ctx, 50)
-	stamp(ctx.defender, "Karasu", black, Color3.fromRGB(150, 130, 220))
+	stamp(ctx.defender, "Karasu", black, Color3.fromRGB(150, 130, 220), ctx.attacker)
 	sound("Wings", ctx.root, 0.9, 0.9, 2.4)
 	task.delay(0.1, function()
 		sound("Caw", ctx.root, 0.6, 0.85, 2)

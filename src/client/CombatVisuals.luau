@@ -2081,8 +2081,6 @@ function CombatVisuals.start()
 		burst = burst,
 		cutStreak = cutStreak,
 		shards = shards,
-		bloodSpray = bloodSpray,
-		bloodPool = bloodPool,
 		vfxSlow = vfxSlow,
 		scaled = scaled,
 		reduced = reducedEffects,
