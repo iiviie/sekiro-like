@@ -58,6 +58,10 @@ local MARGIN = 8
 -- (Thrust, Dodge) sat over the opponent in the middle of the screen.
 local MIN_SCALE = 0.75
 local MAX_SCALE = 1
+-- In landscape the cluster takes at most this share of the screen's height, so its arc
+-- (Thrust, Dodge, Sweep) stays low and right, clear of the fighters in the middle: 0.85 on
+-- an 844x390 phone (the 60 px discs stay 51 pt).
+local MAX_HEIGHT_SHARE = 0.58
 local TICK = 0.15
 
 local screen: ScreenGui
@@ -79,6 +83,9 @@ function TouchHUD.layout(frame: Frame, size: Vector2)
 	local tall = size.Y > size.X
 	local area = if tall then CLUSTER_TALL else CLUSTER
 	local scale = math.min((size.X * 0.5 - MARGIN) / area.X, (size.Y - 40) / area.Y, MAX_SCALE)
+	if not tall then
+		scale = math.min(scale, size.Y * MAX_HEIGHT_SHARE / area.Y)
+	end
 	frame.Size = UDim2.fromOffset(area.X, area.Y)
 	local fit = frame:FindFirstChildOfClass("UIScale")
 	if fit then
