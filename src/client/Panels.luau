@@ -561,7 +561,7 @@ local function settingsPanel()
 		BorderSizePixel = 0,
 		ScrollBarThickness = 5,
 		ScrollBarImageColor3 = UI.Theme.Gold,
-		CanvasSize = UDim2.fromOffset(0, 34 + (#options + 2) * 54),
+		CanvasSize = UDim2.fromOffset(0, 34 + (#options + 5) * 54),
 	}, body)
 	sectionTitle("Settings  ·  saved for this session", 0, list)
 	for i, option in options do
@@ -614,6 +614,32 @@ local function settingsPanel()
 			UI.sound("Press")
 		end
 	)
+	-- Sound levels (client/Audio's groups): everything, music and stingers, effects and ambience.
+	local levels = {
+		{ key = "SettingMasterVolume", label = "Sound" },
+		{ key = "SettingMusicVolume", label = "Music" },
+		{ key = "SettingSFXVolume", label = "Effects" },
+	}
+	for i, level in levels do
+		local stored = player:GetAttribute(level.key)
+		segmented(
+			list,
+			30 + (#options + 1 + i) * 54,
+			level.key,
+			level.label,
+			{
+				{ text = "Off", value = 0 },
+				{ text = "Low", value = 0.35 },
+				{ text = "Mid", value = 0.7 },
+				{ text = "Full", value = 1 },
+			},
+			if typeof(stored) == "number" then stored else 1,
+			function(v)
+				player:SetAttribute(level.key, v)
+				UI.sound("Press")
+			end
+		)
+	end
 end
 
 type Def = { title: string, build: (body: Frame) -> (), large: boolean? }
