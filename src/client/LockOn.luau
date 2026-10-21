@@ -36,6 +36,13 @@ local FRAMING = {
 -- well over there (an opponent dashing past), and then swings across smoothly.
 local SIDE_SWITCH = 1.5 -- studs past the pair line
 local SIDE_RATE = 3
+-- Thin set dressing (fence posts and rails, ropes, lantern poles) never pulls the camera in: the
+-- probe passes through it and it fades on this screen while it's in the shot. Tag anything else
+-- that should behave so with CameraIgnore.
+local IGNORE_TAG = "CameraIgnore"
+local THIN = 1.5 -- studs: a part whose two smaller sides are both under this may be thin (isThin)
+local PROP_FADE = 0.75
+local PROP_RATE = 12
 local probeParams = RaycastParams.new()
 probeParams.FilterType = Enum.RaycastFilterType.Exclude
 probeParams.RespectCanCollide = true
@@ -43,6 +50,7 @@ local eye: Vector3? = nil -- the lagged camera position and look direction (Kann
 local lookDir: Vector3? = nil
 local side = 1 -- which shoulder the camera sits over (1 right, -1 left)
 local sideBlend = 1
+local fadedProps: { [BasePart]: number } = {}
 local reticle: BillboardGui? = nil
 local listeners: { (Model?) -> () } = {}
 
@@ -231,9 +239,49 @@ local function framing(name: string): number
 	return value
 end
 
+local function isThin(part: BasePart): boolean
+	if part:IsA("Terrain") then
+		return false
+	end
+	if CollectionService:HasTag(part, IGNORE_TAG) then
+		return true
+	end
+	-- Posts, poles, rails and ropes are thin in two directions with a roughly square section;
+	-- planks and kerbs are thin too but flat (something to stand on), so they still count.
+	local size = part.Size
+	local a, b, c = size.X, size.Y, size.Z
+	local smallest = math.min(a, b, c)
+	local middle = math.max(math.min(a, b), math.min(math.max(a, b), c))
+	return middle < THIN and smallest >= middle * 0.5
+end
+
+-- Fades the thin props in the shot (`inShot`) and restores the ones that left it.
+local function fadeProps(inShot: { [BasePart]: boolean }, dt: number)
+	local alpha = math.min(1, dt * PROP_RATE)
+	for part in inShot do
+		if not fadedProps[part] then
+			fadedProps[part] = 0
+		end
+	end
+	for part, amount in fadedProps do
+		local goal = if inShot[part] then PROP_FADE else 0
+		amount += (goal - amount) * alpha
+		if goal == 0 and amount < 0.02 or not part.Parent then
+			part.LocalTransparencyModifier = 0
+			fadedProps[part] = nil
+		else
+			part.LocalTransparencyModifier = amount
+			fadedProps[part] = amount
+		end
+	end
+end
+
 local function updateCamera(dt: number)
 	if not target then
 		eye, lookDir = nil, nil
+		if next(fadedProps) then
+			fadeProps({}, 1)
+		end
 		return
 	end
 	if not isValid(target, settings.BreakRange) then
@@ -301,9 +349,10 @@ local function updateCamera(dt: number)
 	-- Kannagi's arm probes the world (ProbeChannel): a wall, rock or post between you and the
 	-- eye pulls the camera in front of it at once (fighters never do).
 	local reach = current - pivot
+	local inShot: { [BasePart]: boolean } = {}
 	if reach.Magnitude > 0.5 then
 		local ignore: { Instance } = CollectionService:GetTagged(Types.Tag)
-		for _ = 1, 4 do
+		for _ = 1, 8 do
 			probeParams.FilterDescendantsInstances = ignore
 			local hit = workspace:Spherecast(pivot, PROBE_RADIUS, reach, probeParams)
 			if not hit then
@@ -312,12 +361,33 @@ local function updateCamera(dt: number)
 			local part = hit.Instance
 			if part:IsA("BasePart") and part.Transparency >= 0.9 then
 				table.insert(ignore, part) -- invisible fence walls keep players in, not the camera
+			elseif part:IsA("BasePart") and isThin(part) then
+				table.insert(ignore, part) -- a post or rail: see through it instead of pulling in
+				inShot[part] = true
 			else
 				current = pivot + reach.Unit * math.max(hit.Distance - 0.1, 1.5)
 				break
 			end
 		end
 	end
+	-- Thin props between the eye and the target fade too (a post right in front of the lens).
+	do
+		local ignore: { Instance } = CollectionService:GetTagged(Types.Tag)
+		local line = theirs.Position - current
+		for _ = 1, 4 do
+			probeParams.FilterDescendantsInstances = ignore
+			local hit = workspace:Raycast(current, line, probeParams)
+			local part = hit and hit.Instance
+			if not part or not part:IsA("BasePart") or not (part.Transparency >= 0.9 or isThin(part)) then
+				break
+			end
+			table.insert(ignore, part)
+			if part.Transparency < 0.9 then
+				inShot[part] = true
+			end
+		end
+	end
+	fadeProps(inShot, dt)
 	eye = current
 	local wantLook = (focus - current).Unit
 	local look = lookDir or wantLook
