@@ -1,26 +1,22 @@
 --!strict
--- Duel presentation: the intro card as the first round counts down (both fighters' banner,
--- title, blade and rank, face to face), the score banner at the top of the screen (it
+-- Duel presentation: the score banner at the top of the screen (it
 -- takes the royale banner's place while you duel), a line while you wait on a duel pad,
 -- and the round, point and result splashes. Driven by the Duel remote and the DuelState / DuelBotAt
 -- player attributes (see server/DuelService).
 
-local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
-local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Config = require(ReplicatedStorage.Shared.Config)
-local Flair = require(ReplicatedStorage.Shared.Flair)
-local Progression = require(ReplicatedStorage.Shared.Progression)
-local Ranks = require(ReplicatedStorage.Shared.Ranks)
 local CombatHUD = require(script.Parent.CombatHUD)
+local IntroCinematic = require(script.Parent.IntroCinematic)
 local LockOn = require(script.Parent.LockOn)
 local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
+local THEME = UI.Theme
 
 local REASONS: { [string]: string } = {
 	Time = "on vitality, as time ran out",
@@ -45,320 +41,12 @@ local function now(): number
 	return workspace:GetServerTimeNow()
 end
 
----------------------------------------------------------------------------------------
--- The intro card: two banners face to face while the first round counts down.
-
-type Fighter = {
-	name: string,
-	title: Catalog.Item?,
-	title2: Catalog.Item?, -- the second title slot (TitleSlot pass)
-	banner: string?,
-	blade: string,
-	bladeTint: Color3,
-	rank: string?,
-	rankColor: Color3?,
-	crest: string?,
-	userId: number?, -- a player's avatar stands on a plain banner
-}
-
-local function loadoutOf(who: Player): { [string]: string }
-	local raw = who:GetAttribute("Loadout")
-	if typeof(raw) ~= "string" then
-		return {}
+-- Test hook (Studio): the pre-fight intro against any model (see client/IntroCinematic).
+function DuelHUD.previewIntro(foe: Model, mode: string?)
+	local hook = player:FindFirstChild("PlayerScripts") and (player :: any).PlayerScripts:FindFirstChild("IntroTest")
+	if hook and hook:IsA("BindableFunction") then
+		hook:Invoke("vs", foe, mode)
 	end
-	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
-	return if ok and typeof(decoded) == "table" then decoded else {}
-end
-
-local function tintOf(v: Vector3): Color3
-	return Color3.new(math.min(v.X, 1), math.min(v.Y, 1), math.min(v.Z, 1))
-end
-
-local function fighterOf(who: Player?, model: Model?, fallbackName: string): Fighter
-	if who then
-		local loadout = loadoutOf(who)
-		local bladeItem = Catalog.get(loadout.bladeSkin)
-		local skinRef = if bladeItem and bladeItem.category == "bladeSkin" then bladeItem.ref else "Steel"
-		local rank = Ranks.of(who:GetAttribute("Rating") or Config.Rating.Start)
-		-- The second title shows only with the pass (the server also clears it without one).
-		local passes = who:GetAttribute("Passes")
-		local hasSlot = typeof(passes) == "string"
-			and string.find("," .. passes .. ",", ",pass.TitleSlot,", 1, true) ~= nil
-		local second = if hasSlot and loadout.title2 ~= loadout.title then Catalog.get(loadout.title2) else nil
-		return {
-			name = who.DisplayName,
-			title = Catalog.get(loadout.title),
-			title2 = if second and second.category == "title" then second else nil,
-			banner = Flair.ref(loadout.banner),
-			blade = if bladeItem then bladeItem.name else Progression.skin(skinRef).name,
-			bladeTint = tintOf(Progression.skin(skinRef).tint),
-			rank = rank.name,
-			rankColor = rank.color,
-			crest = (Assets.RankCrests :: any)[rank.tier],
-			userId = if who.UserId > 0 then who.UserId else nil,
-		}
-	end
-	local skinRef = model and model:GetAttribute("Skin")
-	local skin = Progression.skin(if typeof(skinRef) == "string" then skinRef else "Steel")
-	return {
-		name = fallbackName,
-		title = nil,
-		title2 = nil,
-		banner = nil,
-		blade = skin.name,
-		bladeTint = tintOf(skin.tint),
-		rank = "Wandering swordsman",
-		rankColor = UI.Parchment,
-		crest = nil,
-		userId = nil,
-	}
-end
-
-local introCard: Frame? = nil
-local introGui: ScreenGui? = nil
-
--- The card lives in its own ScreenGui with sibling layering, so the banner art stays under
--- the fighter's details.
-local function introLayer(): ScreenGui
-	if not introGui then
-		introGui = UI.new("ScreenGui", {
-			Name = "DuelIntro",
-			ResetOnSpawn = false,
-			IgnoreGuiInset = true,
-			DisplayOrder = 6,
-			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-		}, player:WaitForChild("PlayerGui"))
-	end
-	return introGui :: ScreenGui
-end
-
-local THEME = UI.Theme
-
-local function titleColor(item: Catalog.Item?): Color3
-	return if item then UI.rarity(item.rarity).text else THEME.Bone
-end
-
--- One fighter: a lacquer plate holding their banner cloth (part C's painted art) above a
--- details strip: titles, name, rank and blade.
-local function half(parent: Instance, f: Fighter, left: boolean): Frame
-	local look = Flair.banner(f.banner)
-	local side = UI.panel({
-		Name = if left then "You" else "Foe",
-		material = "lacquer",
-		sliceScale = 0.6,
-		AnchorPoint = Vector2.new(if left then 1 else 0, 0.5),
-		Position = UDim2.new(0.5, if left then -46 else 46, 0.5, 0),
-		Size = UDim2.fromOffset(300, 320),
-	}, parent)
-	-- The cloth: the banner's colour and art, inset in the plate.
-	local cloth = UI.new("Frame", {
-		Name = "Cloth",
-		Position = UDim2.fromOffset(12, 12),
-		Size = UDim2.new(1, -24, 1, -170), -- the part above the details strip
-		BackgroundColor3 = look.cloth,
-		BorderSizePixel = 0,
-		ClipsDescendants = true,
-		ZIndex = 1,
-	}, side)
-	UI.new("UIStroke", { Color = look.edge, Thickness = 2 }, cloth)
-	UI.new("UIGradient", {
-		Rotation = 90,
-		Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(170, 166, 160)),
-	}, cloth)
-	local motif = UI.text({
-		Name = "Motif",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(0.8, 0.9),
-		Font = UI.Display,
-		TextScaled = true,
-		TextColor3 = look.ink,
-		TextTransparency = 0.72,
-		Text = look.motif,
-	}, cloth)
-	if Flair.decorateBanner(cloth, f.banner or "Plain") then
-		motif.Visible = false -- part C's painted pattern and kanji replace the text motif
-	end
-	-- The plain banner is a bare cloth: the fighter stands on it instead (their avatar, or a
-	-- bot's blade), so the card never shows an empty panel.
-	if not f.banner or f.banner == "Plain" then
-		UI.new("ImageLabel", {
-			Name = "Figure",
-			AnchorPoint = Vector2.new(0.5, 1),
-			Position = UDim2.fromScale(0.5, if f.userId then 1.08 else 0.9),
-			Size = if f.userId then UDim2.fromScale(1.1, 1.1) else UDim2.fromScale(0.62, 0.62),
-			SizeConstraint = Enum.SizeConstraint.RelativeYY,
-			BackgroundTransparency = 1,
-			Image = if f.userId then `rbxthumb://type=Avatar&id={f.userId}&w=420&h=420` else Assets.Icons.Katana,
-			ImageColor3 = if f.userId then Color3.new(1, 1, 1) else f.bladeTint,
-			ZIndex = 2,
-		}, cloth)
-	end
-	if f.crest then
-		UI.new("ImageLabel", {
-			Name = "Crest",
-			AnchorPoint = Vector2.new(if left then 0 else 1, 0),
-			Position = UDim2.new(if left then 0 else 1, if left then 4 else -4, 0, 4),
-			Size = UDim2.fromOffset(64, 64),
-			BackgroundTransparency = 1,
-			Image = f.crest,
-			ZIndex = 5,
-		}, side)
-	end
-	local shade = UI.new("Frame", {
-		Name = "Details",
-		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.new(0, 12, 1, -10),
-		Size = UDim2.new(1, -24, 0, 150),
-		BackgroundTransparency = 1,
-		ZIndex = 5,
-	}, side)
-	UI.text({
-		Name = "Title",
-		Position = UDim2.fromOffset(0, 2),
-		Size = UDim2.new(1, 0, 0, 22),
-		FontFace = UI.Fonts.Display,
-		TextSize = 18,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		TextColor3 = titleColor(f.title),
-		TextTransparency = if f.title then 0 else 1,
-		Text = if f.title then f.title.name else "",
-	}, shade)
-	UI.label("label", {
-		Name = "Title2",
-		Position = UDim2.fromOffset(0, 22),
-		Size = UDim2.new(1, 0, 0, 18),
-		TextSize = 15,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		TextColor3 = titleColor(f.title2),
-		Visible = f.title2 ~= nil,
-		Text = if f.title2 then f.title2.name else "",
-	}, shade)
-	UI.text({
-		Name = "PlayerName",
-		Position = UDim2.fromOffset(0, 40),
-		Size = UDim2.new(1, 0, 0, 38),
-		FontFace = UI.Fonts.Display,
-		TextSize = 32,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		Text = f.name,
-	}, shade)
-	UI.label("label", {
-		Name = "Rank",
-		Position = UDim2.fromOffset(0, 78),
-		Size = UDim2.new(1, 0, 0, 22),
-		TextSize = 17,
-		TextColor3 = f.rankColor or THEME.Bone,
-		Text = f.rank or "",
-	}, shade)
-	UI.divider(shade, { Position = UDim2.fromOffset(0, 100), Size = UDim2.new(1, 0, 0, 8), ornament = "none" })
-	local blade = UI.new("Frame", {
-		Position = UDim2.fromOffset(0, 108),
-		Size = UDim2.new(1, 0, 0, 40),
-		BackgroundTransparency = 1,
-	}, shade)
-	UI.new("UIListLayout", {
-		FillDirection = Enum.FillDirection.Horizontal,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
-		VerticalAlignment = Enum.VerticalAlignment.Center,
-		Padding = UDim.new(0, 6),
-	}, blade)
-	UI.new("ImageLabel", {
-		Size = UDim2.fromOffset(40, 40),
-		BackgroundTransparency = 1,
-		Image = Assets.Icons.Katana,
-		ImageColor3 = f.bladeTint,
-	}, blade)
-	UI.label("body", {
-		Name = "Blade",
-		Size = UDim2.fromOffset(0, 30),
-		AutomaticSize = Enum.AutomaticSize.X,
-		TextSize = 17,
-		TextColor3 = THEME.Dim,
-		Text = f.blade,
-	}, blade)
-	return side
-end
-
-local function showIntro(me: Fighter, foe: Fighter, holdFor: number)
-	if introCard then
-		introCard:Destroy()
-	end
-	-- A CanvasGroup, so the whole card fades as one at the end.
-	local card = UI.new("CanvasGroup", {
-		Name = "Intro",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.46),
-		Size = UDim2.fromOffset(780, 340),
-		BackgroundTransparency = 1,
-	}, introLayer())
-	local scale = UI.new("UIScale", {}, card)
-	local view = workspace.CurrentCamera.ViewportSize
-	scale.Scale = math.clamp(math.min((view.X - 24) / 780, (view.Y * 0.8) / 340), 0.4, 1)
-	local left = half(card, me, true)
-	local right = half(card, foe, false)
-	-- 決闘 stamped between the two plates once they meet.
-	local kanji = UI.new("ImageLabel", {
-		Name = "Kanji",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.42),
-		Size = UDim2.fromOffset(120, 120),
-		BackgroundTransparency = 1,
-		Image = Assets.UI.KanjiDuel,
-		ImageColor3 = THEME.Crimson,
-		ImageTransparency = 1,
-		ZIndex = 6,
-	}, card)
-	UI.label("caption", {
-		Name = "Info",
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0.42, 62),
-		Size = UDim2.fromOffset(110, 44),
-		TextWrapped = true,
-		TextSize = 15,
-		TextColor3 = THEME.Bone,
-		TextStrokeColor3 = THEME.Ink,
-		TextStrokeTransparency = 0.35,
-		Text = `First to {firstTo}{if rated then "\nranked" else ""}`,
-		ZIndex = 6,
-	}, card)
-	task.delay(0.3, function()
-		if kanji.Parent then
-			kanji.ImageTransparency = 0
-			UI.stamp(kanji, 0)
-			UI.sound("Stamp")
-		end
-	end)
-	-- Slide in from the sides, hold through the countdown, fade.
-	local leftHome, rightHome = left.Position, right.Position
-	left.Position = leftHome - UDim2.fromOffset(240, 0)
-	right.Position = rightHome + UDim2.fromOffset(240, 0)
-	UI.tween(left, 0.35, { Position = leftHome })
-	UI.tween(right, 0.35, { Position = rightHome })
-	introCard = card
-	task.delay(math.max(1.2, holdFor), function()
-		if introCard ~= card then
-			return
-		end
-		UI.tween(card, 0.3, { GroupTransparency = 1 })
-		task.delay(0.35, function()
-			card:Destroy()
-			if introCard == card then
-				introCard = nil
-			end
-		end)
-	end)
-end
-
--- Test hook (Studio): show the card against any model or player.
-function DuelHUD.previewIntro(foe: Instance?, hold: number?)
-	local foePlayer = if foe and foe:IsA("Player") then foe else nil
-	local foeModel = if foe and foe:IsA("Model") then foe else nil
-	showIntro(
-		fighterOf(player, nil, player.DisplayName),
-		fighterOf(foePlayer, foeModel, if foe then foe.Name else "Ronin"),
-		hold or 3
-	)
 end
 
 local function refreshScore()
@@ -372,8 +60,6 @@ local function onDuel(kind: string, data: { [string]: any })
 		rated = data.rated == true
 		mine, theirs = 0, 0
 		refreshScore()
-		-- The intro card (on round 1, which follows at once with the foe's body) replaces
-		-- the old "Duel against" splash.
 		CombatHUD.showControls()
 	elseif kind == "Round" then
 		mine, theirs = data.mine or 0, data.theirs or 0
@@ -384,15 +70,8 @@ local function onDuel(kind: string, data: { [string]: any })
 		end
 		if (data.round or 1) > 1 then
 			CombatHUD.splash(Assets.UI.KanjiDuel, `Round {data.round}`, UI.Parchment, 1)
-		else
-			local foeModel = if typeof(data.foe) == "Instance" and data.foe:IsA("Model") then data.foe else nil
-			local foePlayer = foeModel and Players:GetPlayerFromCharacter(foeModel)
-			showIntro(
-				fighterOf(player, nil, player.DisplayName),
-				fighterOf(foePlayer, foeModel, opponent),
-				fightAt - now() - 0.4
-			)
 		end
+		-- Round 1 follows the pre-fight intro (client/IntroCinematic), which shows both cards.
 	elseif kind == "Point" then
 		mine, theirs = data.mine or mine, data.theirs or theirs
 		refreshScore()
@@ -476,6 +155,7 @@ local function step()
 end
 
 function DuelHUD.start()
+	IntroCinematic.start()
 	screen = UI.new("ScreenGui", {
 		Name = "DuelHUD",
 		ResetOnSpawn = false,
