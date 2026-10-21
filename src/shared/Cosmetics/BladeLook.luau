@@ -28,6 +28,8 @@ local function seq(...: number): NumberSequence
 	return NumberSequence.new(points)
 end
 
+-- Glowing kinds stay only half additive: fully additive pale motes vanish against the daylit
+-- sand, so they keep some of their own colour (seen in Studio, phase 3).
 -- A mote emitter of `kind` (also used by client/CosmeticFX for line smears and deflects, so a
 -- line's petals are the same petals everywhere).
 function BladeLook.emitter(kind: string, color: Color3): ParticleEmitter
@@ -66,57 +68,57 @@ function BladeLook.emitter(kind: string, color: Color3): ParticleEmitter
 		e.LightInfluence = 1
 	elseif kind == "sparks" then
 		e.Texture = GLOW
-		e.Size = seq(0.1, 0)
+		e.Size = seq(0.14, 0)
 		e.Lifetime = NumberRange.new(0.08, 0.2)
 		e.Speed = NumberRange.new(4, 9)
 		e.SpreadAngle = Vector2.new(180, 180)
 		e.Orientation = Enum.ParticleOrientation.VelocityParallel
 		e.Squash = NumberSequence.new(2.5)
-		e.LightEmission = 1
+		e.LightEmission = 0.6
 		e.Brightness = 3
 	elseif kind == "embers" then
 		e.Texture = GLOW
-		e.Size = seq(0.12, 0.08, 0)
+		e.Size = seq(0.18, 0.12, 0)
 		e.Lifetime = NumberRange.new(0.6, 1.2)
 		e.Speed = NumberRange.new(0.3, 1.2)
 		e.SpreadAngle = Vector2.new(180, 180)
 		e.Acceleration = Vector3.new(0, 2.5, 0)
-		e.LightEmission = 1
+		e.LightEmission = 0.4
 		e.Brightness = 2
 	elseif kind == "mist" then
 		e.Texture = GLOW
 		e.Size = seq(0.5, 1.2, 1.6)
-		e.Transparency = seq(1, 0.72, 1)
+		e.Transparency = seq(1, 0.55, 1)
 		e.Lifetime = NumberRange.new(0.8, 1.4)
 		e.Speed = NumberRange.new(0.1, 0.4)
 		e.SpreadAngle = Vector2.new(180, 180)
 		e.LightEmission = 0.2
 	elseif kind == "snow" then
 		e.Texture = GLOW
-		e.Size = seq(0.12, 0.08)
+		e.Size = seq(0.16, 0.1)
 		e.Transparency = seq(0, 1)
 		e.Lifetime = NumberRange.new(1, 2)
 		e.Speed = NumberRange.new(0.2, 0.6)
 		e.SpreadAngle = Vector2.new(180, 180)
 		e.Acceleration = Vector3.new(0.2, -1, 0)
-		e.LightEmission = 0.5
+		e.LightEmission = 0.2
 	elseif kind == "foxfire" then
 		e.Texture = GLOW
 		e.Color = ColorSequence.new(color:Lerp(Color3.new(1, 1, 1), 0.5), color)
-		e.Size = seq(0.3, 0.2, 0)
-		e.Transparency = seq(0.1, 0.3, 1)
+		e.Size = seq(0.42, 0.3, 0)
+		e.Transparency = seq(0.05, 0.25, 1)
 		e.Lifetime = NumberRange.new(0.4, 0.8)
 		e.Speed = NumberRange.new(0.2, 0.8)
 		e.SpreadAngle = Vector2.new(30, 30)
 		e.Acceleration = Vector3.new(0, 4, 0)
-		e.LightEmission = 1
+		e.LightEmission = 0.5
 		e.Brightness = 2
 	else -- glints: twinkles that bloom and vanish in place along the blade
 		e.Texture = GLOW
-		e.Size = seq(0, 0.22, 0)
+		e.Size = seq(0, 0.3, 0)
 		e.Lifetime = NumberRange.new(0.35, 0.7)
 		e.Speed = NumberRange.new(0, 0.1)
-		e.LightEmission = 1
+		e.LightEmission = 0.6
 		e.Brightness = 4
 	end
 	return e
@@ -133,14 +135,17 @@ end
 
 -- Emitters spread along the blade (an emitter on an attachment emits from a point).
 local function motesAlong(sword: BasePart, guard: Vector3, tip: Vector3, kind: string, color: Color3, rate: number)
+	-- `rate` is per blade at rest; seen in Studio, that left one or two short-lived motes on
+	-- the whole blade at a time, so the blade sheds twice its listed rate.
+	local each = rate * 2 / 3
 	for _, at in { 0.35, 0.65, 0.95 } do
 		local attachment = Instance.new("Attachment")
 		attachment.Name = "MoteSpan"
 		attachment.Position = guard:Lerp(tip, at)
 		attachment.Parent = sword
 		local e = BladeLook.emitter(kind, color)
-		e.Rate = rate / 3
-		e:SetAttribute("BaseRate", rate / 3) -- client/CombatVisuals scales it for reduced effects
+		e.Rate = each
+		e:SetAttribute("BaseRate", each) -- client/CombatVisuals scales it for reduced effects
 		e.Parent = attachment
 	end
 end
