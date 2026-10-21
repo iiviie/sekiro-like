@@ -275,7 +275,9 @@ local DEFS: { [string]: Def } = {
 	AmbArena = { group = "Ambience", fallback = "AmbLobby", volume = 0.28 },
 	AmbBoss = { group = "Ambience", fallback = "AmbLobby", volume = 0.28 },
 	AmbWaterfall = { group = "Ambience", volume = 0.25, near = 10, far = 70 },
-	AmbMist = { group = "Ambience", volume = 0.3 },
+	-- Placeholder until the generated mist bed: the moon hum pitched down to a low drone, so
+	-- stepping outside the ring is heard as well as seen.
+	AmbMist = { group = "Ambience", ph = one(Assets.Cosmetics.Sounds.MoonHum, 1, 0.6), volume = 0.18 },
 }
 Audio.Defs = DEFS
 
