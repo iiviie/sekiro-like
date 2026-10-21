@@ -25,6 +25,9 @@ return {
 	Paving = Color3.fromRGB(164, 148, 120), -- fighting floors (terrain sand): quiet, so characters pop
 	Sand = Color3.fromRGB(190, 174, 146), -- sand-material parts (pads, the courtyard's duel circle)
 	Rock = Color3.fromRGB(140, 128, 98),
+	-- Terrain Rock (the island cliffs): near-neutral, since any warm tint turns the 2022 Rock
+	-- texture's lichen speckle lilac under midday light.
+	Cliff = Color3.fromRGB(122, 119, 110),
 	LanternStone = Color3.fromRGB(184, 170, 146),
 	Grass = Color3.fromRGB(104, 136, 70),
 	Moss = Color3.fromRGB(92, 120, 60),
