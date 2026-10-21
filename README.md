@@ -161,18 +161,20 @@ panels only read `Catalog` and the attributes the server publishes. Every source
 
 | Currency | Earned from | Spent on |
 |---|---|---|
-| **Coins** | Matches (10 a fight, 15 a kill, 5 a deathblow, 60 a royale win, 25 a duel win), level-ups (50 + 5 × level, capped at 150, +100 every 5th level), daily missions and weekly bounties, boss trials (10 fought, 30 × stars a clear, 120 on a first clear), the daily streak (50 to 150), Shrine Draws, pass tiers | The Odachi (1,500, Mastery 5), base blade skins (some Mastery-gated), outfits, titles, banners; the daily shop's coin slots. About 131k coins of items: ~42 h at an hour a day |
-| **Gems** (premium) | Gem packs (Robux), and slowly by play: 10 + 10 per star on a boss first clear, 10 every 5th Mastery level, 20 on streak day 7, Shrine Draws, the pass (free track ~100, premium ~500), ranked season end (20 Bronze to 250 Shogun) | Finishers, blade lines (L1 650), premium outfits and banners, the daily shop's gem slots and weekly featured set, the Shrine Capsule, up to half of a line upgrade (10 gems a Whetstone) |
+| **Coins** | Matches (10 a fight, 15 a kill, 5 a deathblow, 60 a royale win, 25 a duel win), level-ups (50 + 5 × level, capped at 150, +100 every 5th level), daily missions and weekly bounties, boss trials (10 fought, 30 × stars a clear, 120 on a first clear), the daily streak (50 to 150), Shrine Draws, pass tiers | The Odachi (1,500, Mastery 5), base blade skins (some Mastery-gated), outfits, titles, banners; the daily shop's coin slots. About 137k coins of items: ~57 h at an hour a day |
+| **Gems** (premium) | Gem packs (Robux), and slowly by play: 10 + 10 per star on a boss first clear, 10 every 5th Mastery level, 20 on streak day 7, Shrine Draws, the pass (free track ~100, premium ~500), ranked season end (20 Bronze to 250 Shogun) | Finishers, blade lines (L1 650), intros (200 / 400), premium outfits and banners (gem items sell only while they're in the daily shop or the week's set), the season's premium pass (450), the Shrine Capsule, up to half of a line upgrade (10 gems a Whetstone) |
 | **Whetstones** (earn-only, never sold) | 1 per daily mission and weekly bounty, 1 per win (the first 2 wins a day), boss clears (1 per star) and first clears (2), every 5th Mastery level (2), streak day 7 (5), pass tiers, Shrine Draws | Blade line upgrades: L2 / L3 / L4 cost 20 / 40 / 60. A full line takes ~12 days at 40 min a day |
 | **Shards** | Duplicates from draws and the capsule (5 common to 150 legendary) | Any shrine pool item in the shard shop (25 to 750) |
-| **Pass XP** | 30 a fight, +20 a win, 50 a daily mission, 200 a weekly bounty; double in a season's final week | Pass tiers (1,000 each) |
+| **Pass XP** | 30 a fight, +20 a win, 50 a daily mission, 200 a weekly bounty; a season's first fight tops you up to tier 1; double in a season's final week | Pass tiers (1,000 each) |
 | **Shrine Draws** | 1 per royale win (3 a day), the first duel win of the day, pass tiers | Opening a draw at the shrine |
 
 Mastery (XP) levels: `160 + 95(L-1)` XP below level 10 (about an hour), then +8% a level up to 6,000. Weapon Mastery
 (per weapon XP) evolves the blade: a ribbon at M10, an engraved edge at M25, an aura at M50. The daily streak pauses on
 a missed day instead of resetting. Anti-farm: royale wins against bots only don't count for the Wins board or the
 win titles (`HumanWins`), duels against the same player pay 100/100/50/25/0% for the 1st-5th that day, and a fighter's
-kill coins pay once per match.
+kill coins pay once per match. Bots pay less than people (`AntiFarm.BotRoyale`): a bot cut down in a royale or a duel
+pays half its coins, and after the day's first 3 wins against bots only (royales and duels counted apart) a win pays
+half its coins and XP.
 
 ### Unlocks and the Locker
 
@@ -187,16 +189,25 @@ the duel intro card, the end-of-round podium and the nameplate over your head.
 ### The season pass: Path of the Blade
 
 A 6-week season (S1: 2026-10-19 to 2026-11-30, then a week's break) with 30 tiers of 1,000 Pass XP. The free track
-pays coins, gems, Whetstones, Shrine Draws, a blade and a title; the premium track (449 R$) pays about 500 gems back,
-Whetstones, draws, two blades, a banner, a nameplate, and the capstone at tier 30 (the season blade, its finisher and a
-title). Premium is retroactive: everything already reached becomes claimable. Three daily missions (one free reroll a
-day) and five weekly bounties replace the old Trials. A daily player finishes around day 32 without the double-XP
-week; a 3-times-a-week player reaches about tier 20. Tier skips: +1 (49 R$), +10 (399 R$).
+pays coins, gems, Whetstones, Shrine Draws, a blade and a title; the premium track (449 R$, or 450 gems from the Pass
+panel with the usual confirm) pays about 500 gems back, so it buys the next season's premium; Whetstones, draws, two
+blades, a banner, a nameplate, and the capstone at tier 30 (the season blade, its finisher and a title). Premium is
+retroactive: everything already reached becomes claimable. A season's first fight lifts the pass to tier 1 ("first
+steps on the path", `EconomyConfig.N.Pass.FirstFightTier`), so nobody meets a tier-0 pass. Three daily missions (one
+free reroll a day: a skill one, a duel or boss trial one, a finishing one) and five weekly bounties replace the old
+Trials. A daily player finishes around day 31 without the double-XP week and has earned 450 gems by about day 15; a
+3-times-a-week player reaches about tier 23. Tier skips: +1 (49 R$), +10 (399 R$).
 
 ### Store, draws and odds
 
 - **Daily shop:** 2 coin and 2 gem items a day, plus a weekly featured set of 3 at 20% off (you pay only for what you
-  don't own). Every item comes back within 8 weeks (`EconomyConfig.Shop.ReturnWithinDays`, 56 days). No paid refresh; the only timers are the real rotation times.
+  don't own). The rotation is real for gem items: a gem-priced cosmetic can only be bought (Store, Locker, the shard
+  shop's gem price) on a day it's in the gem slots or the week's set; the server refuses it otherwise
+  (`Economy.setBuyGate` from ShopService). Out of the shop, the Locker shows "Returns to the shop" with the wishlist,
+  and the server sends one calm notice the day a wished item is in. Coin items, earned items and Shards are always
+  available. The longest a gem item can be away is computed from the slots (`ShopService.returnDays`, 13 days with 14
+  gem items) and shown on the Store's line; start-up warns when it passes `EconomyConfig.Shop.ReturnWithinDays` (14),
+  which means add a gem slot. No paid refresh; the only timers are the real rotation times.
 - **Shrine Draw** (earned, no Robux): opens one outcome. Odds: 100 coins 40%, 250 coins 12%, 1 Whetstone 15%,
   3 Whetstones 3%, 5 gems 8%, 20 gems 2%, 10 Shards 10%, a common/uncommon cosmetic 6%, rare 3%, epic 1%. The odds
   sheet shows before your first draw of a session and from the Odds button any time; owned items read "owned → N
@@ -209,8 +220,10 @@ week; a 3-times-a-week player reaches about tier 20. Tier skips: +1 (49 R$), +10
   `PolicyService:GetPolicyInfoForPlayerAsync().ArePaidRandomItemsRestricted` is true; for them, Shrine Draws that came
   from the premium pass track pay a fixed 100 coins, 1 Whetstone and 5 gems instead. The capsule also has a master
   switch, `EconomyConfig.PaidCapsule`: `"studio"` (default: on in Studio, **off in live servers**), `"on"`, `"off"`.
-- **Offers:** the Initiate's Bundle (149 R$, once per account, for 72 h after your first join), the premium pass and the
-  game passes. At most one contextual card per account (after a first level-up or first loss), only in the lobby.
+- **Offers:** the Initiate's Bundle (149 R$, once per account, for 72 h after your first join), the Stagecraft Bundle
+  (499 R$, the four gem intros; any you already own come back as their gem price, and it isn't sold once you own all
+  four), the premium pass and the game passes. A coin, gem or Shard purchase ends in the "Unlocked" card (Equip,
+  Preview). At most one contextual card per account (after a first level-up or first loss), only in the lobby.
 
 ### Ranked seasons
 
@@ -237,7 +250,7 @@ Until an id is filled in (it's `0` today), Studio purchases take Monetization's 
 |---|---|---|---|
 | `gems.80` / `gems.210` / `gems.440` / `gems.920` / `gems.1920` / `gems.5000` | Developer product | 79 / 199 / 399 / 799 / 1,599 / 3,999 | that many gems |
 | `bundle.Initiate` | Developer product | 149 | Initiate's Vow blade, Initiate title, 300 gems, 1,500 coins (once, 72 h) |
-| `bundle.LineYozakura` / `LineRaijin` / `LineKarasu` | Developer product | 1,499 | the line at L4 with its finisher (marked "soon": not on sale yet) |
+| `bundle.Stagecraft` | Developer product | 499 | Sakura Gust, War Fan, Ink Stroke, Crow's Perch (owned ones refunded as gems) |
 | `pass.Premium` | Developer product (bought per season) | 449 | the season's premium track |
 | `pass.TierSkip` / `pass.Tiers10` | Developer product | 49 / 399 | +1 / +10 pass tiers |
 | `pass.VIP` | Game pass | 299 | Hatamoto nameplate, chat tag, sheath |
@@ -255,10 +268,12 @@ a profile is loading or failed to load.
   `prompt(key)`, `pass(key)`, profile tests `reload(raw)`, `raw()`, `writeRaw(raw)`, `save()`, and fight results
   `progress("boss"|"royale"|"duel", ...)`.
 - `ServerStorage.PassTest`: `state`, `xp n`, `event name n`, `clock offsetSeconds` (shifts the season clock on both
-  sides), `reset`, `buy key`, `claimAll`, `rollover`.
+  sides), `reset`, `buy key`, `buyGems` (premium for gems), `claimAll`, `rollover`.
 - `ServerStorage.ShopTest`: `simulate(pool, n, seed)`, `invoke(action, arg)`, `policy(restricted)`, `capsule(on|nil)`,
   `ready(category, on)`, `seasonEnd(season, epoch|false)` (ends a ranked season now: pays rewards and soft-resets),
-  `rotation(fromDay, days)`, `state()`, `grantDraws(n, paid)`, `republish()`.
+  `rotation(fromDay, days)` (with `gemDaysAway`, the longest a gem item was out of the shop), `buy(id, currency?)` (the
+  Locker's BuyItem: a rotated-out gem item is refused with `rotation`), `inRotation(id, day?)`, `state()`,
+  `grantDraws(n, paid)`, `republish()`.
 - `ServerStorage.BossTest`: `start(id)`, `god(true)` (a god-mode clear counts as no-hit), `state()`, `stop()`.
 - Client: `PlayerScripts.CosmeticTest:Invoke(fn, ...)` (finisher / blade / outfit previews), `DuelHUD.previewIntro(foe?)`
   and `Podium.preview(entries?)` (require the module from the client command bar).
