@@ -84,8 +84,9 @@ local function item(id: string): Reward
 end
 
 -- Season 1 track. Premium pays back 500 gems (enough for the next pass), Whetstones, Shrine
--- Draws, two blades and a nameplate; the capstone is the season blade with its finisher and
--- title. Free pays 100 gems, the Pilgrim's Cedar blade and the Pilgrim title among 11 rewards.
+-- Draws, two blades, a nameplate and the Lightning Call intro (tier 18); the capstone is the season
+-- blade with its finisher and title. Free pays 100 gems, the Pilgrim's Cedar blade, the Pilgrim
+-- title and the Wanderer's Kasa intro (tier 15) among 12 rewards.
 local S1_TIERS: { Tier } = {
 	{ free = { coins(200) }, premium = { item("skin.S1Vermilion") } }, -- 1
 	{ premium = { gems(50) } },
@@ -101,10 +102,10 @@ local S1_TIERS: { Tier } = {
 	{ premium = { item("banner.S1Path") } },
 	{ free = { gems(20) }, premium = { coins(500) } },
 	{ premium = { gems(50) } },
-	{ premium = { draws(2) } }, -- 15
+	{ free = { item("intro.Kasa") }, premium = { draws(2) } }, -- 15
 	{ free = { coins(500) }, premium = { stones(4) } },
 	{ premium = { gems(50) } },
-	{ premium = { coins(600) } },
+	{ premium = { item("intro.Raiko"), coins(600) } },
 	{ premium = { stones(5) } },
 	{ free = { item("title.S1Pilgrim") }, premium = { gems(50) } }, -- 20
 	{ premium = { draws(2) } },

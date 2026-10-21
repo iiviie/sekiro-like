@@ -86,6 +86,7 @@ local COSMETIC: { [string]: boolean } = {
 	title = true,
 	banner = true,
 	nameplate = true,
+	intro = true,
 }
 local LABEL: { [string]: string } = {
 	Coins = "Coins",

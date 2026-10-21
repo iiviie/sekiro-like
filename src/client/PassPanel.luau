@@ -15,6 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
+local Intros = require(ReplicatedStorage.Shared.Intros)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Season = require(ReplicatedStorage.Shared.Season)
 local UI = require(script.Parent.UI)
@@ -150,6 +151,10 @@ local function art(reward: Season.Reward): (string, Color3, string)
 		return tabIcon("Banners", ICONS.Trophy), white, item.rarity
 	elseif item.category == "nameplate" then
 		return tabIcon("Titles", ICONS.Profile), white, item.rarity
+	elseif item.category == "intro" then
+		local intro = Intros.resolve(item.ref)
+		local kanji = if intro.kanji == "Slay" then Assets.UI.KanjiSlay else Assets.Cosmetics.Kanji[intro.kanji]
+		return kanji or ICONS.Rewards, intro.accent, item.rarity
 	end
 	return (item.icon and ICONS[item.icon]) or ICONS.Rewards, white, item.rarity
 end

@@ -14,6 +14,7 @@ local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Clothing = require(ReplicatedStorage.Shared.Clothing)
 local Flair = require(ReplicatedStorage.Shared.Flair)
+local Intros = require(ReplicatedStorage.Shared.Intros)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Toasts = require(script.Parent.Toasts)
 local UI = require(script.Parent.UI)
@@ -278,6 +279,11 @@ function StoreUI.thumb(parent: GuiObject, item: Catalog.Item, locked: boolean?)
 			TextColor3 = look.text,
 			Text = "Name",
 		}, strip)
+	elseif category == "intro" then
+		-- the intro's brush kanji in its colour (no painted icons for intros yet)
+		local intro = Intros.resolve(item.ref)
+		local kanji = if intro.kanji == "Slay" then Assets.UI.KanjiSlay else Assets.Cosmetics.Kanji[intro.kanji]
+		image(kanji or ICONS.Katana, intro.accent:Lerp(Color3.new(1, 1, 1), 0.15), 0.72)
 	elseif category == "gemPack" then
 		local packs = ICONS.GemPacks
 		local tier = 1
@@ -287,6 +293,8 @@ function StoreUI.thumb(parent: GuiObject, item: Catalog.Item, locked: boolean?)
 			end
 		end
 		image(if typeof(packs) == "table" and #packs > 0 then packs[math.min(tier, #packs)] else ICONS.Gem)
+	elseif category == "bundle" and item.ref == "Stagecraft" then
+		image(Assets.Cosmetics.Kanji.Sakura, Intros.resolve("Sakura").accent, 0.72)
 	elseif category == "bundle" then
 		image(icon("InitiateBundle", ICONS.Katana))
 	elseif category == "pass" then

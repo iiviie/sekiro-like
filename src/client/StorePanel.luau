@@ -565,6 +565,20 @@ local function offersTab(list: ScrollingFrame)
 		}, StoreUI.attr("PassPremium", false) == true or StoreUI.attr("SeasonPremium", false) == true)
 	end
 
+	-- The pre-fight intro bundle (once per account; the four are also sold one by one for gems).
+	local stagecraft = Catalog.get("bundle.Stagecraft")
+	if stagecraft then
+		local have = StoreUI.owned()
+		local all = true
+		for _, id in (stagecraft.contents and stagecraft.contents.items) or {} do
+			all = all and have[id] == true
+		end
+		offerCard(list, stagecraft, nextOrder(), {
+			"Four pre-fight intros: Sakura Gust, War Fan, Ink Stroke, Crow's Perch.",
+			"Worth 1,450 gems one by one. Once per account.",
+		}, have["bundle.Stagecraft"] == true or all)
+	end
+
 	UI.heading(list, "Passes", nextOrder())
 	local PASS_LINES: { [string]: { string } } = {
 		["pass.VIP"] = { "A Ronin nameplate frame and chat tag, an exclusive sheath. No boosts." },

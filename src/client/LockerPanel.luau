@@ -33,6 +33,7 @@ local TABS: { Tab } = {
 	{ id = "title", label = "Title", categories = { "title" } },
 	{ id = "banner", label = "Banner", categories = { "banner" } },
 	{ id = "nameplate", label = "Nameplate", categories = { "nameplate" } },
+	{ id = "intro", label = "Intro", categories = { "intro" } },
 }
 
 local NO_TITLE = "title." -- equipping this clears the title
@@ -548,6 +549,7 @@ local TAB_ICONS: { [string]: string? } = {
 	title = ICONS.Tabs and ICONS.Tabs.Titles or ICONS.Guide,
 	banner = ICONS.Tabs and ICONS.Tabs.Banners or ICONS.Trophy,
 	nameplate = ICONS.Profile,
+	intro = Assets.Cosmetics.Kanji.Path,
 }
 
 function LockerPanel.build(body: Frame)
