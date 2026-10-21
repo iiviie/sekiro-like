@@ -25,9 +25,10 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   torii terrace (where the Royale pad is, overlooking the castle), the dojo with the Deflect Trainer on the left wing,
   the hall of champions with the leaderboards on the right, two waterfalls, rope bridges to two islets, and more
   islets over a sea of cloud. It's sculpted terrain built by [LobbyBuilder.luau](src/server/LobbyBuilder.luau) at
-  server start, so it doesn't exist in edit mode. There's no rules screen: new players start **queued**, so the first
-  fight (against Novice bots, with the in-fight **Coach**) comes within ~10 s of leaving the title card; press **PLAY**
-  (or step on the glowing red pad) to join or leave the queue. While anyone who is past the title card is queued an 8 s
+  server start, so it doesn't exist in edit mode. There's no rules screen: everyone (new players too) starts in the lobby,
+  unqueued (`Config.Lobby.AutoQueue = false`), with the Locker, Store and Guide in reach; press **PLAY** (or step on
+  the glowing red pad) to join or leave the queue, and a first fight (against Novice bots, with the in-fight **Coach**)
+  comes within ~10 s. While anyone who is past the title card is queued an 8 s
   countdown runs; nobody is put in a match from the title card. **Invite friends** sits left of PLAY and glows when
   you're alone in the server. Lobby PvP is off by default (turning it on takes 3 s); with it off nobody can touch you except
   the **Deflect Trainer**, which swings at whoever steps into its sand ring and never deals damage; after each swing a
@@ -320,8 +321,8 @@ stomp window) are per-move fields in `Config.Attacks` with defaults in `Config.M
 - **Free-for-all rules.** When two or more different fighters have struck you within 3 s you gain **Resolve**: posture
   recovers twice as fast and hit stun is halved. It never applies in a 1v1. For 1.5 s after a posture break, only the
   fighter who broke it can deathblow; anyone else's hit just chips vitality.
-- **Telegraphs.** Every swing coming at you flashes a white glint at the blade tip 0.3 s before impact: press block as it
-  flashes. Your own hits pop up DEFLECTED / GUARDED / damage over the target.
+- **Telegraphs.** Every swing coming at you flashes a white glint at the blade tip 0.38 s before impact
+  (`Config.Visual.GlintLead`, which the Coach's prompt reads too): press block as it flashes. Your own hits pop up DEFLECTED / GUARDED / damage over the target.
 - **Posture.** Builds from guarded hits (×1.0), clean hits (×0.5, which can fill it to 99 but never break it) and being
   deflected. It recovers at a flat 9/s once its delay has passed: 0.5 s after your deflect, 2.5 s after a guarded or
   clean hit, 1.2 s after being deflected; there's no vitality scaling and no guard bonus. At 100 you're **broken** for

@@ -524,7 +524,9 @@ local Config = {
 		Radius = 70,
 		FallY = 40, -- below this height a lobby player is put back on the island
 		QueuePadRadius = 7,
-		AutoQueue = true, -- new players start queued: a first fight within ~30 s
+		-- Players join unqueued: a first visit starts in the lobby with PLAY (and the Locker,
+		-- Store and Guide) in reach, not in an ~8 min queue they didn't choose.
+		AutoQueue = false,
 		PvPToggleDelay = 3, -- turning lobby PvP on takes this long, so it can't be an ambush
 	},
 
@@ -828,6 +830,11 @@ local Config = {
 	-- fighters involved, on their own clients; in a free-for-all a long freeze is a liability.
 	Visual = {
 		PerilousColor = Color3.fromRGB(255, 40, 40),
+		-- The parry cue's lead: the white glint flashes this long before impact. Pressing
+		-- block as it flashes lands inside the deflect window at a median reaction (~0.25 s)
+		-- with room for touch latency. CombatVisuals (the glint) and Coach (the prompt) both
+		-- read it, so they can never drift apart.
+		GlintLead = 0.38,
 		-- Kannagi has no hitstop at all; ours is kept short now that reactions carry weight.
 		-- It only freezes clips already playing (never a windup), so it can't desync a swing.
 		GuardHitstop = 0.03,

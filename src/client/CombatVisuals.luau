@@ -1465,7 +1465,7 @@ CombatVisuals.telegraphPerilous = telegraphPerilous
 -- The parry cue: a white glint at the blade tip a fixed time before impact, on every
 -- swing coming at you. Pressing block as it flashes lands the deflect window at typical
 -- reaction times, so the rhythm is learnable instead of a guess at a moving blade.
-local GLINT_LEAD = 0.3
+local GLINT_LEAD = Config.Visual.GlintLead
 local GLINT_RANGE = 26
 
 local function glint(model: Model, hitAt: number)
