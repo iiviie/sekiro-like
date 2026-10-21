@@ -45,7 +45,8 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   least experienced human: **Ronin** (Novice) for a player's first 3 matches, **Samurai** (Adept), **Kensei** (Master,
   with rare blades) for proven players; only one bot fights a given human at a time. About one match in three has an
   **Omen**: Blood Moon (every deathblow kills, the sky turns red), Iron Will (posture breaks 40% faster) or Rushing Mist
-  (the ring closes twice as fast). After 20 s a ring of red mist starts closing and hurts anyone outside it. Every player
+  (the ring closes twice as fast). After 20 s a ring of red mist starts closing and hurts anyone outside it (except
+  a cut-down fighter kneeling to rise). Every player
   has one **Resurrection** (回生) per match: the first lethal blow cuts you down to your knees, untouchable, and you rise
   2.2 s later at half vitality. The second death is final; you spectate. When two remain, the 一騎討 **Final duel**
   is announced. The last one standing wins. The match ends as soon as no human is left alive, so nobody waits for bots.

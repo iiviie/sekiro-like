@@ -288,7 +288,8 @@ local function match()
 		local ringCenter, radius = Round.zone(now())
 		for _, c in alive do
 			local offset = c.root.Position - ringCenter
-			if Vector3.new(offset.X, 0, offset.Z).Magnitude > radius then
+			-- A cut-down fighter kneeling to rise keeps their resurrection: the mist waits.
+			if c.state ~= "Downed" and Vector3.new(offset.X, 0, offset.Z).Magnitude > radius then
 				CombatService.damage(c, zone.DamagePerSecond * tick)
 			end
 		end
