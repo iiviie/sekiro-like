@@ -77,6 +77,14 @@ local function blocking(model: Model, from: Vector3, to: Vector3): boolean
 end
 
 local selfFade = 0
+
+-- The sword and everything welded to it (tsuba, pommel, edge line) stay solid.
+local function isBlade(part: Instance): boolean
+	return part.Name == "Sword"
+		or part.Name == "Sword2"
+		or part:FindFirstAncestor("Sword") ~= nil
+		or part:FindFirstAncestor("Sword2") ~= nil
+end
 local selfParams = RaycastParams.new()
 selfParams.FilterType = Enum.RaycastFilterType.Include
 
@@ -84,7 +92,7 @@ selfParams.FilterType = Enum.RaycastFilterType.Include
 local function hidesTarget(character: Model, target: Model, from: Vector3): boolean
 	local body = {}
 	for _, part in partsOf(character) do
-		if part:IsA("BasePart") and part.Name ~= "Sword" and part.Name ~= "Sword2" then
+		if part:IsA("BasePart") and not isBlade(part) then
 			table.insert(body, part)
 		end
 	end
@@ -113,7 +121,7 @@ local function fadeSelf(character: Model, from: Vector3, dt: number)
 		selfFade = goal
 	end
 	for _, part in partsOf(character) do
-		if part.Parent and part.Name ~= "Sword" and part.Name ~= "Sword2" then
+		if part.Parent and not isBlade(part) then
 			(part :: any).LocalTransparencyModifier = selfFade
 		end
 	end
