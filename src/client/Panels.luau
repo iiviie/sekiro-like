@@ -16,6 +16,8 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Ranks = require(ReplicatedStorage.Shared.Ranks)
+local Season = require(ReplicatedStorage.Shared.Season)
+local Text = require(ReplicatedStorage.Shared.Text)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
 local Toasts = require(script.Parent.Toasts)
 local UI = require(script.Parent.UI)
@@ -280,7 +282,7 @@ local function rankedNote(rating: number, rank: Ranks.Rank): string
 		return HttpService:JSONDecode(attr("RankedReset", ""))
 	end)
 	if ok and typeof(reset) == "table" and os.time() - (tonumber(reset.t) or 0) < 14 * 86400 then
-		return `{reset.season} ended  ·  eased {reset.from} → {reset.to}`
+		return `{Season.label(reset.season)} ended  ·  rating {reset.from} → {reset.to}`
 	end
 	local rule = EconomyConfig.Ranked.SoftReset
 	local eased = math.floor(rule.Toward + (rating - rule.Toward) * rule.Keep + 0.5)
@@ -298,7 +300,7 @@ local function profilePanel()
 		{ "Wins", tostring(wins) },
 		{ "Losses", tostring(losses) },
 		{ "W/L", string.format("%.2f", ratio) },
-		{ "Kills", tostring(attr("Kills", 0)) },
+		{ "Cut down", tostring(attr("Kills", 0)) },
 		{ "Deathblows", tostring(attr("Deathblows", 0)) },
 		{ "Played", tostring(played) },
 	}
@@ -328,6 +330,7 @@ local function profilePanel()
 	end)
 	for i = 1, 3 do
 		local entry = sorted[i]
+		local games = if entry then Text.count(entry.count, "game") else ""
 		UI.text({
 			Position = UDim2.fromOffset(0, 184 + i * 23),
 			Size = UDim2.new(0.5, -8, 0, 22),
@@ -336,7 +339,7 @@ local function profilePanel()
 			TextColor3 = if entry then UI.Theme.Bone else UI.Theme.Ash,
 			RichText = true,
 			Text = if entry
-				then `<font color="#E8C77A">{i}</font>   {Weapons.get(entry.id).name}  <font color="#A89F92">·  {entry.count} games</font>`
+				then `<font color="#E8C77A">{i}</font>   {Weapons.get(entry.id).name}  <font color="#A89F92">·  {games}</font>`
 				else `{i}   —`,
 		}, body)
 	end
@@ -396,9 +399,9 @@ local function profilePanel()
 	UI.corner(fill, UDim.new(1, 0))
 	UI.text({
 		Position = UDim2.fromOffset(92, 68),
-		Size = UDim2.new(1, -104, 0, 18),
+		Size = UDim2.new(1, -104, 0, 20),
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextSize = 14,
+		TextSize = 16,
 		TextColor3 = UI.Theme.Ash,
 		Text = rankedNote(rating, rank),
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -410,7 +413,7 @@ local function rewardsPanel()
 	local claimedToday = attr("DailyClaimed", false) == true
 	local nextDay = attr("DailyNext", 1)
 	local daily = EconomyConfig.Daily
-	sectionTitle("Daily reward  ·  a missed day pauses the streak, it never resets", 0)
+	sectionTitle("Daily reward  ·  miss a day and your streak just waits", 0)
 	for day, coins in daily.Coins do
 		local done = day < nextDay or (claimedToday and day == nextDay)
 		local isNext = day == nextDay and not claimedToday
@@ -548,9 +551,9 @@ local function settingsPanel()
 	-- `offByDefault`: the attribute reads as off until it's switched on (the rest read as on).
 	local options: { { key: string, label: string, offByDefault: boolean? } } = {
 		{ key = "SettingCameraShake", label = "Camera shake" },
-		{ key = "SettingHitstop", label = "Hit freeze (hitstop)" },
+		{ key = "SettingHitstop", label = "Hit freeze" },
 		{ key = "SettingControlsHint", label = "Show controls reminder" },
-		{ key = "SettingReducedEffects", label = "Reduced effects", offByDefault = true },
+		{ key = "SettingReducedEffects", label = "Fewer particles", offByDefault = true },
 	}
 	local list = UI.new("ScrollingFrame", {
 		Size = UDim2.fromScale(1, 1),

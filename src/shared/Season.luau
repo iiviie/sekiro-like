@@ -161,6 +161,12 @@ for i, entry in CALENDAR do
 	byId[def.id] = def
 end
 
+-- A season id as players read it: "S1" -> "Season 1" (never show the raw id).
+function Season.label(id: string?): string
+	local n = id and string.match(id, "^S(%d+)$")
+	return if n then `Season {n}` else "the season"
+end
+
 function Season.get(id: string?): Def?
 	return if id then byId[id] else nil
 end
@@ -252,14 +258,22 @@ local DAILY = {
 		},
 		{
 			id = "mikiri1",
-			text = "Mikiri Counter a thrust",
+			text = "Land a Mikiri Counter",
 			event = "Mikiri",
 			goal = 1,
 			coins = 150,
 			xp = 100,
 			pass = 50,
 		},
-		{ id = "jump2", text = "Jump 2 sweeps", event = "Jumped", goal = 2, coins = 120, xp = 80, pass = 50 },
+		{
+			id = "jump2",
+			text = "Jump over 2 perilous sweeps",
+			event = "Jumped",
+			goal = 2,
+			coins = 120,
+			xp = 80,
+			pass = 50,
+		},
 		{ id = "riposte5", text = "Land 5 ripostes", event = "Riposte", goal = 5, coins = 130, xp = 90, pass = 50 },
 	},
 	mode = {
@@ -324,7 +338,7 @@ local WEEKLY = {
 		},
 		{
 			id = "w_mikiri5",
-			text = "Mikiri Counter 5 thrusts",
+			text = "Land 5 Mikiri Counters",
 			event = "Mikiri",
 			goal = 5,
 			coins = 200,
