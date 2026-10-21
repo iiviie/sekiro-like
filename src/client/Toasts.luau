@@ -485,6 +485,7 @@ end
 
 -- End of match (guide 11.2): a washi card. Place and a line, then the stats count up one
 -- row after another, then coins and XP, the Mastery bar, and the way back into a fight.
+local hintedOtherFights = false -- the report's one-time pointer to duels and boss trials
 local function report(data: { [string]: any })
 	for _, name in { "Report", "ReportScrim" } do
 		local old = screen:FindFirstChild(name)
@@ -752,6 +753,12 @@ local function report(data: { [string]: any })
 		end)
 	end
 
+	-- A new player's first royale report points, once, at the other fights.
+	local otherFights = not data.boss
+		and not duel
+		and not hintedOtherFights
+		and (player:GetAttribute("Played") or 0) <= 3
+	hintedOtherFights = hintedOtherFights or otherFights
 	local closeAt = os.clock() + REPORT_TIME
 	task.spawn(function()
 		while card.Parent and os.clock() < closeAt do
@@ -759,6 +766,7 @@ local function report(data: { [string]: any })
 			next.Text = if data.boss
 				then "Step on the shrine for another trial"
 				elseif duel then "Step on a duel pad for a rematch"
+				elseif otherFights then "Try a duel (gold pads) or a boss trial (back bridge)"
 				elseif queued then "You're queued for the next royale"
 				else "Press PLAY to fight again"
 			task.wait(0.25)
