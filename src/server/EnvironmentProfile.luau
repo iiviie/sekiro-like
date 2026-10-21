@@ -8,6 +8,8 @@
 -- MapBuilder applies it before anything is built (and before LobbyBuilder clones its
 -- lanterns from Workspace.Props, so the clones inherit the dressing).
 
+local CollectionService = game:GetService("CollectionService")
+
 local Palette = require(game:GetService("ReplicatedStorage").Shared.Palette)
 
 local EnvironmentProfile = {}
@@ -76,6 +78,16 @@ function EnvironmentProfile.dressProps()
 			dressModel(d, look)
 		end
 	end
+	-- Trees are all leaves to the cameras: no part of one collides or can be queried, so a
+	-- camera swinging past a canopy ends up inside it (a screen of pink petals). Tag them
+	-- CameraIgnore so the camera's occlusion pass can find and fade them; LobbyBuilder's clones
+	-- (made after this runs) keep the tag.
+	local trees = props:FindFirstChild("Trees")
+	for _, d in if trees then trees:GetDescendants() else {} do
+		if d:IsA("BasePart") then
+			CollectionService:AddTag(d, EnvironmentProfile.CAMERA_IGNORE)
+		end
+	end
 	local mountains = props:FindFirstChild("Mountains")
 	if mountains then
 		for _, mountain in mountains:GetChildren() do
@@ -93,9 +105,18 @@ end
 export type PostOptions = {
 	castShadow: boolean?,
 	band: number?, -- height of a black band above the foot (for posts on a deck)
+	-- Tag the post and its trim CameraIgnore: the cameras look through it instead of pulling in
+	-- (EnvironmentProfile.CAMERA_IGNORE).
+	cameraIgnore: boolean?,
 }
 
-local function trim(name: string, size: Vector3, at: CFrame, parent: Instance)
+-- Decorative parts the cameras should never stop at: LockOn's probe passes through them and
+-- fades them while they're in the shot, and the follow camera's occlusion fades them near the
+-- lens. Includes parts that can't be queried (ropes, trim, leaves), so a camera that wants
+-- them must look them up by tag, not by raycast.
+EnvironmentProfile.CAMERA_IGNORE = "CameraIgnore"
+
+local function trim(name: string, size: Vector3, at: CFrame, parent: Instance, cameraIgnore: boolean?)
 	local p = Instance.new("Part")
 	p.Name = name
 	p.Anchored = true
@@ -109,6 +130,9 @@ local function trim(name: string, size: Vector3, at: CFrame, parent: Instance)
 	p.Material = Enum.Material.SmoothPlastic
 	p.Reflectance = 0.04
 	p.Color = Palette.Lacquer
+	if cameraIgnore then
+		CollectionService:AddTag(p, EnvironmentProfile.CAMERA_IGNORE)
+	end
 	p.Parent = parent
 end
 
@@ -135,16 +159,27 @@ function EnvironmentProfile.post(
 	if options and options.castShadow ~= nil then
 		post.CastShadow = options.castShadow
 	end
+	local ignore = options and options.cameraIgnore
+	if ignore then
+		CollectionService:AddTag(post, EnvironmentProfile.CAMERA_IGNORE)
+	end
 	local capHeight = math.max(width * 0.32, 0.25)
 	trim(
 		name .. "Cap",
 		Vector3.new(capHeight, width * 1.3, width * 1.3),
 		foot * CFrame.new(0, height + capHeight / 2 - 0.05, 0),
-		parent
+		parent,
+		ignore
 	)
 	local band = options and options.band
 	if band then
-		trim(name .. "Band", Vector3.new(band, width * 1.12, width * 1.12), foot * CFrame.new(0, band / 2, 0), parent)
+		trim(
+			name .. "Band",
+			Vector3.new(band, width * 1.12, width * 1.12),
+			foot * CFrame.new(0, band / 2, 0),
+			parent,
+			ignore
+		)
 	end
 	post.Parent = parent
 	return post

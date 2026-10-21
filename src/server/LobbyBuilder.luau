@@ -88,6 +88,22 @@ local function decor(props: { [string]: any }): { [string]: any }
 	return props
 end
 
+-- Decorative parts the cameras look through (EnvironmentProfile.CAMERA_IGNORE): `instance`
+-- itself if it's a part, and every part inside it.
+local function ignoreCamera(instance: Instance?)
+	if not instance then
+		return
+	end
+	if instance:IsA("BasePart") then
+		CollectionService:AddTag(instance, EnvironmentProfile.CAMERA_IGNORE)
+	end
+	for _, d in instance:GetDescendants() do
+		if d:IsA("BasePart") then
+			CollectionService:AddTag(d, EnvironmentProfile.CAMERA_IGNORE)
+		end
+	end
+end
+
 local function disc(
 	radius: number,
 	height: number,
@@ -393,7 +409,7 @@ local function tree(position: Vector3, parent: Instance, scale: number?)
 	end)
 end
 
-local function lantern(position: Vector3, parent: Instance)
+local function lantern(position: Vector3, parent: Instance): Model?
 	local model = prop("Lantern", CFrame.new(position), parent)
 	if model then
 		local light = Instance.new("PointLight")
@@ -406,6 +422,7 @@ local function lantern(position: Vector3, parent: Instance)
 			light.Parent = primary
 		end
 	end
+	return model
 end
 
 local function billboard(adornee: BasePart, title: string, height: number)
@@ -891,11 +908,19 @@ local function duelTerrace(parent: Instance, center: Vector3, seed: number, size
 		local p0 = center + Vector3.new(math.cos(a0) * radius, 0, math.sin(a0) * radius)
 		local p1 = center + Vector3.new(math.cos(a1) * radius, 0, math.sin(a1) * radius)
 		-- Rooted 3 studs down: the terrace's rounded rim sags under the fence line.
-		EnvironmentProfile.post("FencePost", CFrame.new(p0 - Vector3.new(0, 3, 0)), 7.4, 0.8, parent)
+		-- The fence is set dressing to the cameras: they look through posts, rope and paper.
+		EnvironmentProfile.post(
+			"FencePost",
+			CFrame.new(p0 - Vector3.new(0, 3, 0)),
+			7.4,
+			0.8,
+			parent,
+			{ cameraIgnore = true }
+		)
 		local mid = (p0 + p1) / 2
 		local length = (p1 - p0).Magnitude
 		local rope = CFrame.lookAt(mid + Vector3.new(0, 3.6, 0), p1 + Vector3.new(0, 3.6, 0))
-		part(
+		ignoreCamera(part(
 			decor({
 				Name = "FenceRope",
 				Shape = Enum.PartType.Cylinder, -- a cylinder's axis is its X: turn it along the rope
@@ -905,9 +930,9 @@ local function duelTerrace(parent: Instance, center: Vector3, seed: number, size
 				Color = Palette.Straw,
 			}),
 			parent
-		)
+		))
 		-- A zigzag paper streamer (shide) hanging from the middle of each span.
-		part(
+		ignoreCamera(part(
 			decor({
 				Name = "FenceShide",
 				Size = Vector3.new(0.05, 1.1, 0.4),
@@ -916,7 +941,7 @@ local function duelTerrace(parent: Instance, center: Vector3, seed: number, size
 				Color = Color3.fromRGB(244, 240, 230),
 			}),
 			parent
-		)
+		))
 		part({
 			Name = "FenceWall",
 			Size = Vector3.new(0.5, 16, length + 0.5),
@@ -938,7 +963,9 @@ local function duelTerrace(parent: Instance, center: Vector3, seed: number, size
 	end
 	for i = 0, 3 do
 		local angle = math.rad(45 + i * 90)
-		lantern(center + Vector3.new(math.cos(angle) * (radius + 2), 0, math.sin(angle) * (radius + 2)), parent)
+		ignoreCamera(
+			lantern(center + Vector3.new(math.cos(angle) * (radius + 2), 0, math.sin(angle) * (radius + 2)), parent)
+		)
 	end
 end
 
@@ -1334,12 +1361,12 @@ local function pavilion(parent: Instance, center: Vector3, facing: Vector3)
 	}, parent)
 	for _, x in { -w / 2 + 0.6, w / 2 - 0.6 } do
 		for _, z in { -d / 2 + 0.6, d / 2 - 0.6 } do
-			local post = EnvironmentProfile.post("DojoPost", look * CFrame.new(x, 0, z), h, 0.9, parent, {
+			-- The lock-on camera passes through the posts instead of pulling in on a strafe.
+			EnvironmentProfile.post("DojoPost", look * CFrame.new(x, 0, z), h, 0.9, parent, {
 				castShadow = false,
 				band = 1,
+				cameraIgnore = true,
 			})
-			-- The lock-on camera passes through the posts instead of pulling in on a strafe.
-			CollectionService:AddTag(post, "CameraIgnore")
 		end
 	end
 	for _, side in { -1, 1 } do
@@ -1473,8 +1500,11 @@ function LobbyBuilder.build(): Folder
 	-- The two maples stand back from the duel pads, out of the camera's arc on a pad.
 	tree(at(-24, LOWER, 60), lobby, 1.2)
 	tree(at(26, LOWER, 58), lobby, 1.1)
-	tree(at(-58, LOWER, 18), lobby)
-	tree(at(62, LOWER, 16), lobby)
+	-- The cherry and the maple off the wings stand behind them, over the ponds, 30 studs from the
+	-- trainer: by the duel pads, (-58, 18) and (62, 16), their low canopies swallowed the camera
+	-- at the pads and at the trainer.
+	tree(at(-52, LOWER, -32), lobby)
+	tree(at(54, LOWER, -30), lobby)
 	tree(at(-8, LOWER, 60), lobby, 0.9)
 
 	-- The grand stair up to the torii terrace, and the wing stairs.
