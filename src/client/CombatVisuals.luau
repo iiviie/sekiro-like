@@ -21,6 +21,9 @@ local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Types = require(ReplicatedStorage.Shared.Types)
 local Bosses = require(ReplicatedStorage.Shared.Bosses)
+local Blades = require(ReplicatedStorage.Shared.Cosmetics.Blades)
+local Cosmetics = require(ReplicatedStorage.Shared.Cosmetics)
+local CosmeticFX = require(script.Parent.CosmeticFX)
 local Spacing = require(ReplicatedStorage.Shared.Spacing)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
 
@@ -383,6 +386,7 @@ for level = 1, FADE_LEVELS do
 end
 
 local HIDDEN = NumberSequence.new(1)
+local ANIMATOR_PERIL = Color3.fromRGB(255, 90, 70) -- client/Animator PERIL_TRAIL's first colour
 local PERIL_CORE = Color3.fromRGB(255, 150, 125)
 local PERIL_BODY = Color3.fromRGB(215, 25, 22)
 
@@ -423,6 +427,8 @@ type Smear = {
 	gradient: ColorSequence,
 	emission: number,
 	brightness: number,
+	style: Blades.SmearStyle?, -- a blade line's L2 extras along the arc (client/CosmeticFX)
+	pieces: number,
 }
 type Fighter = { sword: BasePart?, trail: Trail?, blades: { BasePart }, prev: { CFrame }, retryAt: number }
 
@@ -515,6 +521,11 @@ local function addPiece(smear: Smear, track: Track, a: CFrame, b: CFrame, born: 
 	if track.blade.Name == "Sword" then
 		sweepDir[smear.model] = tipSweep.Unit
 		sweepAt[smear.model] = os.clock()
+		local style = smear.style
+		if style then
+			smear.pieces += 1
+			CosmeticFX.smearPiece(style, smear.pieces, tip, tipSweep)
+		end
 	end
 end
 
@@ -584,13 +595,16 @@ local function startSmear(model: Model, fighter: Fighter, trail: Trail, clock: n
 	if not sword or not camera or (camera.CFrame.Position - sword.Position).Magnitude > SMEAR_RANGE then
 		return nil
 	end
-	local perilous = clock < (perilUntil[model] or 0)
-	-- The colour Animator gave the Trail (steel, perilous red or the equipped skin), unless a
-	-- 危 tell says this cut is perilous whatever the clip.
-	local keypoints = trail.Color.Keypoints
-	local core = if perilous then PERIL_CORE else keypoints[1].Value
-	local body = if perilous then PERIL_BODY else keypoints[#keypoints].Value
+	-- Red when Animator's Trail says the clip is perilous (Perilous, Sweep) or a 危 tell says
+	-- this cut is, whatever the clip; otherwise the blade's own colours (Shared/Cosmetics: the
+	-- skin, or a blade line, whose L2 adds its petals / bolts / feathers along the arc).
+	local first = trail.Color.Keypoints[1].Value
+	local perilous = clock < (perilUntil[model] or 0) or first == ANIMATOR_PERIL
+	local look = Cosmetics.blade(model)
+	local core = if perilous then PERIL_CORE else look.trail[1]
+	local body = if perilous then PERIL_BODY else look.trail[2]
 	local reds = core.R > core.B + 0.25
+	local dark = look.dark and not perilous
 	local smear: Smear = {
 		model = model,
 		tracks = {},
@@ -601,9 +615,12 @@ local function startSmear(model: Model, fighter: Fighter, trail: Trail, clock: n
 			else SMEAR_LIFE,
 		live = true,
 		gradient = smearGradient(core, body),
-		-- Additive glow washes a red arc out to pink in daylight, so red stays mostly solid.
-		emission = if reds then 0.2 else 0.4,
-		brightness = if reds then 1.2 else 1.1,
+		-- Additive glow washes a red arc out to pink in daylight, so red stays mostly solid; an
+		-- ink-dark line blade (Karasu) isn't light at all.
+		emission = if dark then 0 elseif reds then 0.2 else 0.4,
+		brightness = if dark then 1 elseif reds then 1.2 else 1.1,
+		style = if perilous then nil else look.smear,
+		pieces = 0,
 	}
 	for i, blade in fighter.blades do
 		local from = blade:FindFirstChild("TrailStart")
@@ -620,6 +637,17 @@ local function startSmear(model: Model, fighter: Fighter, trail: Trail, clock: n
 	end
 	table.insert(smears, smear)
 	return smear
+end
+
+-- The motes a blade sheds (Shared/Cosmetics/BladeLook) thin out under reduced effects.
+local function scaleMotes(sword: Instance)
+	local factor = if reducedEffects() then 0.35 else 1
+	for _, e in sword:GetDescendants() do
+		local base = e:GetAttribute("BaseRate")
+		if e:IsA("ParticleEmitter") and typeof(base) == "number" then
+			e.Rate = base * factor
+		end
+	end
 end
 
 -- Finds a fighter's sword and Trail again after a respawn or re-rig, and hides the Trail.
@@ -644,6 +672,7 @@ local function refreshFighter(model: Model, fighter: Fighter)
 			legacy.Transparency = HIDDEN -- the smear replaces it; Animator still switches it
 		end
 	end
+	scaleMotes(sword)
 end
 
 ---------------------------------------------------------------------------------------
@@ -1004,11 +1033,10 @@ end
 
 -- A struck body's flash: the cut streak along the blade's path, a white bloom with a lens
 -- star, shards. `heavy` for enders and perilous blows, `deathblow` for the finisher's X cut.
-local function impactEffects(attacker: Model, defender: Model, heavy: boolean, deathblow: boolean)
+-- Where and along which line a blow cuts: the struck point, the blow's flat direction, and
+-- the blade's direction of travel there.
+local function cutOf(attacker: Model, defender: Model): (Vector3?, Vector3?, Vector3)
 	local point = impactPoint(attacker, defender)
-	if not point then
-		return
-	end
 	local blow = flatBetween(attacker, defender)
 	local sweep = recentSweep(attacker)
 	if not sweep then
@@ -1016,7 +1044,14 @@ local function impactEffects(attacker: Model, defender: Model, heavy: boolean, d
 		local across = if blow then blow:Cross(Vector3.yAxis) else Vector3.xAxis
 		sweep = across + Vector3.yAxis * (if math.random() < 0.5 then 0.7 else -0.7)
 	end
-	local sweepVector = sweep :: Vector3
+	return point, blow, sweep :: Vector3
+end
+
+local function impactEffects(attacker: Model, defender: Model, heavy: boolean, deathblow: boolean)
+	local point, blow, sweepVector = cutOf(attacker, defender)
+	if not point then
+		return
+	end
 	local perilous = os.clock() < (perilUntil[attacker] or 0)
 	local tint = if perilous or deathblow then Color3.fromRGB(255, 70, 55) else Color3.fromRGB(255, 236, 200)
 	if deathblow then
@@ -1476,6 +1511,11 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 		burst(point, SPARK, 40, 36, 3.5, sprayDir)
 		flare(point, Color3.fromRGB(255, 226, 170), 9, true)
 	end
+	-- A blade line at L3 brings the defender's own deflect spark and sound.
+	local style = Cosmetics.blade(defender).deflect
+	if style and point then
+		CosmeticFX.deflect(style, point, sprayDir, perfect)
+	end
 	if isLocal(attacker) or isLocal(defender) then
 		shake(if perfect then 0.7 else 0.3, if perfect then 0.2 else 0.15)
 		-- A rally you can see: each chained deflect counts up and warms toward gold.
@@ -1754,7 +1794,23 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		playClip(defender, if data.lethal == false then "HitReact" else "Executed")
 		hitstop(Config.Visual.DeathblowHitstop, attacker, defender)
 		local root = rootOf(defender)
-		if root then
+		-- The attacker's finisher draws the cut (client/CosmeticFX); everything else here, the
+		-- clips, hitstop, shake and camera punch, is the same for every finisher.
+		local finisher = if typeof(data.finisher) == "string" then data.finisher else Cosmetics.finisher(attacker)
+		local grade: CosmeticFX.Grade? = nil
+		if root and finisher ~= "Default" then
+			local point, blow, sweep = cutOf(attacker, defender)
+			grade = CosmeticFX.deathblow(finisher, {
+				attacker = attacker,
+				defender = defender,
+				root = root,
+				point = point or root.Position + Vector3.new(0, 0.8, 0),
+				sweep = sweep,
+				blow = blow,
+				lethal = data.lethal ~= false,
+			})
+		end
+		if root and not grade then
 			local direction = blowDirection(attacker, defender)
 			-- The cut lands a beat into the deathblow clip: a long arc of blood, then pools.
 			bloodSpray(root.Position + Vector3.new(0, 0.6, 0), direction, 90, 34)
@@ -1771,7 +1827,11 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		playSound(SOUNDS.HitAlt, root, 0.9, 0.85)
 		if isLocal(attacker) or isLocal(defender) then
 			shake(0.9, 0.35, attacker, defender)
-			deathblowGrade()
+			if grade then
+				CosmeticFX.applyGrade(grade)
+			else
+				deathblowGrade()
+			end
 		end
 		if isLocal(attacker) and data.lethal ~= false then
 			-- Your killing deathblow: the lens punches in and eases back, a beat of cinema.
@@ -1978,6 +2038,17 @@ local function watch(instance: Instance)
 			fighter.trail, fighter.retryAt = nil, 0 -- re-rigged: find the blades again
 		end
 	end)
+	-- A re-dressed blade's new motes (Shared/Cosmetics/BladeLook) obey reduced effects too.
+	model.DescendantAdded:Connect(function(child)
+		if child:IsA("ParticleEmitter") and child:GetAttribute("BaseRate") ~= nil and reducedEffects() then
+			task.defer(function()
+				local base = child:GetAttribute("BaseRate")
+				if typeof(base) == "number" then
+					child.Rate = base * 0.35
+				end
+			end)
+		end
+	end)
 	model:GetAttributeChangedSignal("Blocking"):Connect(function()
 		refreshBase(model)
 	end)
@@ -2004,6 +2075,24 @@ end
 
 function CombatVisuals.start()
 	Animator.start()
+	CosmeticFX.init({
+		flare = flare,
+		burst = burst,
+		cutStreak = cutStreak,
+		shards = shards,
+		bloodSpray = bloodSpray,
+		bloodPool = bloodPool,
+		vfxSlow = vfxSlow,
+		scaled = scaled,
+		reduced = reducedEffects,
+	})
+	player:GetAttributeChangedSignal("SettingReducedEffects"):Connect(function()
+		for _, fighter in fighters do
+			if fighter.sword then
+				scaleMotes(fighter.sword)
+			end
+		end
+	end)
 
 	-- Studio-only: lets tooling sample a clip at an exact time, e.g.
 	-- AnimTest:Invoke("sample", model, "Light1", 0.5, 0.2) plays it, then freezes 0.2 s in.
@@ -2036,6 +2125,15 @@ function CombatVisuals.start()
 			return true
 		end
 		hook.Parent = player:WaitForChild("PlayerScripts")
+
+		-- CosmeticTest:Invoke("finisher", "InkBrush") etc. runs client/CosmeticPreview (tooling).
+		local cosmetic = Instance.new("BindableFunction")
+		cosmetic.Name = "CosmeticTest"
+		cosmetic.OnInvoke = function(command: string, ...: any)
+			local preview = require(script.Parent.CosmeticPreview) :: any
+			return preview[command](...)
+		end
+		cosmetic.Parent = player:WaitForChild("PlayerScripts")
 	end
 
 	combatEvent.OnClientEvent:Connect(function(kind: string, data: { [string]: any })
@@ -2082,8 +2180,33 @@ function CombatVisuals.start()
 			sound.SoundId = id
 			table.insert(preload, sound)
 		end
+		for _, id in Assets.Cosmetics.Sounds do
+			local sound = Instance.new("Sound")
+			sound.SoundId = id
+			table.insert(preload, sound)
+		end
 		ContentProvider:PreloadAsync(preload)
 	end)
+end
+
+---------------------------------------------------------------------------------------
+-- Previews (client/CosmeticPreview): the real effects, played locally on models of your
+-- choosing, with no server involved and no gameplay effect.
+
+-- A deathblow by `attacker` on `defender` with finisher `ref` (the clips, hitstop, shake, grade
+-- and camera punch included when `attacker` is you).
+function CombatVisuals.previewDeathblow(attacker: Model, defender: Model, ref: string)
+	handlers.Deathblow({ attacker = attacker, defender = defender, lethal = true, finisher = ref })
+end
+
+-- Animates a local-only preview rig and draws its blade's smear, like any fighter's.
+function CombatVisuals.watchPreview(model: Model)
+	watch(model)
+end
+
+-- `defender` deflects a light cut from `attacker` (perfect or not).
+function CombatVisuals.previewDeflect(attacker: Model, defender: Model, perfect: boolean)
+	deflectEffects(attacker, defender, perfect, "Light1", false)
 end
 
 return CombatVisuals

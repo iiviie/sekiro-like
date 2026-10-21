@@ -6,6 +6,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Players = game:GetService("Players")
 
+local BladeLook = require(ReplicatedStorage.Shared.Cosmetics.BladeLook)
+local Cosmetics = require(ReplicatedStorage.Shared.Cosmetics)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
 
@@ -153,68 +155,31 @@ function SwordRig.attach(model: Model, weaponId: string?): BasePart?
 	return sword
 end
 
--- Dresses the blade in a skin (Shared/Progression.Skins): the model's "Skin" attribute,
--- else its player's equipped skin. The client reads the same attribute for trail colours.
+-- Dresses the blade in its look (Shared/Cosmetics: base skins, premium blade lines by level,
+-- weapon Mastery evolutions). A player's comes from their Loadout / LineLevels / WeaponMastery;
+-- a bot's from `skinId` or its "Skin" attribute (a Progression skin id). The look is published
+-- on the model (BladeId, BladeLevel, BladeMastery, and Skin = its ref for older readers), which
+-- is what client/CombatVisuals reads for the smear, deflect and finisher.
 function SwordRig.applySkin(model: Model, skinId: string?)
 	local sword = model:FindFirstChild("Sword")
 	if not sword or not sword:IsA("BasePart") then
 		return
 	end
 	local player = Players:GetPlayerFromCharacter(model)
-	local chosen = skinId or (player and player:GetAttribute("Skin")) or model:GetAttribute("Skin")
-	local skin = Progression.skin(if typeof(chosen) == "string" then chosen else nil)
-	model:SetAttribute("Skin", skin.id)
-
-	local mesh = sword:FindFirstChildOfClass("SpecialMesh")
-	if mesh then
-		mesh.VertexColor = skin.tint
+	local id, level, mastery
+	if player and not skinId then
+		local weapon = model:GetAttribute("Weapon")
+		id, level, mastery = Cosmetics.bladeOf(player, if typeof(weapon) == "string" then weapon else nil)
+	else
+		local chosen = skinId or model:GetAttribute("Skin")
+		id, level, mastery = `skin.{Progression.skin(if typeof(chosen) == "string" then chosen else nil).id}`, 1, 0
 	end
-	-- The edge line takes the skin's bright trail colour (Obsidian's "burning edge").
-	for _, line in sword:GetChildren() do
-		if line.Name == "Edge" and line:IsA("BasePart") then
-			line.Color = skin.trail[1]
-		end
-	end
-	local outline = sword:FindFirstChild("BladeOutline")
-	if outline and outline:IsA("Highlight") then
-		outline.OutlineColor = skin.outline
-		outline.FillColor = skin.fill
-	end
-	for _, name in { "SkinGlow", "SkinPetals" } do
-		local old = sword:FindFirstChild(name)
-		if old then
-			old:Destroy()
-		end
-	end
-	if skin.glow then
-		local light = Instance.new("PointLight")
-		light.Name = "SkinGlow"
-		light.Color = skin.glow
-		light.Range = 6
-		light.Brightness = 1.2
-		light.Shadows = false
-		light.Parent = sword
-	end
-	local tip = sword:FindFirstChild("TrailEnd")
-	if skin.petals and tip then
-		local petals = Instance.new("ParticleEmitter")
-		petals.Name = "SkinPetals"
-		petals.Color = ColorSequence.new(skin.petals)
-		petals.LightEmission = 0.3
-		petals.Size = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.18),
-			NumberSequenceKeypoint.new(1, 0.05),
-		})
-		petals.Transparency = NumberSequence.new(0.1, 1)
-		petals.Lifetime = NumberRange.new(0.8, 1.4)
-		petals.Rate = 6
-		petals.Speed = NumberRange.new(0.5, 1.5)
-		petals.SpreadAngle = Vector2.new(180, 180)
-		petals.Acceleration = Vector3.new(0, -2, 0)
-		petals.Rotation = NumberRange.new(0, 360)
-		petals.RotSpeed = NumberRange.new(-120, 120)
-		petals.Parent = tip
-	end
+	local look = Cosmetics.Blades.look(id, level, mastery)
+	model:SetAttribute("Skin", look.ref)
+	model:SetAttribute("BladeId", look.id)
+	model:SetAttribute("BladeLevel", look.level)
+	model:SetAttribute("BladeMastery", mastery)
+	BladeLook.apply(sword, look)
 end
 
 return SwordRig

@@ -5,10 +5,12 @@
 -- welded, massless and invisible to queries. Bosses get their own set by id.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Bosses = require(ReplicatedStorage.Shared.Bosses)
 local Clothing = require(ReplicatedStorage.Shared.Clothing)
+local Wear = require(ReplicatedStorage.Shared.Cosmetics.Wear)
 
 local SKIN = Color3.fromRGB(226, 178, 140)
 local KASA_WIDTH = 3.1
@@ -259,6 +261,46 @@ function Outfit.dressBoss(model: Model, look: BossLook)
 			Material = Enum.Material.SmoothPlastic,
 			CastShadow = false,
 		}, CFrame.new(0, 0, -head.Size.Z / 2 - 0.04))
+	end
+end
+
+---------------------------------------------------------------------------------------
+-- Players: the outfit they equipped (a Clothing set name; "Avatar" or nil = their own
+-- clothes), worn over the avatar in the lobby and in matches (Shared/Cosmetics/Wear).
+-- server/CosmeticService calls this whenever the character or the loadout changes.
+
+local stash: Folder? = nil
+local function stashFolder(): Folder
+	if not stash then
+		local folder = Instance.new("Folder")
+		folder.Name = "OutfitStash" -- layered clothing set aside while a gi is worn
+		folder.Parent = ServerStorage
+		stash = folder
+	end
+	return stash :: Folder
+end
+
+function Outfit.wearPlayer(character: Model, set: string?)
+	local name = if set and Clothing.get(set) then set else ""
+	if Wear.current(character) == name then
+		return
+	end
+	Wear.apply(character, name, stashFolder())
+end
+
+-- A piece of avatar clothing that arrived while an outfit is on (see Wear.cover).
+function Outfit.cover(character: Model, child: Instance)
+	Wear.cover(character, child, stashFolder())
+end
+
+-- Layered clothing set aside for a character that's gone is dropped with it.
+function Outfit.forget(character: Model)
+	if stash then
+		for _, child in stash:GetChildren() do
+			if child:GetAttribute("OutfitStashedFrom") == character.Name then
+				child:Destroy()
+			end
+		end
 	end
 end
 
