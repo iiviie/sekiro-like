@@ -117,6 +117,9 @@ local N = {
 			{ key = "epic", kind = "item", weight = 1 },
 		},
 		MaxPerOpen = 10,
+		-- A Draw that came from something bought with Robux (the premium pass track) is a paid
+		-- random item: players whose policy restricts those get this fixed reward instead.
+		PaidFallback = { Coins = 100, Whetstones = 1, Gems = 5 },
 	},
 
 	-- Shrine Capsule (gems; behind EconomyConfig.PaidCapsule and PolicyService). Tier odds in
@@ -174,8 +177,9 @@ EconomyConfig.Ranked = N.Ranked
 EconomyConfig.Season = "S1"
 
 -- When each ranked season ends (epoch, UTC). server/ShopService pays the season-end rewards
--- once per player after this (on next login when offline). S1 ends 2026-12-02 00:00 UTC.
-EconomyConfig.SeasonEnds = { S1 = 1796169600 } :: { [string]: number }
+-- once per player after this (on next login when offline). Shared/Season's calendar wins
+-- when it has the season; this is the fallback. S1 ends 2026-11-30 00:00 UTC.
+EconomyConfig.SeasonEnds = { S1 = 1795996800 } :: { [string]: number }
 
 -- The gem Shrine Capsule switch: "studio" = on in Studio only (default), "on" = everywhere,
 -- "off" = nowhere. PolicyService's ArePaidRandomItemsRestricted is enforced on top of it.
