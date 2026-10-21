@@ -765,8 +765,9 @@ function StatsService.setPrivate(player: Player, name: string, value: any)
 end
 
 -- Merges settings the player picked (`changes`: { [name] = value }, from LobbyAction
--- "Settings") into the profile. Unknown names and bad values are ignored. Nothing is
--- republished: the client already shows them, and the next save writes them.
+-- "Settings") into the profile. Unknown names and bad values are ignored. Nothing is sent
+-- back: the client already shows them (an echo could undo a pick made since), and the next
+-- save writes them.
 function StatsService.setSettings(player: Player, changes: unknown)
 	local d = data[player]
 	if not d or typeof(changes) ~= "table" then
@@ -779,6 +780,10 @@ function StatsService.setSettings(player: Player, changes: unknown)
 		end
 	end
 	d.Ext.Settings = saved
+	local sent = privateSent[player]
+	if sent then
+		sent.Settings = HttpService:JSONEncode(savedSettings(d))
+	end
 end
 
 -- Saves now and returns true once the write has committed (Monetization grants on this).

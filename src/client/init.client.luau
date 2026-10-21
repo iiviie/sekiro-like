@@ -45,15 +45,13 @@ end
 
 -- Owner-only profile fields (server/StatsService.setPrivate) become local attributes on the
 -- LocalPlayer, so the panels read them like the replicated ones. "Settings" is the saved
--- settings: applied once, when the profile arrives (later copies only echo what's shown).
-local settingsApplied = false
+-- settings (sent when the profile loads; the server doesn't echo the player's own picks).
 local profilePrivate = remotes:WaitForChild("ProfilePrivate") :: RemoteEvent
 profilePrivate.OnClientEvent:Connect(function(name: unknown, value: unknown)
 	if name == "Settings" then
-		if settingsApplied or typeof(value) ~= "string" then
+		if typeof(value) ~= "string" then
 			return
 		end
-		settingsApplied = true
 		local ok, saved = pcall(HttpService.JSONDecode, HttpService, value)
 		if ok and typeof(saved) == "table" then
 			for key, setting in saved do
