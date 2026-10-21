@@ -4,7 +4,8 @@
 -- hold to guard), Slash beside it, an arc of Dodge / Thrust / Sweep / Heal over them,
 -- and Jump and Lock on the outside. The left half of the screen stays clear for the move
 -- stick. On touch the camera locks on to the nearest enemy by itself; Lock turns that
--- off for free look. Keyboard and gamepad players never see any of this.
+-- off for free look, and tapping a foe locks on to that one. Keyboard and gamepad players
+-- never see any of this.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,6 +15,8 @@ local UserInputService = game:GetService("UserInputService")
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
 local LockOn = require(script.Parent.LockOn)
+local Tagged = require(ReplicatedStorage.Shared.Tagged)
+local Types = require(ReplicatedStorage.Shared.Types)
 local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
@@ -63,6 +66,7 @@ local MAX_SCALE = 1
 -- an 844x390 phone (the 60 px discs stay 51 pt).
 local MAX_HEIGHT_SHARE = 0.58
 local TICK = 0.15
+local TAP_SLOP = 60 -- px: a tap this close to where a foe is drawn picks them
 
 local screen: ScreenGui
 local cluster: Frame
@@ -73,6 +77,8 @@ local releases: { () -> () } = {}
 local shown = false
 local autoLock = true
 local autoTarget: Model? = nil
+local picked = false -- autoTarget was tapped by hand: it holds, no switching to a nearer foe
+local lockSlash: Frame? = nil
 local defaultJump: GuiObject? = nil
 local defaultJumpWanted = true
 
@@ -166,11 +172,16 @@ local function refreshLockGlyph()
 		end
 	end
 	strokes.LockOn.Color = if autoLock then UI.Jade else UI.Theme.Ash
+	-- Off reads without colour too: a slash through the disc.
+	if lockSlash then
+		lockSlash.Visible = not autoLock
+	end
 end
 
 local function toggleAutoLock()
 	autoLock = not autoLock
 	autoTarget = nil
+	picked = false
 	if not autoLock then
 		LockOn.set(nil) -- free look
 	end
@@ -353,6 +364,7 @@ local function updateAutoLock(touch: boolean)
 	local current = LockOn.target()
 	if current ~= autoTarget then
 		autoTarget = nil -- released (death, range) or picked by hand
+		picked = false
 	end
 	if not touch or not autoLock or not alive() then
 		return
@@ -363,7 +375,8 @@ local function updateAutoLock(touch: boolean)
 		if held > lockSettings.AutoBreakRange or not canFight(autoTarget) then
 			LockOn.set(nil)
 			autoTarget = nil
-		elseif nearest and nearest ~= autoTarget and distance + lockSettings.AutoSwitchGap < held then
+			picked = false
+		elseif not picked and nearest and nearest ~= autoTarget and distance + lockSettings.AutoSwitchGap < held then
 			LockOn.set(nearest)
 			autoTarget = nearest
 		end
@@ -425,6 +438,68 @@ local function refit()
 	TouchHUD.layout(cluster, screen.AbsoluteSize)
 end
 
+-- Tap to pick a target: the fightable foe under the finger, or else the one drawn nearest
+-- the tap (within TAP_SLOP), so a thumb doesn't have to land on a thin limb.
+local function lockable(model: Model): boolean
+	return model ~= player.Character
+		and model:GetAttribute("CombatState") ~= "Dead"
+		and canFight(model)
+		and LockOn.distanceTo(model) <= lockSettings.Range
+end
+
+local function fighterAt(position: Vector2): Model?
+	local camera = workspace.CurrentCamera
+	local ray = camera:ScreenPointToRay(position.X, position.Y)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = if player.Character then { player.Character } else {}
+	local hit = workspace:Raycast(ray.Origin, ray.Direction * (lockSettings.Range + 30), params)
+	local node: Instance? = hit and hit.Instance
+	while node and node ~= workspace do
+		if node:IsA("Model") and node:HasTag(Types.Tag) then
+			if lockable(node) then
+				return node
+			end
+			break
+		end
+		node = node.Parent
+	end
+	local best: Model? = nil
+	local bestGap = TAP_SLOP
+	for _, instance in Tagged.list(Types.Tag) do
+		if instance:IsA("Model") and lockable(instance) then
+			for _, name in { "Head", "UpperTorso", "HumanoidRootPart", "LowerTorso" } do
+				local part = instance:FindFirstChild(name)
+				if part and part:IsA("BasePart") then
+					local point, visible = camera:WorldToScreenPoint(part.Position)
+					local gap = (Vector2.new(point.X, point.Y) - position).Magnitude
+					if visible and gap < bestGap then
+						best, bestGap = instance, gap
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function onTap(position: Vector2): Model?
+	if not shown or not alive() then
+		return nil
+	end
+	local model = fighterAt(position)
+	if model and model ~= LockOn.target() then
+		LockOn.set(model)
+		autoTarget = model
+		picked = true
+		if not autoLock then
+			autoLock = true -- a tapped foe turns the lock back on
+			refreshLockGlyph()
+		end
+	end
+	return model
+end
+
 -- Builds the cluster. `handlers` maps the combat actions (Attack, Block, Dodge, Perilous,
 -- Sweep, Heal, and optionally Jump) to what a press does; Lock (and Jump by default) are
 -- handled here.
@@ -454,7 +529,42 @@ function TouchHUD.start(handlers: { [string]: Handler })
 	-- CombatInput may take over the jump (to buffer it during swings and stomp in the air).
 	makeButton("Jump", handlers.Jump or { began = jump })
 	makeButton("LockOn", { began = toggleAutoLock })
+	lockSlash = UI.new("Frame", {
+		Name = "Off",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0.78, 0, 0, 5),
+		Rotation = -45,
+		BackgroundColor3 = UI.Theme.Bone,
+		BorderSizePixel = 0,
+		ZIndex = 5,
+		Visible = false,
+	}, cluster:FindFirstChild("LockOn"))
+	UI.new("UIStroke", { Color = UI.Theme.Ink, Thickness = 1.5, Transparency = 0.1 }, lockSlash)
 	refreshLockGlyph()
+
+	UserInputService.TouchTap:Connect(function(positions: { Vector2 }, processed: boolean)
+		if not processed and positions[1] and usingTouch() then
+			onTap(positions[1])
+		end
+	end)
+	if RunService:IsStudio() then
+		-- Test aid: a tap at a screen point (GUI coordinates), or on a model's head; returns
+		-- the model now locked.
+		local hook = UI.new("BindableFunction", { Name = "TapTest" }, screen)
+		hook.OnInvoke = function(at: any): Model?
+			if typeof(at) == "Instance" and at:IsA("Model") then
+				local head = at:FindFirstChild("Head") :: BasePart?
+				if not head then
+					return nil
+				end
+				local point = workspace.CurrentCamera:WorldToScreenPoint(head.Position)
+				at = Vector2.new(point.X, point.Y)
+			end
+			onTap(at)
+			return LockOn.target()
+		end
+	end
 
 	screen.Parent = player:WaitForChild("PlayerGui")
 	screen:GetPropertyChangedSignal("AbsoluteSize"):Connect(refit)
