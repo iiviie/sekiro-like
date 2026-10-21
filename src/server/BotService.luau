@@ -138,12 +138,40 @@ local function rollLook(index: number, rigTier: string): BotLook
 	return { index = index, skin = skins[skinIndex].id, finisher = finisher }
 end
 
+-- A given name no bot on the map is using (two "Ronin Raiden"s in one royale doubled up
+-- their bars and name lines); with every name taken, a number tells them apart.
+local function freshName(): string
+	local used = {}
+	for _, folder in { botFolder, duelFolder } do
+		for _, model in if folder then folder:GetChildren() else {} do
+			used[model:GetAttribute("BotName") or ""] = true
+		end
+	end
+	local free = {}
+	for _, name in NAMES do
+		if not used[name] then
+			table.insert(free, name)
+		end
+	end
+	if #free > 0 then
+		return free[math.random(#free)]
+	end
+	local base = NAMES[math.random(#NAMES)]
+	local n = 2
+	while used[`{base} {n}`] do
+		n += 1
+	end
+	return `{base} {n}`
+end
+
 local function buildRig(look: BotLook, rigTier: string): Model
 	local description = Instance.new("HumanoidDescription")
 	Outfit.describe(description, look.index)
 
 	local model = Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R15)
-	model.Name = `{Config.Bots.Tiers[rigTier].Title} {NAMES[math.random(#NAMES)]}`
+	local given = freshName()
+	model.Name = `{Config.Bots.Tiers[rigTier].Title} {given}`
+	model:SetAttribute("BotName", given)
 	model:SetAttribute("BotTier", rigTier)
 	model:SetAttribute("Skin", look.skin)
 	model:SetAttribute("Finisher", look.finisher)
@@ -804,6 +832,7 @@ function BotService.spawnDuelist(
 	local model = buildRig(chosen, rigTier)
 	if name then
 		model.Name = name
+		model:SetAttribute("BotName", name:match("^%S+%s+(.+)$") or name) -- (the title stays first)
 	end
 	model:PivotTo(cframe)
 	model.Parent = duelFolder
