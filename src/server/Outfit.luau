@@ -13,6 +13,10 @@ local Clothing = require(ReplicatedStorage.Shared.Clothing)
 local Wear = require(ReplicatedStorage.Shared.Cosmetics.Wear)
 
 local SKIN = Color3.fromRGB(226, 178, 140)
+-- A stern ink face (art/faces/bot_face_stern.png) on a classic head: Roblox now builds rigs
+-- with a dynamic head (FaceControls) that draws its own blank face and ignores
+-- HumanoidDescription.Face and face Decals (WD-11).
+local FACE = "rbxassetid://103948066493516"
 local KASA_WIDTH = 3.1
 -- The rig keeps the description describe() filled in; this attribute on it names the set.
 local SET_ATTRIBUTE = "ClothingSet"
@@ -103,7 +107,38 @@ function Outfit.describe(description: HumanoidDescription, index: number)
 	colourBody(description, SKIN, Clothing.Sets[name])
 end
 
--- Clothes, hat and obi go on the built rig.
+-- A classic rounded head with the stern face, welded over the rig's dynamic head (which is
+-- hidden, and keeps its joints, collisions and attachments).
+local function classicHead(model: Model, head: BasePart)
+	local size = head.Size
+	local shell = wear(model, "Head", {
+		Name = "ClassicHead",
+		Size = size,
+		Color = SKIN,
+		Material = Enum.Material.SmoothPlastic,
+		CastShadow = true,
+	}, CFrame.identity)
+	if not shell then
+		return
+	end
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Head
+	mesh.Scale = Vector3.new(1.25, 1.25, 1.25)
+	mesh.Parent = shell
+	local face = Instance.new("Decal")
+	face.Name = "face"
+	face.Face = Enum.NormalId.Front
+	face.Texture = FACE
+	face.Parent = shell
+	head.Transparency = 1
+	for _, child in head:GetChildren() do
+		if child:IsA("Decal") then
+			child:Destroy()
+		end
+	end
+end
+
+-- Clothes, hat, obi and face go on the built rig.
 function Outfit.dress(model: Model)
 	local set = setOf(model) or Clothing.Sets[Clothing.Bots[1]]
 	clothe(model, set)
@@ -111,6 +146,7 @@ function Outfit.dress(model: Model)
 
 	local head = model:FindFirstChild("Head")
 	if head and head:IsA("BasePart") then
+		classicHead(model, head)
 		local kasa = Assets.Kasa
 		local scale = KASA_WIDTH / kasa.NativeSize.X
 		local hat = wear(model, "Head", {
