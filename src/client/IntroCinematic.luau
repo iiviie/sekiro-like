@@ -180,7 +180,7 @@ local function buildCard(parent: Instance, card: Card, right: boolean): Frame
 	local frame = UI.new("CanvasGroup", {
 		Name = if right then "CardRight" else "CardLeft",
 		AnchorPoint = Vector2.new(if right then 1 else 0, 1),
-		Position = UDim2.new(if right then 1 else 0, if right then -28 else 28, 0.88, -10),
+		Position = UDim2.new(if right then 1 else 0, if right then -28 else 28, 0.9, 14),
 		Size = UDim2.fromOffset(CARD_W, CARD_H),
 		BackgroundColor3 = THEME.Ink,
 		BackgroundTransparency = 0.18,
@@ -280,7 +280,7 @@ end
 
 local function showCard(card: Frame, show: boolean, slide: boolean?)
 	local right = card.Name == "CardRight"
-	local home = UDim2.new(if right then 1 else 0, if right then -28 else 28, 0.88, -10)
+	local home = UDim2.new(if right then 1 else 0, if right then -28 else 28, 0.9, 14)
 	if show then
 		if slide ~= false then
 			card.Position = home + UDim2.fromOffset(if right then 120 else -120, 0)
@@ -425,7 +425,7 @@ local function setSkipText(s: Session)
 	if s.voted then
 		label.Text = "Waiting for your opponent to skip"
 	else
-		label.Text = if UI.isTouch() then "" else "SPACE  ·  skip"
+		label.Text = if UI.touchSized() then "" else "SPACE  ·  skip"
 	end
 	if s.skipButton then
 		s.skipButton.Visible = not s.voted
@@ -469,6 +469,16 @@ local function endSession(s: Session, quick: boolean?)
 	end
 	for _, card in s.cards do
 		showCard(card, false)
+	end
+	local vs = s.gui:FindFirstChild("VS")
+	if vs then
+		for _, d in vs:GetDescendants() do
+			if d:IsA("ImageLabel") then
+				TweenService:Create(d, TweenInfo.new(0.2), { ImageTransparency = 1 }):Play()
+			elseif d:IsA("TextLabel") then
+				TweenService:Create(d, TweenInfo.new(0.2), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+			end
+		end
 	end
 	if s.skipLabel then
 		s.skipLabel.Visible = false
@@ -546,7 +556,7 @@ local function stampVS(s: Session)
 		Size = UDim2.fromOffset(160, 120),
 		BackgroundTransparency = 1,
 	}, s.gui)
-	UI.new("UIScale", { Scale = math.clamp(workspace.CurrentCamera.ViewportSize.Y / 800, 0.6, 1) }, holder)
+	UI.new("UIScale", { Scale = math.clamp(UI.viewport().Y / 800, 0.6, 1) }, holder)
 	local kanji = UI.new("ImageLabel", {
 		Name = "Kanji",
 		AnchorPoint = Vector2.new(0.5, 0),
@@ -645,7 +655,7 @@ function IntroCinematic.play(spec: Spec)
 	for i, f in s.fighters do
 		local card = buildCard(gui, f.card, i == 2)
 		local scale = card:FindFirstChild("Scale") :: UIScale
-		scale.Scale = math.clamp(workspace.CurrentCamera.ViewportSize.X / 1300, 0.62, 1)
+		scale.Scale = math.clamp(UI.viewport().X / 1300, 0.72, 1) -- 0.72 keeps a phone's smallest line near 10 pt
 		table.insert(s.cards, card)
 	end
 
@@ -662,12 +672,14 @@ function IntroCinematic.play(spec: Spec)
 		Text = "",
 	}, gui)
 	s.skipLabel = skipLabel
-	if UI.isTouch() and spec.canSkip then
+	if UI.touchSized() and spec.canSkip then
 		local button = UI.new("TextButton", {
+			-- top-right on the letterbox: the bottom corners belong to the cards, and a phone's
+			-- bottom edge left the old spot a few points off-screen
 			Name = "SkipButton",
-			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -20, 0.95, 0),
-			Size = UDim2.fromOffset(110, 48),
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -16, 0, 8),
+			Size = UDim2.fromOffset(96, 44),
 			BackgroundColor3 = THEME.Lacquer,
 			BackgroundTransparency = 0.2,
 			FontFace = UI.Fonts.Label,
