@@ -486,8 +486,9 @@ order: naginata (reach), then dual blades; kusarigama last.
   ("hybrid" / "procedural", top of Gait.luau; Studio attribute `GaitMode` overrides it live) switches forward running
   back to the procedural cycle (the round-1 A/B kept "hybrid"). Roblox's jump, fall, climb and seat animations show in
   the air and when seated or climbing. Rigs over 90 studs from the camera are posed 15 times a second. Out of combat
-  the stance stands taller and the blade rests on the right shoulder (it's too long to carry low without trailing on
-  the sand); locked on, or within 4 s of an exchange, fighters raise a two-handed chudan guard. Combat motion
+  the stance stands taller and the blade lies over the right shoulder, sloping down behind the back with the edge up
+  (it's too long to carry low without trailing on the sand; a per-carry `level` tips it back down against the run's
+  lean). In Studio the `CarryMode` / `CarrySpec` workspace attributes switch and tune the carry live; locked on, or within 4 s of an exchange, fighters raise a two-handed chudan guard. Combat motion
   is procedural: [Poses.luau](src/shared/Poses.luau)
   describes each pose as directions (where the arm, forearm and blade point), solves them into joint rotations, and
   [Animator.luau](src/client/Animator.luau) layers them over the locomotion with eased keyframes from [Clips.luau](src/shared/Clips.luau).
