@@ -380,6 +380,10 @@ local BOSS_ARENA = Vector2.new(-60, 135) -- offset from the lobby origin; far is
 local BOSS_PAD = Vector2.new(-6, 3) -- offset from the back islet's centre
 -- The boss shrine's torii stands this far behind its pad, on the side away from the arena.
 local BOSS_TORII_BACK = 5
+-- Where a finished trial puts you back (BossReturn): this far from the pad's centre toward the
+-- arena, just past the torii, facing the pad. Behind you is the open drop toward the arena, so
+-- the camera has nothing to look through; the islet's lanterns, maple and rim rocks are ahead.
+local BOSS_RETURN_OUT = 8
 
 local function bossToriiSpot(): Vector2
 	local pad = BRIDGE_BACK.islet + BOSS_PAD
@@ -951,6 +955,36 @@ local function bossGrounds(lobby: Instance, islet: Vector3)
 	holder:SetAttribute("Pad", pad)
 	holder:SetAttribute("PadRadius", radius)
 	holder:SetAttribute("Arena", arena)
+	-- The return point (BossService respawns you here after every trial) and a disabled
+	-- SpawnLocation on it: spawning a new body there, rather than moving it after it spawned on
+	-- the plaza, sets the camera up behind you facing the pad.
+	local back = pad - away * BOSS_RETURN_OUT
+	local returnSpawn = Instance.new("SpawnLocation")
+	returnSpawn.Name = "BossReturn"
+	returnSpawn.Anchored = true
+	returnSpawn.Enabled = false
+	returnSpawn.Neutral = true
+	returnSpawn.Duration = 0
+	returnSpawn.Size = Vector3.new(4, 0.2, 4)
+	returnSpawn.Transparency = 1
+	returnSpawn.CanCollide = false
+	returnSpawn.CanQuery = false
+	returnSpawn.CanTouch = false
+	returnSpawn.CFrame = CFrame.lookAt(back, Vector3.new(pad.X, back.Y, pad.Z))
+	returnSpawn.Parent = holder
+	holder:SetAttribute("BossReturn", back)
+	table.insert(pendingSeats, function()
+		-- The islet's edge slopes away there: stand it on the terrain actually under it.
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Include
+		params.FilterDescendantsInstances = { workspace.Terrain }
+		local hit = workspace:Raycast(back + Vector3.new(0, 8, 0), Vector3.new(0, -20, 0), params)
+		if hit then
+			local ground = Vector3.new(back.X, hit.Position.Y, back.Z)
+			returnSpawn.CFrame = CFrame.lookAt(ground, Vector3.new(pad.X, ground.Y, pad.Z))
+			holder:SetAttribute("BossReturn", ground)
+		end
+	end)
 	holder.Parent = lobby
 end
 

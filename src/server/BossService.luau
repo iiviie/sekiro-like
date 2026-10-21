@@ -603,6 +603,42 @@ local function fightBody(f: Fight)
 	task.wait(RULES.Results)
 end
 
+-- A fresh body back at the shrine (Sekiro's idol by the boss), not on the spawn plaza, however
+-- the trial ended: on LobbyBuilder's BossReturn point, in the open just past the torii and
+-- facing the pad, so one step forward opens the picker for another try. The body spawns on
+-- the shrine's (otherwise disabled) BossReturn SpawnLocation, so the camera starts behind it;
+-- moving a body that spawned on the plaza keeps the plaza's camera angle, which looks back
+-- through the islet's rocks.
+local function returnToShrine(player: Player)
+	local shrine = workspace:FindFirstChild("Lobby")
+	shrine = shrine and shrine:FindFirstChild("BossShrine")
+	local spawn = shrine and shrine:FindFirstChild("BossReturn")
+	local spot = shrine and shrine:GetAttribute("BossReturn")
+	if spawn and spawn:IsA("SpawnLocation") then
+		-- Enabled only while this body spawns (an enabled neutral spawn is a random pick for
+		-- everyone else's spawns too).
+		spawn.Enabled = true
+		player.RespawnLocation = spawn
+	end
+	local ok, err = pcall(player.LoadCharacter, player)
+	if spawn and spawn:IsA("SpawnLocation") then
+		spawn.Enabled = false
+		if player.Parent then
+			player.RespawnLocation = nil
+		end
+	end
+	if not ok then
+		warn(`[BossService] respawn after a trial failed: {err}`)
+		return
+	end
+	-- If the spawn didn't take (no shrine spawn), move the body there instead.
+	local character = player.Character
+	if character and typeof(spot) == "Vector3" and (character:GetPivot().Position - spot).Magnitude > 6 then
+		local at = spot + Vector3.new(0, 3, 0)
+		character:PivotTo(CFrame.lookAt(at, Vector3.new(pad.X, at.Y, pad.Z)))
+	end
+end
+
 -- Puts everything back however the fight ended (or broke): the boss gone, the player out of
 -- the arena with a fresh body, the arena free for whoever is next in line.
 local function cleanup(f: Fight)
@@ -623,16 +659,7 @@ local function cleanup(f: Fight)
 	end
 	player:SetAttribute("DuelState", nil)
 	if f.placed and player.Parent then
-		player:LoadCharacter()
-		-- Back beside the shrine pad (Sekiro's idol by the boss), not on the spawn plaza: one
-		-- step onto it opens the picker for another try.
-		local character = player.Character
-		local away = LobbyService.spawnCFrame().Position - pad
-		away = Vector3.new(away.X, 0, away.Z)
-		if character and pad ~= Vector3.zero and away.Magnitude > 1 then
-			local spot = pad + away.Unit * (padRadius + 3) + Vector3.new(0, 3, 0)
-			character:PivotTo(CFrame.lookAt(spot, Vector3.new(pad.X, spot.Y, pad.Z)))
-		end
+		returnToShrine(player)
 	end
 	if fight == f then
 		fight = nil
