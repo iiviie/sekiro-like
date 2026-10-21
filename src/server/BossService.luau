@@ -26,7 +26,11 @@
 --                     "Notice" { text, kind, line? }   kind: "Refused" | "Line" | "Turn" | "Failed"
 --                              (every Choose gets a Start or a Notice; a "Line" notice carries
 --                              your place in line, none when you're out of it)
---   client -> server: "Choose" bossId | "Cancel" (leave the line)
+--                     "Intro" { mode, at, endsAt, fighters = { { model, intro, name } }, skip } before
+--                              the countdown: you and the boss frozen and protected while each
+--                              plays its pre-fight intro (Shared/Intros); "IntroEnd" { } if skipped
+--   client -> server: "Choose" bossId | "Cancel" (leave the line) | "SkipIntro" (only once
+--                     you've seen that boss's intro: a clear, or earlier this session)
 --
 -- One arena, one fight at a time: choosing while it's taken puts you in line, and your
 -- trial starts by itself when the fight before yours ends (wherever you are in the lobby).
@@ -38,10 +42,13 @@ local ServerStorage = game:GetService("ServerStorage")
 local HttpService = game:GetService("HttpService")
 
 local Bosses = require(ReplicatedStorage.Shared.Bosses)
+local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Config = require(ReplicatedStorage.Shared.Config)
+local Intros = require(ReplicatedStorage.Shared.Intros)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
 local BossAI = require(script.Parent.BossAI)
 local CombatService = require(script.Parent.CombatService)
+local Economy = require(script.Parent.Economy)
 local Locomotion = require(script.Parent.Locomotion)
 local LobbyService = require(script.Parent.LobbyService)
 local Outfit = require(script.Parent.Outfit)
@@ -380,6 +387,69 @@ end
 
 local serveLine: () -> ()
 
+-- Pre-fight intros: which bosses' intros each player has watched this session (with a clear,
+-- they may skip it), and the skip request of the intro playing now.
+local introSeen: { [Player]: { [string]: boolean } } = {}
+local introSkip: { [Player]: boolean } = {}
+
+-- You and the boss on your marks, frozen (anchored; CombatService refuses a "Cinematic" body's
+-- input) and protected while your intro and then the boss's play. Skippable once seen.
+local function introPhase(f: Fight)
+	local player, id, pc, boss = f.player, f.id, f.pc, f.boss
+	local d = StatsService.get(player)
+	local seen = (introSeen[player] and introSeen[player][id]) or (d and ((d :: any).BossClears or {})[id] or 0) > 0
+	local item = Catalog.get(Economy.equipped(player, "intro"))
+	local mine = Intros.resolve(if item and item.category == "intro" then item.ref else nil).ref
+	local theirs = Intros.Bosses[id]
+	local at = now() + Intros.Timing.Lead
+	local endsAt = at + Intros.Timing.Full
+	for _, c in { pc, boss } do
+		c.root.AssemblyLinearVelocity = Vector3.zero
+		c.protectedUntil = math.huge
+		c.model:SetAttribute("Cinematic", true)
+		c.root.Anchored = true
+	end
+	pc.model:PivotTo(mark(1))
+	introSkip[player] = nil
+	send(player, "Intro", {
+		mode = "full",
+		at = at,
+		endsAt = endsAt,
+		fighters = {
+			{ model = pc.model, intro = mine, name = player.DisplayName },
+			{ model = boss.model, intro = if theirs then theirs.clip else Intros.Default, name = f.def.name },
+		},
+		skip = seen == true,
+		boss = id,
+	})
+	introSeen[player] = introSeen[player] or {}
+	introSeen[player][id] = true
+	while now() < endsAt and player.Parent and alive(pc) do
+		if introSkip[player] and seen then
+			send(player, "IntroEnd", {})
+			break
+		end
+		task.wait(0.05)
+	end
+	introSkip[player] = nil
+	for _, c in { pc, boss } do
+		if c.model.Parent then
+			c.model:SetAttribute("Cinematic", nil)
+			c.root.Anchored = false
+		end
+	end
+	if player.Parent and pc.model.Parent then
+		pcall(function()
+			pc.root:SetNetworkOwner(player)
+		end)
+	end
+	if boss.model.Parent then
+		pcall(function()
+			boss.root:SetNetworkOwner(nil)
+		end)
+	end
+end
+
 -- The fight, from the boss's arrival to the end of the results pause. Anything that throws
 -- in here ends the trial cleanly through runFight's cleanup instead of leaving the arena
 -- taken and the player stuck as DuelState "Boss" (the shrine would ignore them for good).
@@ -402,6 +472,8 @@ local function fightBody(f: Fight)
 	pc.root.AssemblyLinearVelocity = Vector3.zero
 	pc.model:PivotTo(mark(1))
 	f.placed = true
+	introPhase(f) -- leaving or falling meanwhile is handled by the fight loop below
+	f.fightAt = now() + RULES.Countdown
 	CombatService.reset(pc, RULES.Countdown)
 	CombatService.setResurrections(pc, RULES.PlayerResurrections)
 	pc.god = testGod[player] == true
@@ -831,6 +903,8 @@ function BossService.start()
 			else
 				notice(player, "Refused", "Step back onto the shrine to begin a trial")
 			end
+		elseif action == "SkipIntro" then
+			introSkip[player] = true
 		elseif action == "Cancel" then
 			if linePosition(player) then
 				leaveLine(player)
@@ -842,6 +916,8 @@ function BossService.start()
 		picking[player] = nil
 		offered[player] = nil
 		testGod[player] = nil
+		introSeen[player] = nil
+		introSkip[player] = nil
 		leaveLine(player)
 	end)
 

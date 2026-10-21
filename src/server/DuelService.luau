@@ -21,13 +21,22 @@
 --   "Round" { round, mine, theirs, fightAt }
 --   "Point" { you, name, mine, theirs, reason }   reason: "Fell" | "Time" | "Forfeit" | "Draw"
 --   "End"   { won, mine, theirs, opponent, rating? }
+--   "Intro" { mode, at, endsAt, fighters = { { model, intro, name } }, skip, firstTo, rated }
+--           before round 1: both bodies frozen and protected on their marks while each plays
+--           their pre-fight intro (Shared/Intros, client/IntroCinematic); "short" when the same
+--           two met in the last Intros.Timing.RepeatWindow
+--   "IntroVote" { } the other human pressed skip;  "IntroEnd" { } everyone skipped
+-- Remote (client -> server): "SkipIntro" (the intro ends once every human in it has asked)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Config = require(ReplicatedStorage.Shared.Config)
+local Intros = require(ReplicatedStorage.Shared.Intros)
 local BotService = require(script.Parent.BotService)
 local CombatService = require(script.Parent.CombatService)
+local Economy = require(script.Parent.Economy)
 local LobbyService = require(script.Parent.LobbyService)
 local ProgressService = require(script.Parent.ProgressService)
 local StatsService = require(script.Parent.StatsService)
@@ -61,6 +70,12 @@ local DuelService = {}
 
 local grounds: { Ground } = {}
 local remote: RemoteEvent
+
+-- Pre-fight intros in progress (one per duel), and when each pair last met (repeat pairs get
+-- the short intro).
+type IntroState = { humans: { Player }, votes: { [Player]: boolean }, skipped: boolean }
+local intros: { [Player]: IntroState } = {}
+local lastMet: { [string]: number } = {}
 
 local function now(): number
 	return workspace:GetServerTimeNow()
@@ -157,6 +172,123 @@ local function setBusy(ground: Ground, busy: boolean)
 	end
 end
 
+-- The intro a side plays: a player's equipped one, a bot's own (seeded by its name).
+local function introOf(side: Side): string
+	local player = side.player
+	if player then
+		local item = Catalog.get(Economy.equipped(player, "intro"))
+		return Intros.resolve(if item and item.category == "intro" then item.ref else nil).ref
+	end
+	return Intros.forBot(side.name)
+end
+
+local function pairKey(sides: { Side }): string
+	local keys = {}
+	for _, side in sides do
+		table.insert(keys, if side.player then tostring((side.player :: Player).UserId) else "bot")
+	end
+	table.sort(keys)
+	return table.concat(keys, ":")
+end
+
+-- Before round 1: both on their marks, frozen (anchored, no actions: CombatService refuses a
+-- "Cinematic" body's input) and untouchable while their intros play; ends early once every
+-- human has asked to skip. Combat timing is untouched: the round's countdown starts after.
+local function introPhase(ground: Ground, sides: { Side }, rated: boolean)
+	local key = pairKey(sides)
+	local t = now()
+	local mode = if lastMet[key] and t - lastMet[key] < Intros.Timing.RepeatWindow then "short" else "full"
+	lastMet[key] = t
+	local length = if mode == "short" then Intros.Timing.Short else Intros.Timing.Full
+	local at = t + Intros.Timing.Lead
+	local endsAt = at + length
+
+	local fighters = {}
+	local humans: { Player } = {}
+	for i, side in sides do
+		local c = side.c :: Combatant
+		c.root.AssemblyLinearVelocity = Vector3.zero
+		c.model:PivotTo(mark(ground, i))
+		LobbyService.setInDuel(c.model, ground.index)
+		c.protectedUntil = math.huge
+		c.model:SetAttribute("Cinematic", true)
+		c.root.Anchored = true
+		table.insert(fighters, { model = c.model, intro = introOf(side), name = side.name })
+		if side.player then
+			table.insert(humans, side.player :: Player)
+		end
+	end
+	local state: IntroState = { humans = humans, votes = {}, skipped = false }
+	for _, player in humans do
+		intros[player] = state
+	end
+	for _, side in sides do
+		send(side, "Intro", {
+			mode = mode,
+			at = at,
+			endsAt = endsAt,
+			fighters = fighters,
+			skip = true,
+			firstTo = DUEL.FirstTo,
+			rated = rated,
+		})
+	end
+	while now() < endsAt and not state.skipped do
+		local gone = false
+		for _, side in sides do
+			if not present(side) or not alive(side.c) then
+				gone = true
+			end
+		end
+		if gone then
+			break
+		end
+		task.wait(0.05)
+	end
+	if state.skipped then
+		for _, side in sides do
+			send(side, "IntroEnd", {})
+		end
+	end
+	for _, player in humans do
+		if intros[player] == state then
+			intros[player] = nil
+		end
+	end
+	for _, side in sides do
+		local c = side.c
+		if c and c.model.Parent then
+			c.model:SetAttribute("Cinematic", nil)
+			c.root.Anchored = false
+			local player = side.player
+			if player and player.Parent then
+				pcall(function()
+					c.root:SetNetworkOwner(player)
+				end)
+			end
+		end
+	end
+end
+
+local function onSkip(player: Player)
+	local state = intros[player]
+	if not state or state.votes[player] then
+		return
+	end
+	state.votes[player] = true
+	for _, human in state.humans do
+		if human ~= player and human.Parent then
+			remote:FireClient(human, "IntroVote", {})
+		end
+	end
+	for _, human in state.humans do
+		if human.Parent and not state.votes[human] then
+			return
+		end
+	end
+	state.skipped = true
+end
+
 local function runDuel(ground: Ground, players: { Player })
 	setBusy(ground, true)
 	table.clear(ground.waiting)
@@ -238,6 +370,7 @@ local function runDuel(ground: Ground, players: { Player })
 			for i, side in sides do
 				send(side, "Start", { opponent = other(i).name, firstTo = DUEL.FirstTo, rated = rated })
 			end
+			introPhase(ground, sides, rated)
 		end
 
 		-- Both on their marks, fresh and protected through the countdown.
@@ -447,6 +580,27 @@ function DuelService.start()
 	remote = Instance.new("RemoteEvent")
 	remote.Name = "Duel"
 	remote.Parent = ReplicatedStorage:WaitForChild("Remotes")
+	remote.OnServerEvent:Connect(function(player: Player, action: unknown)
+		if action == "SkipIntro" then
+			onSkip(player)
+		end
+	end)
+	Players.PlayerRemoving:Connect(function(player)
+		local state = intros[player]
+		intros[player] = nil
+		if state then
+			-- the one who left no longer holds the skip up
+			local all = true
+			for _, human in state.humans do
+				if human ~= player and human.Parent and not state.votes[human] then
+					all = false
+				end
+			end
+			if all and next(state.votes) then
+				state.skipped = true
+			end
+		end
+	end)
 
 	local folder = workspace:WaitForChild("Lobby"):WaitForChild("DuelGrounds")
 	for i = 1, #folder:GetChildren() do

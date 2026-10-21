@@ -1380,6 +1380,9 @@ function CombatService.perform(c: Combatant, action: Action, stamp: number?, fla
 	if not isAlive(c) then
 		return false
 	end
+	if c.model:GetAttribute("Cinematic") == true then
+		return false -- a pre-fight intro is playing (DuelService / BossService): no moves start
+	end
 	local t = now()
 	local at = stamp or t
 	if action == "Dodge" or action == "Jump" then
