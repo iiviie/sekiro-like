@@ -2,6 +2,7 @@
 -- Puts a fighter's weapon (Shared/Weapons) in its right hand. Meshes are built from code
 -- with a SpecialMesh, so the place file doesn't need to carry them. Body motion comes from client/Animator, so the grip is fixed.
 
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Players = game:GetService("Players")
@@ -129,16 +130,9 @@ function SwordRig.attach(model: Model, weaponId: string?): BasePart?
 	trail(sword, look)
 
 	-- A thin ink outline keeps the blade's silhouette the same width on screen at any
-	-- distance or lighting, the cheapest way to make a sword read in third person.
-	local outline = Instance.new("Highlight")
-	outline.Name = "BladeOutline"
-	outline.Adornee = sword
-	outline.FillColor = Color3.fromRGB(235, 240, 255)
-	outline.FillTransparency = 0.8
-	outline.OutlineColor = Color3.fromRGB(20, 18, 22)
-	outline.OutlineTransparency = 0.15
-	outline.DepthMode = Enum.HighlightDepthMode.Occluded
-	outline.Parent = sword
+	-- distance or lighting. Each client draws it (client/BladeOutlines) on the few blades
+	-- nearest its camera only: Highlights are capped at 31, and the perilous tell needs one.
+	CollectionService:AddTag(sword, "BladeOutline")
 
 	-- The fist closes around the handle with the blade pointing out of the front of the
 	-- hand, edge down, so arm poses aim the blade.

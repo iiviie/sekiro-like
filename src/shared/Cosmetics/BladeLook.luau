@@ -244,6 +244,9 @@ function BladeLook.apply(sword: BasePart, look: Blades.Look)
 			line.Color = look.edge
 		end
 	end
+	-- The outline's colours, for client/BladeOutlines (which draws it near the camera only).
+	sword:SetAttribute("OutlineColor", look.outline)
+	sword:SetAttribute("OutlineFill", look.fill)
 	local outline = sword:FindFirstChild("BladeOutline")
 	if outline and outline:IsA("Highlight") then
 		outline.OutlineColor = look.outline

@@ -1,5 +1,6 @@
 --!strict
 local Audio = require(script.Audio)
+local BladeOutlines = require(script.BladeOutlines)
 local BossHUD = require(script.BossHUD)
 local ChatTags = require(script.ChatTags)
 local Coach = require(script.Coach)
@@ -29,6 +30,7 @@ profilePrivate.OnClientEvent:Connect(function(name: unknown, value: unknown)
 end)
 
 Audio.start()
+BladeOutlines.start()
 Motion.start()
 Movement.start()
 Occlusion.start()
