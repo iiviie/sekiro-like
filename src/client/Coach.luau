@@ -15,6 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Bosses = require(ReplicatedStorage.Shared.Bosses)
 local Config = require(ReplicatedStorage.Shared.Config)
+local Round = require(ReplicatedStorage.Shared.Round)
 local CombatHUD = require(script.Parent.CombatHUD)
 local InputNames = require(script.Parent.InputNames)
 local LockOn = require(script.Parent.LockOn)
@@ -24,7 +25,7 @@ local player = Players.LocalPlayer
 
 local MATCHES = 3 -- coach for this many matches...
 local DEFLECTS = 12 -- ...or until this many lifetime deflects, whichever comes first
-local GLINT_LEAD = 0.3 -- matches CombatVisuals' glint
+local GLINT_LEAD = Config.Visual.GlintLead -- the same lead as CombatVisuals' glint
 local RANGE = 12 -- studs: swings from further away aren't aimed at you (a thrust reaches ~11)
 local TIP_TIME = 6 -- seconds a death tip stays up
 local PROMPT_BOTTOM = CombatHUD.PostureTop + 4 -- just over the posture bar
@@ -54,6 +55,8 @@ local tipLabel: TextLabel
 local tipGroup: CanvasGroup
 local lastHitKind: string? = nil
 local lastHitAt = 0
+local fellInMist = false -- the last fall was in a royale, outside the ring
+local reportAt = -math.huge -- os.clock() of the last match report (its card opens soon after)
 
 local screen: ScreenGui
 local prompt: Frame
@@ -149,8 +152,34 @@ local function hideTip()
 	tipGroup.GroupTransparency = 1
 end
 
+-- Where you fell: in a royale and outside the ring is the mist's doing (a boss trial, a duel
+-- or a fall with no recent hit gets no tip at all).
+local function inMist(): boolean
+	local character = player.Character
+	local root = rootOf(character)
+	if not character or not root or character:GetAttribute("InMatch") ~= true or Round.phase() ~= "Match" then
+		return false
+	end
+	local center, radius = Round.zone(now())
+	local offset = root.Position - center
+	return Vector3.new(offset.X, 0, offset.Z).Magnitude > radius - 1
+end
+
+-- Whether a report card is up, or on its way (it opens a few seconds after its remote).
+local function reportShowing(): boolean
+	if os.clock() - reportAt < 20 then
+		return true
+	end
+	local toasts = player.PlayerGui:FindFirstChild("Toasts")
+	return toasts ~= nil and toasts:FindFirstChild("Report", true) ~= nil
+end
+
 local function showTip()
-	local kind = if os.clock() - lastHitAt < 4 then lastHitKind else "Mist"
+	local character = player.Character
+	if reportShowing() or (character and character:GetAttribute("InBoss") == true) then
+		return
+	end
+	local kind = if os.clock() - lastHitAt < 4 then lastHitKind elseif fellInMist then "Mist" else nil
 	local tip = kind and DEATH_TIPS[kind]
 	if not tip then
 		return
@@ -163,7 +192,6 @@ local function showTip()
 	tipLabel.Text = tip
 	-- Over the spectate bar while the match goes on; at the very bottom once you're back in
 	-- the lobby (nothing else lives in its bottom-centre).
-	local character = player.Character
 	local inFight = character ~= nil
 		and (character:GetAttribute("InMatch") == true or character:GetAttribute("InDuel") == true)
 	tipGroup.Position = UDim2.new(0.5, 0, 1, -(if inFight then TIP_BOTTOM else 20))
@@ -195,11 +223,13 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	end,
 	CutDown = function(data)
 		if data.model == player.Character then
+			fellInMist = inMist()
 			task.delay(1.8, showTip)
 		end
 	end,
 	Died = function(data)
 		if data.model == player.Character then
+			fellInMist = inMist()
 			task.delay(2.6, showTip)
 		end
 	end,
@@ -372,7 +402,7 @@ function Coach.start()
 		Name = "Tip",
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -TIP_BOTTOM),
-		Size = UDim2.fromOffset(540, 0),
+		Size = UDim2.fromOffset(520, 0), -- narrow enough to sit between the fighters' feet; wraps to two lines
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		Visible = false,
@@ -412,6 +442,21 @@ function Coach.start()
 				hideTip()
 			end
 		end)
+		character:GetAttributeChangedSignal("InBoss"):Connect(function()
+			if character:GetAttribute("InBoss") == true then
+				hideTip()
+			end
+		end)
+	end)
+
+	-- The match report takes the screen: the tip goes as its card is on the way, and none
+	-- shows under it.
+	local progress = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Progress") :: RemoteEvent
+	progress.OnClientEvent:Connect(function(kind: string)
+		if kind == "Report" then
+			reportAt = os.clock()
+			hideTip()
+		end
 	end)
 
 	local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent
