@@ -506,8 +506,8 @@ order: naginata (reach), then dual blades; kusarigama last.
   arc). Thrusts (the perilous thrust, boss thrusts) barely sweep, so they also draw a straight, tapered streak from the
   guard to past the tip, red for perilous, that closes up toward the point as it fades. Deflects spray long sparks
   from where the blades meet (more, and a bigger bloom, for a perfect deflect); hits
-  add a cut streak, a white star flash and shards to the dark, gravity-pulled blood; deathblows add an X cut, pools on
-  the floor and a brief desaturated freeze. **Settings → Reduced effects** thins particles, drops flash lights and
+  add a cut streak, a white star flash and shards to dark, gravity-pulled sumi ink (never blood); deathblows add an X cut,
+  ink splats on the floor and a brief desaturated freeze. **Settings → Reduced effects** thins particles, drops flash lights and
   shortens smears. In Studio, `workspace:SetAttribute("VfxSlowMo", 0.1)` slows only these effects for screenshots. The camera kicks along the blow and settles
   rather than jittering at random.
 - **Sound.** Licensed ProSoundEffects and APM library audio. Every asset id is in [Assets.luau](src/shared/Assets.luau).
@@ -552,6 +552,6 @@ src/
   `EconomyConfig.PaidCapsule` (`"studio"` keeps the gem capsule off in live servers).
 - The place's `TextChatService.ChatVersion` is still `LegacyChatService`; switch it to `TextChatService` (both chat
   tag paths are in place).
-- Fill in the maturity questionnaire (the default deathblow has blood; finishers like Ink Brush don't).
+- Fill in the maturity questionnaire (combat shows no blood: hits and deathblows throw ink).
 - Store page: icon and thumbnails (real gameplay captures work best), description, genre "Fighting".
 - Rename anything that borrows FromSoftware terms ("Shinobi Execution", "Mikiri") if you want to avoid trouble.

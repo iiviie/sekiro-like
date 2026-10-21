@@ -33,8 +33,10 @@ local player = Players.LocalPlayer
 local SOUNDS = Assets.Sounds
 local GOLD = Color3.fromRGB(255, 214, 110)
 local SPARK = Color3.fromRGB(255, 185, 90)
-local BLOOD = Color3.fromRGB(150, 8, 16)
-local BLOOD_DARK = Color3.fromRGB(64, 4, 8)
+-- Hits throw sumi ink, not blood: the ink-and-brush look, and no gore on screen.
+local INK = Color3.fromRGB(26, 22, 26)
+local INK_WASH = Color3.fromRGB(70, 62, 70)
+local CRIMSON = Color3.fromRGB(196, 40, 40) -- a flash of light, not a fluid
 local STEEL = Color3.fromRGB(200, 205, 215)
 
 local CombatVisuals = {
@@ -1108,9 +1110,9 @@ local function shake(intensity: number, duration: number, from: Model?, to: Mode
 	end)
 end
 
--- Blood: dark, unlit droplets thrown along the blow and pulled down by gravity, plus a
--- faint red mist. Deliberately not a glowing spark burst.
-local function bloodSpray(position: Vector3, direction: Vector3?, count: number, speed: number)
+-- Ink: dark, unlit droplets and a few brush splats thrown along the blow and pulled down
+-- by gravity, plus a faint grey wash. Deliberately not a glowing spark burst.
+local function inkSpray(position: Vector3, direction: Vector3?, count: number, speed: number)
 	local anchor = anchorAt(position)
 	if direction and direction.Magnitude > 0.01 then
 		anchor.CFrame = CFrame.lookAt(position, position + direction)
@@ -1118,7 +1120,7 @@ local function bloodSpray(position: Vector3, direction: Vector3?, count: number,
 
 	local drops = Instance.new("ParticleEmitter")
 	drops.Texture = Assets.UI.Glow
-	drops.Color = ColorSequence.new(BLOOD, BLOOD_DARK)
+	drops.Color = ColorSequence.new(INK, INK_WASH)
 	drops.LightEmission = 0
 	drops.LightInfluence = 0.6
 	drops.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.32), NumberSequenceKeypoint.new(1, 0.06) })
@@ -1134,24 +1136,50 @@ local function bloodSpray(position: Vector3, direction: Vector3?, count: number,
 	drops.Parent = anchor
 	drops:Emit(count)
 
-	local mist = Instance.new("ParticleEmitter")
-	mist.Texture = Assets.UI.Glow
-	mist.Color = ColorSequence.new(BLOOD)
-	mist.LightEmission = 0
-	mist.LightInfluence = 0.6
-	mist.Size = NumberSequence.new(0.8, 2.4)
-	mist.Transparency = NumberSequence.new(0.55, 1)
-	mist.Speed = NumberRange.new(2, 5)
-	mist.EmissionDirection = Enum.NormalId.Front
-	mist.SpreadAngle = Vector2.new(60, 60)
-	mist.Lifetime = NumberRange.new(0.25, 0.45)
-	mist.Rate = 0
-	mist.Parent = anchor
-	mist:Emit(math.ceil(count / 10))
+	local splats = Instance.new("ParticleEmitter")
+	splats.Texture = Assets.Cosmetics.InkSplats
+	splats.FlipbookLayout = Enum.ParticleFlipbookLayout.Grid2x2
+	splats.FlipbookMode = Enum.ParticleFlipbookMode.OneShot
+	splats.FlipbookStartRandom = true
+	splats.FlipbookFramerate = NumberRange.new(0)
+	splats.Color = ColorSequence.new(INK)
+	splats.LightEmission = 0
+	splats.LightInfluence = 0.6
+	splats.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(1, 1) })
+	splats.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.7, 0.1),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	splats.Speed = NumberRange.new(speed * 0.25, speed * 0.6)
+	splats.EmissionDirection = Enum.NormalId.Front
+	splats.SpreadAngle = if direction then Vector2.new(40, 30) else Vector2.new(180, 180)
+	splats.Lifetime = NumberRange.new(0.4, 0.7)
+	splats.Acceleration = Vector3.new(0, -45, 0)
+	splats.Drag = 2
+	splats.Rotation = NumberRange.new(0, 360)
+	splats.Rate = 0
+	splats.Parent = anchor
+	splats:Emit(math.ceil(count / 8))
+
+	local wash = Instance.new("ParticleEmitter")
+	wash.Texture = Assets.UI.Glow
+	wash.Color = ColorSequence.new(INK_WASH)
+	wash.LightEmission = 0
+	wash.LightInfluence = 0.6
+	wash.Size = NumberSequence.new(0.8, 2.4)
+	wash.Transparency = NumberSequence.new(0.6, 1)
+	wash.Speed = NumberRange.new(2, 5)
+	wash.EmissionDirection = Enum.NormalId.Front
+	wash.SpreadAngle = Vector2.new(60, 60)
+	wash.Lifetime = NumberRange.new(0.25, 0.45)
+	wash.Rate = 0
+	wash.Parent = anchor
+	wash:Emit(math.ceil(count / 10))
 end
 
--- A few overlapping dark pools on the floor under a deathblow, fading after a while.
-local function bloodPool(position: Vector3, direction: Vector3?)
+-- A brush splat of ink on the floor under a deathblow, fading after a while.
+local function inkPool(position: Vector3, direction: Vector3?)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
 	params.FilterDescendantsInstances = { workspace.Terrain, workspace:FindFirstChild("Castle") :: Instance }
@@ -1161,27 +1189,28 @@ local function bloodPool(position: Vector3, direction: Vector3?)
 	end
 	local flat = if direction then Vector3.new(direction.X, 0, direction.Z) else Vector3.zero
 	flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.zero
-	for i = 1, 4 do
+	for i = 1, 2 do
 		local pool = Instance.new("Part")
-		pool.Shape = Enum.PartType.Cylinder
 		pool.Anchored = true
 		pool.CanCollide = false
 		pool.CanQuery = false
 		pool.CanTouch = false
 		pool.CastShadow = false
-		pool.Material = Enum.Material.SmoothPlastic
-		pool.Color = BLOOD_DARK
-		pool.Reflectance = 0.05
-		local size = (2.8 - i * 0.45) * (0.8 + math.random() * 0.4)
-		pool.Size = Vector3.new(0.04, size, size)
-		local spread = flat * (i - 1) * 1.1 + Vector3.new(math.random() - 0.5, 0, math.random() - 0.5) * 0.8
-		pool.CFrame = CFrame.new(hit.Position + spread + Vector3.new(0, 0.03 + i * 0.004, 0))
-			* CFrame.Angles(0, 0, math.rad(90))
 		pool.Transparency = 1
+		local size = (if i == 1 then 5 else 3) * (0.85 + math.random() * 0.3)
+		pool.Size = Vector3.new(size, 0.05, size)
+		pool.CFrame = CFrame.new(hit.Position + flat * (i - 1) * 1.8 + Vector3.new(0, 0.04 + i * 0.004, 0))
+			* CFrame.Angles(0, math.random() * math.pi * 2, 0)
+		local decal = Instance.new("Decal")
+		decal.Face = Enum.NormalId.Top
+		decal.Texture = Assets.Cosmetics.InkSplats
+		decal.Color3 = INK
+		decal.Transparency = 1
+		decal.Parent = pool
 		pool.Parent = workspace
-		TweenService:Create(pool, TweenInfo.new(0.25), { Transparency = 0.12 }):Play()
+		TweenService:Create(decal, TweenInfo.new(0.25), { Transparency = 0.08 }):Play()
 		task.delay(6, function()
-			TweenService:Create(pool, TweenInfo.new(2.5), { Transparency = 1 }):Play()
+			TweenService:Create(decal, TweenInfo.new(2.5), { Transparency = 1 }):Play()
 		end)
 		Debris:AddItem(pool, 9)
 	end
@@ -1761,7 +1790,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		impactEffects(attacker, defender, ender, false)
 		local root = rootOf(defender)
 		if root then
-			bloodSpray(
+			inkSpray(
 				root.Position + Vector3.new(0, 0.8, 0),
 				blowDirection(attacker, defender),
 				if ender then 40 else 26,
@@ -1813,14 +1842,14 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		end
 		if root and not grade then
 			local direction = blowDirection(attacker, defender)
-			-- The cut lands a beat into the deathblow clip: a long arc of blood, then pools.
-			bloodSpray(root.Position + Vector3.new(0, 0.6, 0), direction, 90, 34)
-			flare(root.Position + Vector3.new(0, 0.6, 0), BLOOD, 10)
+			-- The cut lands a beat into the deathblow clip: a long arc of ink, then splats.
+			inkSpray(root.Position + Vector3.new(0, 0.6, 0), direction, 90, 34)
+			flare(root.Position + Vector3.new(0, 0.6, 0), STEEL, 10)
 			impactEffects(attacker, defender, true, true)
 			task.delay(0.12, function()
 				if root.Parent then
-					bloodSpray(root.Position + Vector3.new(0, 0.2, 0), direction, 40, 20)
-					bloodPool(root.Position, direction)
+					inkSpray(root.Position + Vector3.new(0, 0.2, 0), direction, 40, 20)
+					inkPool(root.Position, direction)
 				end
 			end)
 		end
@@ -1856,7 +1885,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		playClip(model, "Executed")
 		local root = rootOf(model)
 		if root then
-			flare(root.Position, BLOOD, 8)
+			flare(root.Position, CRIMSON, 8)
 		end
 		playSound(SOUNDS.PostureBreak, root, 0.7, 0.6)
 	end,

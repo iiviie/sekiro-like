@@ -766,7 +766,7 @@ local FINISHERS: { [string]: (Ctx) -> Grade } = {
 }
 
 -- Plays finisher `ref`'s cut. Returns its grade, or nil for the default (CombatVisuals then
--- plays the default cut, blood and grade itself).
+-- plays the default cut, ink and grade itself).
 function CosmeticFX.deathblow(ref: string, ctx: Ctx): Grade?
 	local play = FINISHERS[ref]
 	if not play then
