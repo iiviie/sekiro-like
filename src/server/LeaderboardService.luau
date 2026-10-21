@@ -6,12 +6,16 @@
 -- Boards read OrderedDataStores, refreshed every couple of minutes; each player's values
 -- are written at most once a minute. Where DataStores are unavailable (an unpublished
 -- place) the boards show the players in this server instead, so they never sit blank.
--- Titles ("12 Wins" over the rank name) are BillboardGuis on each player's head.
+-- Nameplates (equipped title, name on the equipped nameplate frame, wins and rank) are
+-- BillboardGuis on each player's head.
 
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Catalog = require(ReplicatedStorage.Shared.Catalog)
+local Flair = require(ReplicatedStorage.Shared.Flair)
 local Palette = require(ReplicatedStorage.Shared.Palette)
 local Ranks = require(ReplicatedStorage.Shared.Ranks)
 local StatsService = require(script.Parent.StatsService)
@@ -171,50 +175,106 @@ local function write(player: Player)
 	end
 end
 
--- "12 Wins" over the rank, on the player's head.
+-- The nameplate over the player's head: their equipped title (in its rarity colour) over
+-- their name on the equipped nameplate frame, and "12 Wins · Gold II" under it. The
+-- default Roblox name is hidden since the plate carries the name.
+local function label(name: string, parent: Instance): TextLabel
+	local text = Instance.new("TextLabel")
+	text.Name = name
+	text.BackgroundTransparency = 1
+	text.TextScaled = true
+	text.TextStrokeTransparency = 0.4
+	text.Parent = parent
+	return text
+end
+
+local function loadoutOf(player: Player): { [string]: string }
+	local raw = player:GetAttribute("Loadout")
+	if typeof(raw) ~= "string" then
+		return {}
+	end
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
+	return if ok and typeof(decoded) == "table" then decoded else {}
+end
+
 local function title(player: Player)
 	local character = player.Character
 	local head = character and character:FindFirstChild("Head")
 	if not head or not head:IsA("BasePart") then
 		return
 	end
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	end
 	local gui = head:FindFirstChild("Title") :: BillboardGui?
 	if not gui then
 		local created = Instance.new("BillboardGui")
 		created.Name = "Title"
-		created.Size = UDim2.fromOffset(160, 44)
-		created.StudsOffset = Vector3.new(0, 3.1, 0)
+		created.Size = UDim2.fromOffset(200, 74)
+		created.StudsOffset = Vector3.new(0, 3.4, 0)
 		created.MaxDistance = 70
 		created.LightInfluence = 0
 		created.ResetOnSpawn = false
 		-- Your own title would float in the middle of your own view.
 		created.PlayerToHideFrom = player
-		local wins = Instance.new("TextLabel")
-		wins.Name = "Wins"
-		wins.BackgroundTransparency = 1
-		wins.Size = UDim2.fromScale(1, 0.55)
-		wins.Font = Enum.Font.Garamond
-		wins.TextScaled = true
-		wins.TextColor3 = Color3.fromRGB(232, 190, 92)
-		wins.TextStrokeTransparency = 0.4
-		wins.Parent = created
-		local rank = wins:Clone()
-		rank.Name = "Rank"
-		rank.Position = UDim2.fromScale(0, 0.55)
-		rank.Size = UDim2.fromScale(1, 0.4)
-		rank.Font = Enum.Font.SourceSansSemibold
-		rank.Parent = created
+		local heading = label("Heading", created)
+		heading.Size = UDim2.fromScale(1, 0.26)
+		heading.Font = Enum.Font.Garamond
+		local plate = Instance.new("Frame")
+		plate.Name = "Plate"
+		plate.AnchorPoint = Vector2.new(0.5, 0)
+		plate.Position = UDim2.fromScale(0.5, 0.28)
+		plate.Size = UDim2.fromScale(0.86, 0.36)
+		plate.BorderSizePixel = 0
+		plate.BackgroundTransparency = 0.15
+		plate.Parent = created
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.3, 0)
+		corner.Parent = plate
+		local edge = Instance.new("UIStroke")
+		edge.Name = "Edge"
+		edge.Thickness = 1.5
+		edge.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		edge.Parent = plate
+		local name = label("PlayerName", plate)
+		name.AnchorPoint = Vector2.new(0.5, 0.5)
+		name.Position = UDim2.fromScale(0.5, 0.5)
+		name.Size = UDim2.fromScale(0.92, 0.8)
+		name.Font = Enum.Font.SourceSansBold
+		name.ZIndex = 3 -- over part C's painted frame and watermark
+		local wins = label("Wins", created)
+		wins.Position = UDim2.fromScale(0, 0.68)
+		wins.Size = UDim2.fromScale(1, 0.3)
+		wins.Font = Enum.Font.SourceSansSemibold
 		created.Parent = head
 		gui = created
 	end
 	local billboard = gui :: BillboardGui
 	local wins = player:GetAttribute("HumanWins") or 0
 	local rank = Ranks.of(player:GetAttribute("Rating") or 0)
+	local loadout = loadoutOf(player)
+	local titleItem = Catalog.get(loadout.title)
+	local plateLook = Flair.plate(Flair.ref(loadout.nameplate))
+	local heading = billboard:FindFirstChild("Heading") :: TextLabel
+	local plate = billboard:FindFirstChild("Plate") :: Frame
+	local name = plate:FindFirstChild("PlayerName") :: TextLabel
+	local edge = plate:FindFirstChild("Edge") :: UIStroke
 	local winsLabel = billboard:FindFirstChild("Wins") :: TextLabel
-	local rankLabel = billboard:FindFirstChild("Rank") :: TextLabel
-	winsLabel.Text = if wins == 1 then "1 Win" else `{wins} Wins`
-	rankLabel.Text = rank.name
-	rankLabel.TextColor3 = rank.color
+	heading.Visible = titleItem ~= nil
+	heading.Text = if titleItem then titleItem.name else ""
+	heading.TextColor3 = if titleItem then Flair.Rarity[titleItem.rarity] or Palette.Parchment else Palette.Parchment
+	plate.BackgroundColor3 = plateLook.fill
+	edge.Color = plateLook.edge
+	local plateRef = Flair.ref(loadout.nameplate) or "Plain"
+	if billboard:GetAttribute("PlateRef") ~= plateRef then
+		billboard:SetAttribute("PlateRef", plateRef)
+		edge.Enabled = not Flair.decoratePlate(plate, plateRef) -- part C's painted frame replaces the stroke
+	end
+	name.Text = player.DisplayName
+	name.TextColor3 = plateLook.text
+	winsLabel.Text = `{if wins == 1 then "1 Win" else `{wins} Wins`}  ·  {rank.name}`
+	winsLabel.TextColor3 = rank.color
 end
 
 function LeaderboardService.start()
@@ -241,6 +301,9 @@ function LeaderboardService.start()
 		write(player)
 	end)
 	local function onPlayer(player: Player)
+		player:GetAttributeChangedSignal("Loadout"):Connect(function()
+			title(player)
+		end)
 		-- Avatar loading replaces the head, so re-title whenever a new one appears.
 		player.CharacterAdded:Connect(function(character)
 			character:WaitForChild("Head", 5)
