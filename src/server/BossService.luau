@@ -262,7 +262,7 @@ local function enterStage(f: Fight)
 		phase = f.brain.phase,
 		lives = f.brain.zp,
 		stage = tostring(f.brain.zp),
-		lesson = stage.lesson,
+		lesson = Bosses.lesson(f.id, tostring(f.brain.zp)),
 	})
 	if stage.selfRevival then
 		BossAI.targetRose(f.brain)

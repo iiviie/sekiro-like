@@ -234,6 +234,28 @@ Bosses.Defs = {
 -- The tutorial trainer first, then the bosses by difficulty (Kannagi's star ratings; ties by
 -- how much vitality and posture they bring and how fast they press).
 Bosses.Tutorial = "Enemy03"
+
+-- The tutorial's lesson lines by stage (the generated decks carry Kannagi's own notes, with
+-- move ids, which aren't for players). BossHUD shows "Lesson: <line>"; stages without a line
+-- show no lesson banner.
+local LESSONS: { [string]: { [string]: string } } = {
+	Enemy03 = {
+		["99"] = "move in, then attack",
+		["98"] = "deflect its cut: block just as it lands",
+		["97"] = "deflect both cuts of its double strike",
+		["96"] = "jump over its perilous sweep",
+		["95"] = "dash into its perilous thrust for a Mikiri Counter",
+		["94"] = "put it all together",
+		["2"] = "take both its lives",
+		["1"] = "one life left: finish it",
+	},
+}
+
+-- The player-facing lesson for tutorial stage `stage` of boss `id`, or nil.
+function Bosses.lesson(id: string, stage: string): string?
+	local lessons = LESSONS[id]
+	return lessons and lessons[stage]
+end
 Bosses.Order = { "Enemy01", "Enemy07", "Enemy05", "Enemy04", "Enemy06", "Enemy08", "Enemy02", "Enemy09" }
 Bosses.List = { "Enemy03", "Enemy01", "Enemy07", "Enemy05", "Enemy04", "Enemy06", "Enemy08", "Enemy02", "Enemy09" }
 
