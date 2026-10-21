@@ -1,25 +1,48 @@
 --!strict
 -- Dresses the ronin bots so they read as one faction and a clear silhouette across the
--- courtyard: a woven kasa, a dark gi and hakama in one of a few muted colourways, and a
--- crimson sash. Three extra parts per bot, welded, massless and invisible to queries.
+-- courtyard: a textured gi and hakama (classic Shirt and Pants from Shared/Clothing) in one
+-- of several mid-tone colourways, a woven kasa and a welded obi. The extra parts are
+-- welded, massless and invisible to queries. Bosses get their own set by id.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
-local Palette = require(ReplicatedStorage.Shared.Palette)
+local Bosses = require(ReplicatedStorage.Shared.Bosses)
+local Clothing = require(ReplicatedStorage.Shared.Clothing)
 
 local SKIN = Color3.fromRGB(226, 178, 140)
 local KASA_WIDTH = 3.1
-
--- { gi (torso and sleeves), hakama (legs) }
-local COLOURWAYS: { { Color3 } } = {
-	{ Color3.fromRGB(44, 40, 42), Color3.fromRGB(28, 27, 32) }, -- charcoal
-	{ Color3.fromRGB(40, 46, 68), Color3.fromRGB(26, 28, 38) }, -- indigo
-	{ Color3.fromRGB(84, 66, 52), Color3.fromRGB(42, 36, 32) }, -- ash brown
-	{ Color3.fromRGB(70, 30, 30), Color3.fromRGB(32, 26, 28) }, -- oxblood
-}
+-- The rig keeps the description describe() filled in; this attribute on it names the set.
+local SET_ATTRIBUTE = "ClothingSet"
 
 local Outfit = {}
+
+-- The arms take the skin colour: the shirt leaves the hands and wrists transparent.
+local function colourBody(description: HumanoidDescription, skin: Color3, set: Clothing.Set)
+	description.HeadColor = skin
+	description.LeftArmColor = skin
+	description.RightArmColor = skin
+	description.TorsoColor = set.gi
+	description.LeftLegColor = set.hakama
+	description.RightLegColor = set.hakama
+end
+
+local function setOf(model: Model): Clothing.Set?
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local description = humanoid and humanoid:FindFirstChildOfClass("HumanoidDescription")
+	return Clothing.get(description and description:GetAttribute(SET_ATTRIBUTE) :: string?)
+end
+
+local function clothe(model: Model, set: Clothing.Set)
+	local shirt = Instance.new("Shirt")
+	shirt.Name = "Gi"
+	shirt.ShirtTemplate = set.shirt
+	shirt.Parent = model
+	local pants = Instance.new("Pants")
+	pants.Name = "Hakama"
+	pants.PantsTemplate = set.pants
+	pants.Parent = model
+end
 
 local function wear(model: Model, bodyPart: string, props: { [string]: any }, offset: CFrame): BasePart?
 	local anchor = model:FindFirstChild(bodyPart)
@@ -45,29 +68,44 @@ local function wear(model: Model, bodyPart: string, props: { [string]: any }, of
 	return piece
 end
 
--- Body colours go on the description before the rig is built.
-function Outfit.describe(description: HumanoidDescription, index: number)
-	local colours = COLOURWAYS[(index - 1) % #COLOURWAYS + 1]
-	description.HeadColor = SKIN
-	description.TorsoColor = colours[1]
-	description.LeftArmColor = colours[1]
-	description.RightArmColor = colours[1]
-	description.LeftLegColor = colours[2]
-	description.RightLegColor = colours[2]
-end
-
--- Hat and sash go on the built rig.
-function Outfit.dress(model: Model)
+-- The obi: a slim band over the painted one at the top of the LowerTorso, so the waist
+-- keeps a little depth in silhouette. The hakama's ties and knot stay visible below it.
+local function obi(model: Model, colour: Color3)
 	local lower = model:FindFirstChild("LowerTorso")
 	if lower and lower:IsA("BasePart") then
-		wear(model, "LowerTorso", {
+		local height = lower.Size.Y * 0.5
+		local size = Vector3.new(lower.Size.X + 0.06, height, lower.Size.Z + 0.06)
+		local band = wear(model, "LowerTorso", {
 			Name = "Sash",
-			Size = Vector3.new(lower.Size.X + 0.08, 0.34, lower.Size.Z + 0.1),
+			Size = size,
 			Material = Enum.Material.Fabric,
-			Color = Palette.Crimson,
+			Color = colour,
 			CastShadow = false,
-		}, CFrame.new(0, lower.Size.Y / 2 - 0.12, 0))
+		}, CFrame.new(0, lower.Size.Y / 2 - height / 2 + 0.02, 0))
+		-- Parenting a scaled rig (bosses) rescales loose parts by ~1.3 but not the body: hold
+		-- the band to the LowerTorso it was fitted to.
+		if band then
+			band:GetPropertyChangedSignal("Size"):Connect(function()
+				if band.Size ~= size then
+					band.Size = size
+				end
+			end)
+		end
 	end
+end
+
+-- Body colours and the set go on the description before the rig is built.
+function Outfit.describe(description: HumanoidDescription, index: number)
+	local name = Clothing.Bots[(index - 1) % #Clothing.Bots + 1]
+	description:SetAttribute(SET_ATTRIBUTE, name)
+	colourBody(description, SKIN, Clothing.Sets[name])
+end
+
+-- Clothes, hat and obi go on the built rig.
+function Outfit.dress(model: Model)
+	local set = setOf(model) or Clothing.Sets[Clothing.Bots[1]]
+	clothe(model, set)
+	obi(model, set.obi)
 
 	local head = model:FindFirstChild("Head")
 	if head and head:IsA("BasePart") then
@@ -106,13 +144,28 @@ type BossLook = {
 	height: number,
 }
 
+-- The boss's set (Clothing.Boss) found by its look: BossService hands Outfit the def's look.
+local function bossSet(look: BossLook): Clothing.Set?
+	for id, def in Bosses.Defs :: { [string]: Bosses.BossDef } do
+		if (def.look :: any) == look then
+			return Clothing.get(Clothing.Boss[id])
+		end
+	end
+	return nil
+end
+
 function Outfit.describeBoss(description: HumanoidDescription, look: BossLook)
-	description.HeadColor = look.skin
-	description.TorsoColor = look.gi
-	description.LeftArmColor = look.gi
-	description.RightArmColor = look.gi
-	description.LeftLegColor = look.hakama
-	description.RightLegColor = look.hakama
+	local set = bossSet(look)
+	if set then
+		colourBody(description, look.skin, set)
+	else -- no set: the flat look colours
+		description.HeadColor = look.skin
+		description.TorsoColor = look.gi
+		description.LeftArmColor = look.gi
+		description.RightArmColor = look.gi
+		description.LeftLegColor = look.hakama
+		description.RightLegColor = look.hakama
+	end
 	description.HeightScale = look.height
 	description.WidthScale = 1 + (look.height - 1) * 0.8
 	description.DepthScale = 1 + (look.height - 1) * 0.6
@@ -145,16 +198,11 @@ local function ear(model: Model, head: BasePart, side: number, look: BossLook)
 end
 
 function Outfit.dressBoss(model: Model, look: BossLook)
-	local lower = model:FindFirstChild("LowerTorso")
-	if lower and lower:IsA("BasePart") then
-		wear(model, "LowerTorso", {
-			Name = "Sash",
-			Size = Vector3.new(lower.Size.X + 0.08, 0.34, lower.Size.Z + 0.1),
-			Material = Enum.Material.Fabric,
-			Color = look.sash,
-			CastShadow = false,
-		}, CFrame.new(0, lower.Size.Y / 2 - 0.12, 0))
+	local set = bossSet(look)
+	if set then
+		clothe(model, set)
 	end
+	obi(model, if set then set.obi else look.sash)
 	local head = model:FindFirstChild("Head")
 	if not head or not head:IsA("BasePart") then
 		return
