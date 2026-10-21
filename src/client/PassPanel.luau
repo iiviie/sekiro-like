@@ -18,6 +18,7 @@ local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Intros = require(ReplicatedStorage.Shared.Intros)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Season = require(ReplicatedStorage.Shared.Season)
+local Panels = require(script.Parent.Panels)
 local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
@@ -296,8 +297,13 @@ local function header(body: Frame, width: number)
 		Text = `Tier {tier}`,
 	}, body)
 
+	-- Premium for gems too (Catalog pass.Premium price.gems): a second, quieter button.
+	local premiumItem = Catalog.get(Season.Products.Premium)
+	local premiumGems = premiumItem and premiumItem.price and premiumItem.price.gems
+	local gemButton = not premium and premiumGems ~= nil
+
 	-- Pass XP toward the next tier (value outside the bar), the countdown under it.
-	local right = 232 -- the premium button
+	local right = if gemButton then 372 else 232 -- the premium button(s)
 	local barX = HEADER_H + 146
 	local barW = math.max(150, width - barX - right - 16)
 	local maxed = tier >= Season.Tiers
@@ -363,12 +369,13 @@ local function header(body: Frame, width: number)
 			Text = "PREMIUM OWNED",
 		}, chip)
 	else
+		local gemW = if gemButton then 132 else 0
 		local upgrade = UI.button({
 			Name = "BuyPremium",
 			variant = if running then "premium" else "disabled",
 			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.fromOffset(right - 12, HEADER_H),
+			Position = UDim2.new(1, -(if gemButton then gemW + 8 else 0), 0, 0),
+			Size = UDim2.fromOffset(220, HEADER_H),
 			FontFace = UI.Fonts.Number,
 			TextSize = 17,
 			Text = `Unlock Premium  ·  {price(Season.Products.Premium)}`,
@@ -376,6 +383,42 @@ local function header(body: Frame, width: number)
 		upgrade.Activated:Connect(function()
 			action("Buy", Season.Products.Premium)
 		end)
+		if gemButton then
+			local gems = premiumGems :: number
+			local withGems = UI.button({
+				Name = "BuyPremiumGems",
+				variant = if running then "secondary" else "disabled",
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.fromScale(1, 0),
+				Size = UDim2.fromOffset(gemW, HEADER_H),
+				FontFace = UI.Fonts.Number,
+				TextSize = 16,
+				Text = `or {UI.number(gems)} gems`,
+			}, body)
+			withGems.Activated:Connect(function()
+				if not running then
+					return
+				end
+				local balance = attr("Gems", 0)
+				UI.confirm(Panels.window(), {
+					title = "Unlock Premium?",
+					text = "This season's premium track. Tiers you've already reached pay out at once.",
+					price = { currency = "gems", amount = gems },
+					balance = balance,
+					yes = "Unlock",
+					shortLabel = "Get gems",
+					onShort = function()
+						local store = script.Parent:FindFirstChild("StorePanel")
+						if store and store:IsA("ModuleScript") then
+							(require(store) :: any).show("Gems")
+						end
+					end,
+					onYes = function()
+						action("BuyGems")
+					end,
+				})
+			end)
+		end
 	end
 end
 

@@ -7,10 +7,13 @@
 --
 -- The card waits for a quiet moment: in the lobby, no match report, no panel, no reveal, no
 -- offer card, no preview. Several unlocks share one card. It closes itself after a while.
+-- Something bought with coins, gems or Shards (Locker, Store) gets the same card at once,
+-- over the open panel, with Equip and Preview: a purchase ends in a moment, not a toast.
 --
 --   NewItems.start(openLocker(slot, id))   LockerPanel wires it
 --   NewItems.isNew(id) -> boolean          got this session, not looked at yet
 --   NewItems.seen(id)                      looked at (the Locker selected it)
+--   NewItems.bought(ids)                   a purchase was asked for: the card once it's granted
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -37,6 +40,7 @@ local queue: { Unlock } = {}
 local open: ((string?, string?) -> ())? = nil
 local screen: ScreenGui? = nil
 local showing = false
+local closeShown: (() -> ())? = nil -- closes the card on screen
 
 function NewItems.isNew(id: string): boolean
 	return fresh[id] == true
@@ -85,7 +89,25 @@ local function slotOf(item: Catalog.Item): string?
 	return (Catalog.SlotOf :: any)[item.category]
 end
 
-local function showCard(batch: { Unlock })
+-- Tries `item` on (CosmeticPreview, or the intro on your own character), back to the Locker.
+local function preview(item: Catalog.Item, slot: string?)
+	Panels.closeAll()
+	local function back()
+		if open then
+			open(slot, item.id)
+		end
+	end
+	if item.category == "intro" then
+		local intro = require(script.Parent.IntroCinematic) :: any
+		intro.preview(item.ref, back)
+		return
+	end
+	CosmeticPreview.present(item, { back = "Back to the Locker", onBack = back })
+end
+
+-- `bought`: a purchase the player just made (shown at once, over an open panel; Equip and
+-- Preview, or Preview and Locker when the server already put it on).
+local function showCard(batch: { Unlock }, bought: boolean?)
 	local first = batch[1]
 	local item = Catalog.get(first.id)
 	if not item or not screen then
@@ -113,7 +135,10 @@ local function showCard(batch: { Unlock })
 		Size = UDim2.new(1, -130, 0, 18),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextColor3 = T.GoldHi,
-		Text = if first.equipped then "NEW  ·  ON YOU NOW" else "NEW",
+		Text = if bought
+			then (if first.equipped then "UNLOCKED  ·  ON YOU NOW" else "UNLOCKED")
+			elseif first.equipped then "NEW  ·  ON YOU NOW"
+			else "NEW",
 	}, card)
 	local more = if #batch > 1 then `  +{#batch - 1} more` else ""
 	UI.text({
@@ -141,6 +166,9 @@ local function showCard(batch: { Unlock })
 			return
 		end
 		closed = true
+		if closeShown == close then
+			closeShown = nil
+		end
 		UI.play(card, UI.Motion.Close, { Position = UDim2.new(1, 360, 0.42, 0) })
 		task.delay(0.2, function()
 			card:Destroy()
@@ -169,8 +197,25 @@ local function showCard(batch: { Unlock })
 		Padding = UDim.new(0, 8),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, row)
+	closeShown = close
 	local slot = slotOf(item)
-	if first.equipped then
+	local canPreview = StoreUI.previewable(item)
+	if bought and canPreview then
+		local look = UI.button({
+			Name = "Preview",
+			variant = "secondary",
+			LayoutOrder = 3,
+			Size = UDim2.fromOffset(110, 46),
+			TextSize = 16,
+			Text = "Preview",
+		}, row)
+		look.Activated:Connect(function()
+			close()
+			preview(item, slot)
+		end)
+	end
+	-- A bought item already on you (a new blade goes straight on) has nothing to equip.
+	if first.equipped and not bought then
 		local undo = UI.tertiary({
 			Name = "Undo",
 			LayoutOrder = 1,
@@ -183,7 +228,7 @@ local function showCard(batch: { Unlock })
 			StoreUI.fire("EquipItem", if previous == "" then "title." else previous)
 			close()
 		end)
-	elseif slot then
+	elseif slot and not first.equipped then
 		local equip = UI.button({
 			Name = "Equip",
 			variant = "primary",
@@ -199,20 +244,22 @@ local function showCard(batch: { Unlock })
 			close()
 		end)
 	end
-	local locker = UI.button({
-		Name = "Locker",
-		variant = "secondary",
-		LayoutOrder = 3,
-		Size = UDim2.fromOffset(110, 46),
-		TextSize = 16,
-		Text = "Locker",
-	}, row)
-	locker.Activated:Connect(function()
-		close()
-		if open then
-			open(slot, item.id)
-		end
-	end)
+	if not (bought and canPreview) or first.equipped then
+		local locker = UI.button({
+			Name = "Locker",
+			variant = "secondary",
+			LayoutOrder = 3,
+			Size = UDim2.fromOffset(110, 46),
+			TextSize = 16,
+			Text = "Locker",
+		}, row)
+		locker.Activated:Connect(function()
+			close()
+			if open then
+				open(slot, item.id)
+			end
+		end)
+	end
 
 	card.Position = UDim2.new(1, 360, 0.42, 0)
 	UI.play(card, UI.Motion.Open, { Position = UDim2.new(1, -16, 0.42, 0) })
@@ -224,7 +271,7 @@ local function showCard(batch: { Unlock })
 			task.wait(0.5)
 			local character = player.Character
 			if
-				Panels.isOpen()
+				(Panels.isOpen() and not bought)
 				or not character
 				or character:GetAttribute("InMatch") == true
 				or character:GetAttribute("InDuel") == true
@@ -235,12 +282,43 @@ local function showCard(batch: { Unlock })
 	end)
 end
 
+-- A coin / gem / Shard purchase was asked for: once the server's grant arrives (the Inventory
+-- attribute; a refusal never grants, and the server says why), the card shows at once.
+function NewItems.bought(ids: { string })
+	local id = ids[1]
+	if not id or not Catalog.get(id) then
+		return
+	end
+	task.spawn(function()
+		local deadline = os.clock() + 6
+		while os.clock() < deadline and not StoreUI.owned()[id] do
+			task.wait(0.2)
+		end
+		if not StoreUI.owned()[id] then
+			return
+		end
+		task.wait(0.15) -- the loadout attribute (a new blade goes on) lands in the same publish
+		local item = Catalog.get(id) :: Catalog.Item
+		local slot = slotOf(item)
+		local worn = slot and StoreUI.loadout()[slot]
+		local batch: { Unlock } = {}
+		for _, each in ids do
+			table.insert(batch, { id = each, equipped = each == id and worn == id })
+		end
+		if closeShown then
+			closeShown()
+			task.wait(0.2)
+		end
+		showCard(batch, true)
+	end)
+end
+
 function NewItems.start(openLocker: (string?, string?) -> ())
 	open = openLocker
 	screen = UI.new("ScreenGui", {
 		Name = "NewItems",
 		ResetOnSpawn = false,
-		DisplayOrder = 5,
+		DisplayOrder = 7, -- over the panels (6): a purchase's card shows with the Store open
 		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
 	}, player:WaitForChild("PlayerGui"))
 	player:GetAttributeChangedSignal("Inventory"):Connect(onInventory)

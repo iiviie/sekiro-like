@@ -1,7 +1,9 @@
 --!strict
 -- The Store, in four calm tabs:
 --   Featured  today's shop (2 coin + 2 gem items) and the week's featured set, with the
---             real rotation times from the server (items come back; nothing is gone for good)
+--             real rotation times from the server. Gem items sell only while they're here (the
+--             server's gate) and come back within the server's computed window; coin items are
+--             always in the Locker too. Nothing is gone for good.
 --   Gems      the six gem packs: amount, a plain bonus and the Robux price
 --   Offers    the Initiate's Bundle (only while its 72 h window is open and you don't own
 --             it), the Path of the Blade premium track, and the cosmetic / convenience passes
@@ -22,11 +24,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
-local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Text = require(ReplicatedStorage.Shared.Text)
 local Flair = require(ReplicatedStorage.Shared.Flair)
 local Season = require(ReplicatedStorage.Shared.Season)
 local CosmeticPreview = require(script.Parent.CosmeticPreview)
+local NewItems = require(script.Parent.NewItems)
 local Panels = require(script.Parent.Panels)
 local Reveal = require(script.Parent.Reveal)
 local StoreUI = require(script.Parent.StoreUI)
@@ -167,14 +169,14 @@ end
 -- Featured: the daily shop and the weekly set
 
 -- The purchase confirm for a coin, gem or shard price: the item in its frame, the price as
--- the largest thing, the balance after, and "Get gems" instead when gems are short.
+-- the largest thing, the balance after, and "Get gems" instead when gems are short. A
+-- purchase ends in the NewItems card (Equip, Preview).
 local function confirmBuy(
 	item: Catalog.Item,
 	currency: string, -- "coins" | "gems" | "shards"
 	cost: number,
 	action: string,
-	arg: any,
-	done: string
+	arg: any
 )
 	local attrName = ({ coins = "Coins", gems = "Gems", shards = "Shards" } :: { [string]: string })[currency]
 	UI.confirm(Panels.window(), {
@@ -195,7 +197,7 @@ local function confirmBuy(
 		onYes = function()
 			shop(action, arg, function(result)
 				if result.ok then
-					Toasts.notice(done, UI.Gold)
+					NewItems.bought({ item.id })
 				end
 			end)
 		end,
@@ -239,7 +241,7 @@ local function shopCard(parent: Instance, id: string, order: number, have: { [st
 			if owns then
 				return
 			end
-			confirmBuy(item, currency, cost, "BuyShop", id, `Unlocked  ·  {item.name}  ·  equip it in the Locker`)
+			confirmBuy(item, currency, cost, "BuyShop", id)
 		end,
 	}, parent)
 end
@@ -253,10 +255,10 @@ local function featuredTab(list: ScrollingFrame)
 	end
 	local line = UI.note(list, "", 1)
 	if typeof(rotation.endsAt) == "number" then
+		-- The real window (the server's math), and where coin items always are.
+		local back = StoreUI.returnText()
 		StoreUI.countdown(line, rotation.endsAt, function(left)
-			return `Today's shop  ·  new items in {left}  ·  every item returns within {Text.days(
-				EconomyConfig.Shop.ReturnWithinDays
-			)}`
+			return `Today's shop  ·  new in {left}  ·  gem items come back {back}  ·  coin items are always in the Locker`
 		end)
 	end
 	local row = UI.new("Frame", {
@@ -396,7 +398,7 @@ local function featuredTab(list: ScrollingFrame)
 			onYes = function()
 				shop("BuyFeatured", nil, function(result)
 					if result.ok then
-						Toasts.notice("The set is yours  ·  equip it in the Locker", UI.Gold)
+						NewItems.bought(if typeof(result.data) == "table" then result.data else {})
 					end
 				end)
 			end,
@@ -651,9 +653,12 @@ local function offersTab(list: ScrollingFrame)
 
 	local premium = Catalog.get("pass.Premium")
 	if premium then
+		local premiumGems = premium.price and premium.price.gems
 		offerCard(list, premium, nextOrder(), {
 			"This season's premium track: two blades, a finisher, a title, about 500 gems back.",
-			"Tiers you've already reached pay out at once.",
+			if premiumGems
+				then `Tiers you've already reached pay out at once. Also {UI.number(premiumGems)} gems in the Pass.`
+				else "Tiers you've already reached pay out at once.",
 		}, StoreUI.attr("PassPremium", false) == true or StoreUI.attr("SeasonPremium", false) == true)
 	end
 
@@ -663,13 +668,29 @@ local function offersTab(list: ScrollingFrame)
 	if stagecraft then
 		local have = StoreUI.owned()
 		local all = true
+		-- "Worth" from the Catalog's gem prices; what you own already comes back as gems.
+		local worth, back, owned = 0, 0, 0
 		for _, id in (stagecraft.contents and stagecraft.contents.items) or {} do
 			all = all and have[id] == true
+			local intro = Catalog.get(id)
+			local gems = (intro and intro.price and intro.price.gems) or 0
+			worth += gems
+			if have[id] then
+				owned += 1
+				back += gems
+			end
 		end
-		offerCard(list, stagecraft, nextOrder(), {
+		local lines = {
 			"Four pre-fight intros: Sakura Gust, War Fan, Ink Stroke, Crow's Perch.",
-			"Worth 1,450 gems one by one. Once per account.",
-		}, have["bundle.Stagecraft"] == true or all)
+			`Worth {UI.number(worth)} gems one by one. Once per account.`,
+		}
+		if owned > 0 and not all then
+			table.insert(
+				lines,
+				`You own {owned}: {if owned == 1 then "it comes" else "they come"} back as {UI.number(back)} gems.`
+			)
+		end
+		offerCard(list, stagecraft, nextOrder(), lines, have["bundle.Stagecraft"] == true or all)
 	end
 
 	UI.heading(list, "Passes", nextOrder())
@@ -1126,7 +1147,7 @@ local function shrineTab(list: ScrollingFrame)
 	UI.heading(list, `Shard shop  ·  you have {Text.currency(StoreUI.attr("Shards", 0), "Shards")}`, 2)
 	UI.note(
 		list,
-		"Duplicates from draws turn into Shards. Every item a draw can give is also here to buy outright.",
+		"Duplicates from draws turn into Shards. Every item a draw can give is here for Shards any day; gem items sell for gems while they're in today's shop.",
 		3,
 		36
 	)
@@ -1182,10 +1203,26 @@ local function shrineTab(list: ScrollingFrame)
 				Toasts.notice(`{Text.currency(shardCost - shards, "Shards")} more for {item.name}`, UI.Parchment)
 				return
 			end
-			confirmBuy(item, "shards", shardCost, "ShardBuy", id, `Unlocked  ·  {item.name}`)
+			confirmBuy(item, "shards", shardCost, "ShardBuy", id)
 		end)
 		local price = direct[id]
-		if typeof(price) == "table" and (price.gems or price.coins) then
+		if typeof(price) == "table" and price.gems and StoreUI.rotatedOut(item) then
+			-- The real rotation: gem items sell for gems only while they're in the shop.
+			local away = UI.actionButton(row, {
+				Name = "Direct",
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -14, 0.5, 0),
+				Size = UDim2.fromOffset(160, 58),
+				TextSize = 15,
+				Text = "Returns to the shop",
+			}, false)
+			away.Activated:Connect(function()
+				Toasts.notice(
+					`{item.name} sells for gems while it's in the shop: back {StoreUI.returnText()}. Wishlist it in the Locker.`,
+					UI.Parchment
+				)
+			end)
+		elseif typeof(price) == "table" and (price.gems or price.coins) then
 			local currency = if price.gems then "Gems" else "Coins"
 			local cost = price.gems or price.coins
 			local afford = (if currency == "Gems" then gems else coins) >= cost
@@ -1205,7 +1242,7 @@ local function shrineTab(list: ScrollingFrame)
 					end
 					return
 				end
-				confirmBuy(item, string.lower(currency), cost, "DirectBuy", id, `Unlocked  ·  {item.name}`)
+				confirmBuy(item, string.lower(currency), cost, "DirectBuy", id)
 			end)
 		end
 	end
@@ -1305,8 +1342,23 @@ local function purchaseReveal(data: { [string]: any })
 			table.insert(results, outcome)
 		end
 	end
-	if (data.gems or 0) > 0 then
-		table.insert(results, { kind = "Gems", amount = data.gems, rarity = "rare", caption = "ADDED TO YOUR GEMS" })
+	-- A bundle item you already owned came back as its gem price (Monetization.contents).
+	local refundGems, refundNames = 0, {}
+	for _, entry in if typeof(data.refunded) == "table" then data.refunded else {} do
+		local had = typeof(entry) == "table" and Catalog.get(entry.id)
+		if had and typeof(entry.gems) == "number" then
+			refundGems += entry.gems
+			table.insert(refundNames, had.name)
+			local outcome = itemOutcome(had.id, "Owned")
+			if outcome then
+				outcome.caption = `YOU HAD IT  ·  +{UI.number(entry.gems)} GEMS`
+				table.insert(results, outcome)
+			end
+		end
+	end
+	local gemsAdded = (data.gems or 0) + refundGems
+	if gemsAdded > 0 then
+		table.insert(results, { kind = "Gems", amount = gemsAdded, rarity = "rare", caption = "ADDED TO YOUR GEMS" })
 	end
 	if (data.coins or 0) > 0 then
 		table.insert(
@@ -1391,6 +1443,9 @@ local function purchaseReveal(data: { [string]: any })
 			table.insert(names, granted.name)
 		end
 		note = if #names > 0 then `{table.concat(names, " and ")}: on you now.` else "Everything is in your Locker."
+		if refundGems > 0 then
+			note = `You had {table.concat(refundNames, " and ")}: +{UI.number(refundGems)} gems. {note}`
+		end
 		-- A blade that didn't go on (you wear another): one tap to wear it.
 		for _, granted in off do
 			if granted.category == "bladeSkin" then

@@ -10,7 +10,9 @@
 -- pass; save what you wear, put a preset on in one tap, rename it), a 新 seal on things
 -- you got this session and haven't looked at yet, a wishlist toggle for shop items (the
 -- server says when one is in the daily shop), and Preview, which puts the item on you
--- (CosmeticPreview.present) with the camera in front.
+-- (CosmeticPreview.present) with the camera in front. Gem items sell only while they're in
+-- the Store's shop (the real rotation): out of it they read "Returns to the shop" with the
+-- wishlist; coin items unlock any day. A purchase ends in the NewItems card (Equip, Preview).
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -21,6 +23,7 @@ local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Text = require(ReplicatedStorage.Shared.Text)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Flair = require(ReplicatedStorage.Shared.Flair)
+local Blades = require(ReplicatedStorage.Shared.Cosmetics.Blades)
 local CosmeticPreview = require(script.Parent.CosmeticPreview)
 local NewItems = require(script.Parent.NewItems)
 local Panels = require(script.Parent.Panels)
@@ -116,7 +119,10 @@ local function status(item: Catalog.Item, owns: boolean, equipped: boolean, prog
 		return `{UI.number(entry[1])}/{UI.number(entry[2])}`
 	end
 	if item.price and not item.price.product then
-		return if Catalog.isReady(item) then StoreUI.priceText(item) else "Coming soon"
+		if not Catalog.isReady(item) then
+			return "Coming soon"
+		end
+		return if StoreUI.rotatedOut(item) then "Returns to the shop" else StoreUI.priceText(item)
 	end
 	return "Locked"
 end
@@ -135,6 +141,7 @@ local function card(parent: Instance, item: Catalog.Item, order: number, state: 
 		and not price.product
 		and (price.coins ~= nil or price.gems ~= nil)
 		and Catalog.isReady(item)
+		and not StoreUI.rotatedOut(item)
 	local text = if second then "2nd title" else status(item, owns, equipped, state.progress)
 	local made = UI.card({
 		Name = StoreUI.key(item.id),
@@ -208,8 +215,6 @@ local function levelPips(parent: Instance, item: Catalog.Item, level: number, y:
 	}, row)
 end
 
-local inShopToday: (id: string) -> boolean
-
 -- The big preview on the left: art, name, what it is, how to get it, and the one action.
 local function preview(parent: Instance, item: Catalog.Item, state: { [string]: any })
 	local window = Panels.window()
@@ -275,6 +280,10 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		text = if pricePill
 			then (item.blurb or "Unlock it once, wear it whenever you like.")
 			else howToGet(item, state.progress)
+		if pricePill and StoreUI.rotatedOut(item) then
+			-- The real rotation: out of the shop today, never gone for good.
+			text = `Sold in the Store's daily shop, and back {StoreUI.returnText()}. Wishlist it to hear the day.`
+		end
 		if item.blurb and not pricePill then
 			text = `{item.blurb}\n{text}`
 		end
@@ -407,6 +416,7 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 				else nil,
 			onYes = function()
 				StoreUI.fire("BuyItem", item.id)
+				NewItems.bought({ item.id }) -- the card once the server grants it
 			end,
 		})
 	end
@@ -442,17 +452,53 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 			end
 			confirmUnlock("coins", price.coins :: number)
 		end)
+	elseif price and price.gems and ruleMet and StoreUI.rotatedOut(item) then
+		-- Between rotations: no buy button, the wishlist hears the day it's back.
+		action.Text = "Returns to the shop"
+		UI.setVariant(action, "secondary")
+		action:SetAttribute("Quiet", nil)
+		action.Activated:Connect(function()
+			if StoreUI.wished()[item.id] then
+				Toasts.notice(`{item.name} is on your wishlist: you'll hear the day it's in the Store`, UI.Gold)
+				return
+			end
+			UI.sound("Press")
+			StoreUI.fire("Wish", item.id)
+			Toasts.notice(
+				`{item.name} is back in the shop {StoreUI.returnText()}. It's on your wishlist: you'll hear the day.`,
+				UI.Gold
+			)
+		end)
 	elseif price and price.gems and ruleMet then
 		local afford = gems >= price.gems
-		action.Text = if afford then "Unlock" else "Get gems"
-		UI.setVariant(action, if afford then "primary" else "premium")
+		action.Text = if afford then "Unlock" else `{UI.number(price.gems - gems)} more gems`
+		UI.setVariant(action, if afford then "primary" else "secondary")
+		action:SetAttribute("Quiet", nil)
 		action.Activated:Connect(function()
 			if not afford then
-				StorePanel.show("Gems")
+				Toasts.notice(
+					"Gems come from boss first clears, every 5th Mastery level, streak day 7 and the pass, or the Store.",
+					UI.Gold
+				)
 				return
 			end
 			confirmUnlock("gems", price.gems :: number)
 		end)
+		if not afford then
+			-- The quiet way to the gem packs, under the text (not a gold button).
+			local link = UI.tertiary({
+				Name = "GemsLink",
+				Position = UDim2.fromOffset(10, y + 104),
+				Size = UDim2.fromOffset(150, 26),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Text = "Gems in the Store",
+				TextSize = 14,
+				ZIndex = 6,
+			}, box)
+			link.Activated:Connect(function()
+				StorePanel.show("Gems")
+			end)
+		end
 	elseif price and price.product then
 		action.Text = "See it in the Store"
 		UI.setVariant(action, "premium")
@@ -558,7 +604,7 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 	-- A shop item you don't own: in today's shop (a link there), or a wishlist toggle (the
 	-- server tells you the day it rotates in).
 	if not owns and StoreUI.wishable(item) and Catalog.isReady(item) then
-		local today = inShopToday(item.id)
+		local today = StoreUI.inShopToday(item.id)
 		local wished = StoreUI.wished()[item.id] == true
 		local link = UI.tertiary({
 			Name = "Wishlist",
@@ -585,22 +631,22 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 	end
 end
 
--- Whether `id` is in today's shop (the daily slots or the week's set).
-function inShopToday(id: string): boolean
-	local raw = ReplicatedStorage:GetAttribute("ShopRotation")
-	if typeof(raw) ~= "string" then
-		return false
-	end
-	local ok, rotation = pcall(HttpService.JSONDecode, HttpService, raw)
-	if not ok or typeof(rotation) ~= "table" then
-		return false
-	end
-	for _, list in { rotation.coin or {}, rotation.gem or {}, (rotation.featured or {}).items or {} } do
-		if table.find(list, id) then
-			return true
+-- The blade tab's Mastery line: the weapon in hand's Mastery and the next evolution every
+-- blade you wear gains (Shared/Cosmetics/Blades.Evolutions: a ribbon, an engraved edge, an aura).
+local EVOLUTION_NAMES = { "a sageo ribbon", "an engraved edge", "an aura" }
+
+local function masteryLine(worn: { [string]: string }): string
+	local weapon = Catalog.get(worn.weapon or Catalog.Defaults.weapon) or Catalog.get(Catalog.Defaults.weapon)
+	local ref = if weapon then weapon.ref else "Katana"
+	local levels = StoreUI.json("WeaponMastery")
+	local level = tonumber(levels[ref]) or 1
+	local name = if weapon then weapon.name else ref
+	for i, at in Blades.Evolutions do
+		if level < at then
+			return `{name} Mastery {level}/{at}  ·  {EVOLUTION_NAMES[i] or "an evolution"} at {at}, on every blade`
 		end
 	end
-	return false
+	return `{name} Mastery {level}  ·  every evolution: ribbon, engraved edge and aura`
 end
 
 -- A "no title" card for the title slot.
@@ -630,7 +676,7 @@ end
 
 local TAB_ICONS: { [string]: string? } = {
 	weapon = ICONS.Weapons,
-	bladeSkin = ICONS.Katana,
+	bladeSkin = ICONS.Skin, -- the glowing blade (the weapon tab has the plain katana)
 	finisher = ICONS.Tabs and ICONS.Tabs.Finishers or ICONS.Deathblow,
 	outfit = ICONS.Tabs and ICONS.Tabs.Outfits or ICONS.Profile,
 	title = ICONS.Tabs and ICONS.Tabs.Titles or ICONS.Guide,
@@ -724,10 +770,25 @@ function LockerPanel.build(body: Frame)
 		}, box)
 	end
 
+	-- The blade tab: one line of weapon Mastery and its next evolution over the grid.
+	local gridTop = 0
+	if t.id == "bladeSkin" then
+		gridTop = 26
+		UI.text({
+			Name = "Mastery",
+			Position = UDim2.fromOffset(266, 0),
+			Size = UDim2.new(1, -270, 0, 22),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextSize = 15,
+			TextColor3 = UI.Theme.Dim,
+			Text = masteryLine(worn),
+		}, area)
+	end
 	local grid = UI.new("ScrollingFrame", {
 		Name = "Grid",
-		Position = UDim2.fromOffset(262, 0),
-		Size = UDim2.new(1, -262, 1, 0),
+		Position = UDim2.fromOffset(262, gridTop),
+		Size = UDim2.new(1, -262, 1, -gridTop),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 5,
