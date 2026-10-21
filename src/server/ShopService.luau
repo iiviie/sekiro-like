@@ -43,6 +43,8 @@ local ServerStorage = game:GetService("ServerStorage")
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Ranks = require(ReplicatedStorage.Shared.Ranks)
+local Season = require(ReplicatedStorage.Shared.Season)
+local Text = require(ReplicatedStorage.Shared.Text)
 local Economy = require(script.Parent.Economy)
 local Monetization = require(script.Parent.Monetization)
 local StatsService = require(script.Parent.StatsService)
@@ -103,7 +105,7 @@ local TEXT: { [string]: string } = {
 	locked = "You haven't unlocked that yet.",
 	["not for sale"] = "That isn't for sale.",
 	expired = "That offer has rotated out. Here's today's shop.",
-	unavailable = "Purchases are off this session because your progress couldn't load. Rejoin to try again.",
+	unavailable = Text.ProgressFailed,
 	off = "The Shrine Capsule isn't open.",
 	restricted = "The Shrine Capsule isn't available in your region. Every item in it can be bought directly or with Shards.",
 	closed = "The Shrine Capsule is closed until its next banner.",
@@ -982,8 +984,8 @@ local function announce(player: Player, paid: { { [string]: any } })
 	for _, reward in paid do
 		remote:FireClient(player, "Notice", {
 			text = if reward.tier
-				then `Season {reward.season} is over: you finished {reward.tier}. {reward.gems} gems and your season rewards are in your locker. Your rating eases from {reward.from} to {reward.to} for the new season.`
-				else `Ranked season {reward.season} is over. Your rating eases from {reward.from} to {reward.to} for the new season.`,
+				then `{Season.label(reward.season)} has ended: you reached {reward.tier}. +{reward.gems} gems; your rewards are in the Locker. New rating: {reward.to}.`
+				else `Ranked {Season.label(reward.season)} has ended. New rating: {reward.to}.`,
 		})
 		for _, id in reward.items do
 			local item = Catalog.get(id)

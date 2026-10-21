@@ -31,6 +31,7 @@ local Toasts = require(script.Parent.Toasts)
 local UI = require(script.Parent.UI)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Round = require(ReplicatedStorage.Shared.Round)
+local Text = require(ReplicatedStorage.Shared.Text)
 
 -- Part S's pass panel (registered as the Pass tab when it exists).
 type PassModule = {
@@ -652,7 +653,7 @@ function refresh()
 	rewardsBadge.Visible = player:GetAttribute("DataLoaded") == true and player:GetAttribute("DailyClaimed") == false
 	saveNotice.Visible = failed or player:GetAttribute("DataWaiting") == true
 	saveNotice.Text = if failed
-		then player:GetAttribute("DataError") or "Your progress couldn't be loaded; this session won't be saved."
+		then player:GetAttribute("DataError") or Text.ProgressFailed
 		else "Waiting for your save to free up from another server..."
 	if trialsBadge then
 		trialsBadge.Visible = player:GetAttribute("DataLoaded") == true and not trialsSeen
@@ -767,7 +768,7 @@ local function showOfferCard()
 		TextYAlignment = Enum.TextYAlignment.Top,
 		TextWrapped = true,
 		TextSize = 14,
-		Text = "A blade of your own, the Initiate title, 300 gems and 1,500 coins. Your first 72 hours only.",
+		Text = "A blade of your own, the Initiate title, 300 gems and 1,500 coins. Here for your first 3 days.",
 	}, card)
 	local close = UI.iconButton({
 		Name = "Dismiss",

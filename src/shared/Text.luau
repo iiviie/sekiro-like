@@ -13,6 +13,11 @@
 
 local Text = {}
 
+-- The one wording for "the profile didn't load" (StatsService's DataError, the Store, the
+-- purchase refusals, the lobby banner), so players see the same sentence everywhere.
+Text.ProgressFailed =
+	"Your progress couldn't load, so this session won't save and purchases are off. Rejoin to try again."
+
 -- The word for `n` things: `singular` when n is 1, else `pluralForm` or singular + "s".
 function Text.plural(n: number, singular: string, pluralForm: string?): string
 	if n == 1 then

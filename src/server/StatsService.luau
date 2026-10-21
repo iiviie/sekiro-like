@@ -31,6 +31,7 @@ local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Config = require(ReplicatedStorage.Shared.Config)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Progression = require(ReplicatedStorage.Shared.Progression)
+local Text = require(ReplicatedStorage.Shared.Text)
 
 export type Purchase = { k: string, t: number } -- catalogue key, when granted
 export type Data = {
@@ -577,8 +578,7 @@ local function load(player: Player): (Data?, string?)
 			player:SetAttribute("DataWaiting", true) -- the lobby can say "waiting for your save"
 		end
 	end
-	return nil,
-		"Your progress couldn't be loaded, so this session won't be saved and purchases are off. Rejoin to try again."
+	return nil, Text.ProgressFailed
 end
 
 local function onPlayerAdded(player: Player)
