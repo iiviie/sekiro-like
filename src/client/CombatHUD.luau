@@ -303,18 +303,30 @@ end
 -- A brush-kanji banner on an ink band, with a small spaced-caps subtitle: top-centre, under
 -- the round banner and over the fighters' heads, never across them. One at a time: a new
 -- splash replaces the one showing.
+--
+-- On a phone the stage line sits right where a foe's floating bars and name are drawn, so a
+-- splash during a fight (a kill, a round, the final duel) is a smaller band tucked under the
+-- round banner, without the caption (the kill toast and the feed say it in words). Your own
+-- death, a resurrection and a win, when nobody is left to read, keep the full splash.
 local SPLASH = Vector2.new(520, 150)
 local SPLASH_TOP = Kit.Hud.StageTop
+local SPLASH_SMALL = 0.56 -- the phone splash: the band and glyph only, at this fraction
+local SPLASH_SMALL_TOP = 66 -- under the round banner's subline (scale 1; about 48 pt on a phone)
+local FULL_ON_PHONE = { [UI.KanjiDeath] = true, [UI.KanjiResurrect] = true, [UI.KanjiVictory] = true }
 local currentSplash: CanvasGroup? = nil
 function CombatHUD.splash(kanjiImage: string, subtitle: string, color: Color3, hold: number)
 	if currentSplash then
 		currentSplash:Destroy()
 	end
+	local small = Kit.compact(Kit.viewport()) and not FULL_ON_PHONE[kanjiImage]
+	local bandH = 112
 	local group = Instance.new("CanvasGroup")
 	group.Name = "Splash"
 	group.AnchorPoint = Vector2.new(0.5, 0)
-	group.Position = UDim2.new(0.5, 0, 0, SPLASH_TOP)
-	group.Size = UDim2.fromOffset(SPLASH.X, SPLASH.Y)
+	group.Position = UDim2.new(0.5, 0, 0, if small then SPLASH_SMALL_TOP else SPLASH_TOP)
+	group.Size = if small
+		then UDim2.fromOffset(math.floor(SPLASH.X * SPLASH_SMALL), math.floor(bandH * SPLASH_SMALL))
+		else UDim2.fromOffset(SPLASH.X, SPLASH.Y)
 	group.BackgroundTransparency = 1
 	group.GroupTransparency = 1
 	group.ZIndex = 50
@@ -323,34 +335,41 @@ function CombatHUD.splash(kanjiImage: string, subtitle: string, color: Color3, h
 
 	image(group, UI.InkBand, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.48),
-		Size = UDim2.fromOffset(SPLASH.X, 112),
+		Position = UDim2.fromScale(0.5, if small then 0.5 else 0.48),
+		Size = if small then UDim2.fromScale(1, 1) else UDim2.fromOffset(SPLASH.X, bandH),
 		ImageTransparency = 0.18,
 	})
 	local glyph = image(group, kanjiImage, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.4),
-		Size = UDim2.fromScale(1, 0.62),
+		Position = UDim2.fromScale(0.5, if small then 0.5 else 0.4),
+		Size = UDim2.fromScale(1, if small then 0.86 else 0.62),
 		ScaleType = Enum.ScaleType.Fit,
 		ImageColor3 = color,
 	})
-	local caption = Instance.new("TextLabel")
-	caption.AnchorPoint = Vector2.new(0.5, 0)
-	caption.Position = UDim2.fromScale(0.5, 0.72)
-	caption.Size = UDim2.new(1, 0, 0, 22)
-	caption.BackgroundTransparency = 1
-	caption.Font = FONT
-	-- Letter-spaced, one UTF-8 character at a time (a byte-wise pattern splits "·").
-	caption.Text = (string.upper(subtitle):gsub(utf8.charpattern, "%0 ")):sub(1, -2)
-	caption.TextSize = 18
-	caption.TextColor3 = PARCHMENT
-	caption.TextTransparency = 0.1
-	caption.TextStrokeColor3 = Kit.Theme.Ink
-	caption.TextStrokeTransparency = 0.5
-	caption.Parent = group
+	if not small then
+		local caption = Instance.new("TextLabel")
+		caption.AnchorPoint = Vector2.new(0.5, 0)
+		caption.Position = UDim2.fromScale(0.5, 0.72)
+		caption.Size = UDim2.new(1, 0, 0, 22)
+		caption.BackgroundTransparency = 1
+		caption.Font = FONT
+		-- Letter-spaced, one UTF-8 character at a time (a byte-wise pattern splits "·").
+		caption.Text = (string.upper(subtitle):gsub(utf8.charpattern, "%0 ")):sub(1, -2)
+		caption.TextSize = 18
+		caption.TextColor3 = PARCHMENT
+		caption.TextTransparency = 0.1
+		caption.TextStrokeColor3 = Kit.Theme.Ink
+		caption.TextStrokeTransparency = 0.5
+		caption.Parent = group
+	end
 
 	tween(group, 0.3, { GroupTransparency = 0 })
-	tween(glyph, 1.2, { Size = UDim2.fromScale(0.9, 0.56) }, Enum.EasingStyle.Sine)
+	tween(
+		glyph,
+		1.2,
+		{ Size = if small then UDim2.fromScale(0.9, 0.78) else UDim2.fromScale(0.9, 0.56) },
+		Enum.EasingStyle.Sine
+	)
 	-- Brief: at most 2.4 s on screen before it fades.
 	task.delay(math.min(hold, 2.4), function()
 		if not group.Parent then
