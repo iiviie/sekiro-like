@@ -22,6 +22,52 @@ local screen: ScreenGui
 local stack: Frame
 local REPORT_TIME = 9
 
+-- The centre of the screen holds one announcement at a time. A match end used to fire the
+-- level-up, a mission banner and the report card together, piled on top of each other: now
+-- the banners play one after another, the report waits for them (a few seconds at most),
+-- and anything that arrives while the report is open goes to the toast stack instead.
+local STAGE_Y = 0.31 -- under the round banner and its sub-line (RoundHUD owns the top 20%)
+local REPORT_DELAY = 2.4
+local REPORT_MAX_DELAY = 6
+local stageFreeAt = 0
+local reportOpen = false
+-- Plates that arrive while the report card is open wait for it to close: the stack sits under
+-- the card's scrim and its right edge, where they'd be dimmed and cut off.
+local deferred: { () -> () } = {}
+
+local function deferWhileReport(show: () -> ()): boolean
+	if reportOpen then
+		table.insert(deferred, show)
+		return true
+	end
+	return false
+end
+
+local function flushDeferred()
+	local list = deferred
+	deferred = {}
+	for i, show in list do
+		task.delay((i - 1) * 0.25, show)
+	end
+end
+
+-- Plays `show` on the centre stage once it is free and returns true, or returns false (the
+-- caller falls back to a toast) while a report card is open.
+local function onStage(duration: number, show: () -> ()): boolean
+	if reportOpen then
+		return false
+	end
+	local now = os.clock()
+	local wait = math.max(0, stageFreeAt - now)
+	stageFreeAt = now + wait + duration
+	if wait > 0 then
+		task.delay(wait, show)
+	else
+		show()
+	end
+	return true
+end
+
 local function sound(id: string, volume: number, pitch: number)
 	local s = Instance.new("Sound")
 	s.SoundId = id
@@ -100,6 +146,11 @@ end
 
 -- "+15 coins  +30 XP" over "Cut down": the currency that just arrived and where from.
 local function toast(xp: number, coins: number, reason: string)
+	if deferWhileReport(function()
+		toast(xp, coins, reason)
+	end) then
+		return
+	end
 	local row, inner = plate(64)
 	local main = if coins > 0 then `+{UI.number(coins)}` else `+{UI.number(xp)}`
 	icon(inner, if coins > 0 then ICONS.Coin else ICONS.Level, 46, UDim2.new(0, 10, 0.5, 0), Vector2.new(0, 0.5))
@@ -149,6 +200,11 @@ end
 -- The plate's left edge says what kind: gold for good news, lacquer red for a refusal.
 function Toasts.notice(text: string, color: Color3?)
 	if not stack then
+		return
+	end
+	if deferWhileReport(function()
+		Toasts.notice(text, color)
+	end) then
 		return
 	end
 	local good = color == UI.Gold or color == UI.Jade or color == T.Gold
@@ -247,7 +303,7 @@ local function levelUp(level: number, coins: number, gems: number?)
 	local frame = UI.new("Frame", {
 		Name = "LevelUp",
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.2),
+		Position = UDim2.fromScale(0.5, STAGE_Y),
 		Size = UDim2.fromOffset(600, 170),
 		BackgroundTransparency = 1,
 		ZIndex = 20,
@@ -255,7 +311,7 @@ local function levelUp(level: number, coins: number, gems: number?)
 	local band = UI.new("ImageLabel", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(if reduced then 0.5 else -1, 0.5),
-		Size = UDim2.fromScale(1.5, 1.05),
+		Size = UDim2.fromScale(1.5, 1.3), -- tall enough that the reward row sits on ink
 		BackgroundTransparency = 1,
 		Image = Assets.UI.InkBand,
 		ImageColor3 = Color3.new(0, 0, 0),
@@ -381,10 +437,16 @@ end
 -- End of match (guide 11.2): a washi card. Place and a line, then the stats count up one
 -- row after another, then coins and XP, the Mastery bar, and the way back into a fight.
 local function report(data: { [string]: any })
-	local old = screen:FindFirstChild("Report")
-	if old then
-		old:Destroy()
+	for _, name in { "Report", "ReportScrim" } do
+		local old = screen:FindFirstChild(name)
+		if old then
+			old:Destroy()
+		end
 	end
+	-- A soft scrim so the lobby HUD and tips behind the card don't read through its edges; a
+	-- tap on it closes the card like Lobby does.
+	local scrim = UI.scrim(screen, 0.55, 9)
+	scrim.Name = "ReportScrim"
 	local won = data.won == true
 	local duel = data.duel -- { score, opponent, rating? } for a duel
 	local card = UI.panel({
@@ -392,7 +454,7 @@ local function report(data: { [string]: any })
 		material = "washi",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.47),
-		Size = UDim2.fromOffset(480, 384),
+		Size = UDim2.fromOffset(480, 410), -- room for the hint line above the buttons
 		ZIndex = 10,
 		Active = true,
 	}, screen)
@@ -581,11 +643,18 @@ local function report(data: { [string]: any })
 		ZIndex = 11,
 	}, card)
 
+	reportOpen = true
 	local function close()
+		if reportOpen then
+			reportOpen = false
+			flushDeferred()
+		end
+		scrim:Destroy()
 		if card.Parent then
 			card:Destroy()
 		end
 	end
+	scrim.Activated:Connect(close)
 	-- The way back into a fight: a royale queues you (the same request as PLAY); trials and
 	-- duels start from the shrine / a duel pad, so they only close.
 	local royale = not data.boss and not duel
@@ -677,38 +746,75 @@ function Toasts.start()
 		if kind == "Reward" then
 			toast(data.xp or 0, data.coins or 0, data.reason or "")
 		elseif kind == "LevelUp" then
-			levelUp(data.level or 1, data.coins or 0, data.gems)
-			UI.sound("LevelUp")
-			sound(Assets.Sounds.PerfectDeflect, 0.45, 1.2)
+			local level, coins = data.level or 1, data.coins or 0
+			local shown = onStage(2.75, function()
+				levelUp(level, coins, data.gems)
+				UI.sound("LevelUp")
+				sound(Assets.Sounds.PerfectDeflect, 0.45, 1.2)
+			end)
+			if not shown then
+				Toasts.notice(`Mastery {level}  ·  +{UI.number(coins)} coins`, UI.Gold)
+				UI.sound("LevelUp")
+			end
 		elseif kind == "Trial" then
-			banner(ICONS.Trials, "Trial complete", `{data.text}  ·  +{data.coins} coins`, UI.Jade, 0.16)
-			sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
+			local text = `{data.text}  ·  +{data.coins} coins`
+			if
+				not onStage(3.6, function()
+					banner(ICONS.Trials, "Trial complete", text, UI.Jade, STAGE_Y)
+					sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
+				end)
+			then
+				Toasts.notice(`Trial complete  ·  {text}`, UI.Jade)
+			end
 		elseif kind == "Report" then
-			task.delay(2.4, report, data)
+			-- After the banners already queued, but never long after the match ended.
+			local delay = math.clamp(stageFreeAt - os.clock(), REPORT_DELAY, REPORT_MAX_DELAY)
+			task.delay(delay, report, data)
 		elseif kind == "Unlock" then
-			banner(ICONS.Trophy, "Unlocked", data.name or "", UI.Gold, 0.16)
-			sound(Assets.Sounds.PerfectDeflect, 0.5, 1.1)
+			local name = data.name or ""
+			if
+				not onStage(3.6, function()
+					banner(ICONS.Trophy, "Unlocked", name, UI.Gold, STAGE_Y)
+					sound(Assets.Sounds.PerfectDeflect, 0.5, 1.1)
+				end)
+			then
+				Toasts.notice(`Unlocked  ·  {name}`, UI.Gold)
+			end
 		elseif kind == "Notice" then
 			Toasts.notice(data.text or "", UI.Parchment)
 		elseif kind == "Mission" then
 			-- Season pass missions (server/PassService): a daily mission or a weekly bounty.
 			local pass = if (data.pass or 0) > 0 then `+{data.pass} Pass XP  ·  ` else ""
-			banner(
-				ICONS.Trials,
-				if data.weekly then "Bounty complete" else "Mission complete",
-				`{data.text}  ·  {pass}+{data.coins} coins`,
-				UI.Jade,
-				0.16
-			)
-			sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
+			local title = if data.weekly then "Bounty complete" else "Mission complete"
+			local text = `{data.text}  ·  {pass}+{data.coins} coins`
+			if
+				not onStage(3.6, function()
+					banner(ICONS.Trials, title, text, UI.Jade, STAGE_Y)
+					sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
+				end)
+			then
+				Toasts.notice(`{title}  ·  {text}`, UI.Jade)
+			end
 		elseif kind == "PassTier" then
 			local crest = (ICONS :: any).SeasonPass or Assets.RankCrests.Gold
 			local ready = if (data.claimable or 0) > 0 then `  ·  {data.claimable} to claim` else ""
-			task.delay(0.6, banner, crest, `Tier {data.tier}`, `Path of the Blade{ready}`, UI.Gold, 0.3)
-			task.delay(0.6, sound, Assets.Sounds.PerfectDeflect, 0.6, 0.85)
+			local tier = data.tier
+			if
+				not onStage(3.6, function()
+					banner(crest, `Tier {tier}`, `Path of the Blade{ready}`, UI.Gold, STAGE_Y)
+					sound(Assets.Sounds.PerfectDeflect, 0.6, 0.85)
+				end)
+			then
+				Toasts.notice(`Path of the Blade  ·  Tier {tier}{ready}`, UI.Gold)
+			end
 		elseif kind == "PassPremium" then
 			local crest = (ICONS :: any).SeasonPass or Assets.RankCrests.Gold
-			banner(crest, "Premium unlocked", `{data.claimable or 0} rewards ready to claim`, UI.Gold, 0.3)
+			local text = `{data.claimable or 0} rewards ready to claim`
+			if not onStage(3.6, function()
+				banner(crest, "Premium unlocked", text, UI.Gold, STAGE_Y)
+			end) then
+				Toasts.notice(`Premium unlocked  ·  {text}`, UI.Gold)
+			end
 			UI.sound("Robux")
 		elseif kind == "PassClaim" then
 			Toasts.notice(`Claimed  ·  {data.text or ""}`, UI.Gold)
