@@ -54,8 +54,10 @@ local CLUSTER = Vector2.new(336, 266)
 local CLUSTER_TALL = Vector2.new(258, 342)
 local MARGIN = 8
 -- The smallest button stays at least 45 px across: comfortably over the 44 px minimum.
+-- Never larger than designed: at 1.25 the cluster filled 85% of a phone's height and its arc
+-- (Thrust, Dodge) sat over the opponent in the middle of the screen.
 local MIN_SCALE = 0.75
-local MAX_SCALE = 1.25
+local MAX_SCALE = 1
 local TICK = 0.15
 
 local screen: ScreenGui
