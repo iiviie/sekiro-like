@@ -86,16 +86,49 @@ local specs: { [string]: PoseSpec } = {
 	-- (relaxed) to ~36 (fight) degrees left of the facing, right hip forward, and squares the
 	-- chest back up; a stance's Waist turns the chest from square, its Neck brings the eyes back.
 
-	-- Out of combat: the sword rests on the right shoulder, the fist in front of the shoulder and
-	-- the blade running back and up over it (about 20 degrees above level), edge up. The oversized
-	-- blade (5-6.4 studs past the hand) can't be carried low without trailing along the sand.
-	-- Only the sword arm is posed; the left arm swings with the footwork.
-	Relaxed = {
+	-- Out of combat the sword is carried: Relaxed is one of the carries below (CARRY picks it;
+	-- client/Animator's Studio attribute CarryMode swaps them live). Only the sword arm is
+	-- posed; the left arm swings with the footwork. The blades are oversized (the tip 5-6.4
+	-- studs past the hand), so a carry must keep the tip below the head (no raised flag) and
+	-- above the sand, standing and running.
+	-- Raised (round 1): fist in front of the shoulder, blade back and up over it about 20 degrees
+	-- above level, edge up. At gameplay distance the tip stood well above the head.
+	["Carry.Raised"] = {
 		RightArm = {
 			upper = v(0.2, -0.6, -0.78),
 			fore = v(-0.3, 0.85, 0.2),
 			blade = v(0.14, 0.36, 1),
 			edge = v(0, 1, -0.36),
+		},
+	},
+	-- Back: fist up in front of the shoulder, the blade laid over the shoulder and sloping
+	-- down behind the back (about 23 degrees below level), edge up; the tip hangs behind at
+	-- hip height.
+	["Carry.Back"] = {
+		RightArm = {
+			upper = v(0.15, -0.55, -0.82),
+			fore = v(-0.2, 0.93, 0.3),
+			blade = v(0.2, -0.42, 1),
+			edge = v(0, 1, 0.42),
+		},
+	},
+	-- Flat: the round-1 arm with the blade lying level along the shoulder, edge up.
+	["Carry.Flat"] = {
+		RightArm = {
+			upper = v(0.2, -0.6, -0.78),
+			fore = v(-0.3, 0.85, 0.2),
+			blade = v(0.16, -0.06, 1),
+			edge = v(0, 1, -0.06),
+		},
+	},
+	-- Low: the arm hangs a little forward and the blade trails behind the hip in a reverse
+	-- grip, nearly level and turned out from the leg, edge down.
+	["Carry.Low"] = {
+		RightArm = {
+			upper = v(0.15, -0.98, -0.1),
+			fore = v(0.08, -0.9, -0.42),
+			blade = v(0.35, -0.12, 1),
+			edge = v(0, -1, -0.12),
 		},
 	},
 
@@ -523,10 +556,14 @@ local specs: { [string]: PoseSpec } = {
 	},
 }
 
+-- The carry Relaxed ships with (review round 2 A/B).
+local CARRY = "Back"
+
 local Poses: { [string]: Pose } = {}
 for name, spec in specs do
 	Poses[name] = compile(spec)
 end
+Poses.Relaxed = Poses["Carry." .. CARRY]
 -- Poses keyed in Blender (art/anim) and exported as joint Transforms override the
 -- hand-written ones of the same name, except the stances authored for the footwork's turned
 -- hips (the baked ones stay as Legacy.<name>).
@@ -623,5 +660,9 @@ for _, pose in Poses do
 		end
 	end
 end
+
+-- Studio tuning aid (client/Animator's CarrySpec attribute): compiles a pose spec at run time.
+-- Kept off the table itself, so loops over the poses never meet it.
+setmetatable(Poses, { __index = { compile = compile, carry = CARRY } })
 
 return Poses

@@ -113,10 +113,22 @@ local LOD_RATE = 15
 local ORPHAN_TIME = 3
 -- How much a held stance's arm swings with the stride (share of a free arm's swing): a one-handed
 -- carry swings the sword hand a little with the blade kept steady, a two-handed guard barely.
-local HELD_SWING = { one = 0.45, two = 0.08, shoulder = 0.12 }
--- Out of a fight the blade rests on the right shoulder (Poses.Relaxed): it barely swings, and
--- doesn't need turning out beside the knee.
-local SHOULDER_CARRY = { Relaxed = true }
+local HELD_SWING = { one = 0.45, two = 0.08 }
+-- Out of a fight the sword is carried (Poses.Relaxed is one of Poses' "Carry.<name>"): how each
+-- carry moves with the stride. `swing` is its share of a free arm's swing; `out` and `abduct`
+-- (degrees at a full run) turn a low blade's tip away from the leg and lift the arm clear of
+-- it; `level` (degrees at a full run) tips the blade back down, since the run's forward lean
+-- and arm carriage raise a blade pointing back by ~18 degrees (measured in Studio: the round-1
+-- carry went from 21 degrees above level standing to 34-46 running). A blade over the shoulder
+-- barely swings and needs no turning out.
+type Carry = { swing: number, out: number, abduct: number, level: number }
+local CARRIES: { [string]: Carry } = {
+	Raised = { swing = 0.12, out = 0, abduct = 0, level = 0 },
+	Back = { swing = 0.12, out = 0, abduct = 0, level = 18 },
+	Flat = { swing = 0.12, out = 0, abduct = 0, level = 18 },
+	Low = { swing = 0.3, out = -8, abduct = 6, level = 8 },
+}
+local carry: Carry = CARRIES[(Poses :: any).carry] or CARRIES.Back
 -- Roblox's default R15 walk and run (the Animate script's own), for Gait's hybrid mode, and the
 -- speeds they were authored for (the Animate script's setRunSpeed: studs/s / 16 x 1.25 / height
 -- scale; the walk is drawn for 0.5 of that, the run for 1).
@@ -908,26 +920,26 @@ local function step(state: State, dt: number)
 		local baseArm = if state.base.RightShoulder then state.base.RightShoulder.w else 0
 		local name = state.baseName
 		local two = name ~= nil and ClipLibrary.TwoHandedStances[name] == true
-		local shouldered = name ~= nil and SHOULDER_CARRY[name] == true
+		local carried = if name == "Relaxed" then carry else nil
 		-- (Hybrid: the authored cycle's own shoulder swing, so the hand keeps time with its legs.)
 		local h = state.authoredW
 		local presence = math.max(locoWeight, h)
-		local kind = if two then HELD_SWING.two elseif shouldered then HELD_SWING.shoulder else HELD_SWING.one
+		local kind = if two then HELD_SWING.two elseif carried then carried.swing else HELD_SWING.one
 		local share = kind * baseArm * (1 - clipArm) * presence
 		local swing = -targets.armSwing * (1 - h) + state.authoredSwing * h
-		-- A one-handed carry held low also tips the blade up against the run's lean so the tip
-		-- stays clear of the ground, and turns it out beside the driving knee (a blade on the
-		-- shoulder needs neither).
-		local carry = if two then 0 else baseArm * (1 - clipArm) * presence
-		local running = if shouldered then 0 else targets.run * targets.moveW * carry
+		-- A one-handed stance held forward also tips the blade up against the run's lean so the
+		-- tip stays clear of the ground, and turns it out beside the driving knee; a carry does
+		-- what its entry says (a blade pointing back rises with the lean by itself).
+		local held = if two then 0 else baseArm * (1 - clipArm) * presence
+		local running = targets.run * targets.moveW * held
 		swingHeld(
 			state,
 			results,
 			"Right",
 			swing * share,
-			if shouldered then 0 else -targets.lean * 1.4 * carry * (1 - h),
-			math.rad(10) * running,
-			math.rad(8) * running
+			if carried then math.rad(carried.level) * running else -targets.lean * 1.4 * held * (1 - h),
+			math.rad(if carried then carried.out else 10) * running,
+			math.rad(if carried then carried.abduct else 8) * running
 		)
 	end
 
@@ -1236,6 +1248,43 @@ local function idle(state: State): boolean
 		and state.grip < 1e-3
 end
 
+-- Studio A/B of the carries: workspace attribute CarryMode ("Back", "Low", "Flat", "Raised")
+-- swaps Poses.Relaxed live; CarrySpec ("ux uy uz fx fy fz bx by bz ex ey ez": upper arm,
+-- forearm, blade and edge directions in Poses' upper-torso space) tunes one, moving as CarryMode
+-- (or Back) says.
+local shippedRelaxed = poseFrames.Relaxed
+local carryKey: string? = nil
+local function studioCarry()
+	local mode = workspace:GetAttribute("CarryMode")
+	local spec = workspace:GetAttribute("CarrySpec")
+	local key = `{mode}|{spec}`
+	if key == carryKey then
+		return
+	end
+	carryKey = key
+	local name = if typeof(mode) == "string" and CARRIES[mode] then mode else (Poses :: any).carry
+	local pose = poseFrames["Carry." .. name] or shippedRelaxed
+	if typeof(spec) == "string" then
+		local n = {}
+		for word in spec:gmatch("[^%s,]+") do
+			table.insert(n, tonumber(word) or 0)
+		end
+		if #n == 12 then
+			local function d(i: number): Vector3
+				return Vector3.new(n[i], n[i + 1], n[i + 2]).Unit
+			end
+			pose = (Poses :: any).compile({ RightArm = { upper = d(1), fore = d(4), blade = d(7), edge = d(10) } })
+		end
+	end
+	carry = CARRIES[name] or CARRIES.Back
+	poseFrames.Relaxed = pose
+	for _, state in states do
+		if state.baseName == "Relaxed" then
+			state.baseTarget = pose
+		end
+	end
+end
+
 function Animator.start()
 	local studio = RunService:IsStudio()
 	RunService.PreSimulation:Connect(function(dt)
@@ -1244,6 +1293,7 @@ function Animator.start()
 			if mode == "hybrid" or mode == "procedural" then
 				Gait.Mode = mode
 			end
+			studioCarry()
 		end
 		local camera = workspace.CurrentCamera
 		local eye = if camera then camera.CFrame.Position else nil
