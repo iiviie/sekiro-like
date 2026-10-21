@@ -186,6 +186,17 @@ function TitleScreen.show()
 	end
 	local logoScale = UI.new("UIScale", { Scale = 1 }, logo)
 
+	-- A soft ink smudge behind the tagline (the radial glow stretched wide, feathered all
+	-- round), so it reads over pale cloud.
+	local taglineInk = UI.new("ImageLabel", {
+		Name = "TaglineInk",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundTransparency = 1,
+		Image = Assets.UI.Glow,
+		ImageColor3 = T.Ink,
+		ImageTransparency = 1,
+		ZIndex = 4,
+	}, screen)
 	local tagline = label(screen, {
 		Name = "Tagline",
 		FontFace = UI.Fonts.Body,
@@ -277,6 +288,8 @@ function TitleScreen.show()
 		tagline.TextSize = if small then 14 else 17
 		tagline.Size = UDim2.fromOffset(math.min(vp.X - 32, 900), tagline.TextSize + 8)
 		tagline.Position = UDim2.fromOffset(vp.X / 2, cy + h / 2 + (if small then 10 else 18))
+		taglineInk.Size = UDim2.fromOffset(math.min(vp.X, tagline.TextSize * 44), tagline.TextSize * 4.4)
+		taglineInk.Position = tagline.Position
 		local bottom = vp.Y - (if small then 34 else 64)
 		status.Position = UDim2.fromOffset(vp.X / 2, bottom)
 		prompt.Position = UDim2.fromOffset(vp.X / 2, bottom)
@@ -296,6 +309,7 @@ function TitleScreen.show()
 		end)
 		TweenService:Create(logo, LOGO_IN, { ImageTransparency = 0 }):Play()
 		TweenService:Create(tagline, LOGO_IN, { TextTransparency = 0.12 }):Play()
+		TweenService:Create(taglineInk, LOGO_IN, { ImageTransparency = 0 }):Play()
 	end)
 
 	-- Hide the game HUD and chat until the player enters.
