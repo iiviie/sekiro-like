@@ -70,13 +70,22 @@ LEG_SPLITS = (58, 114)  # knee row, ankle row (hakama hem ends; tabi below)
 
 # name: gi, collar (eri), inner collar (juban), obi, hakama, ties (himo), gi fabric
 COLOURWAYS: dict[str, dict] = {
-    # bots
-    "indigo": dict(gi=(62, 76, 128), eri=(40, 46, 74), juban=(226, 220, 204), obi=(168, 44, 44), hakama=(80, 86, 108), himo=(196, 186, 164), fabric="sashiko"),
-    "slate": dict(gi=(92, 112, 138), eri=(58, 70, 90), juban=(232, 226, 212), obi=(150, 52, 46), hakama=(92, 98, 112), himo=(206, 196, 172), fabric="gi_cotton"),
-    "moss": dict(gi=(96, 112, 74), eri=(60, 70, 48), juban=(228, 220, 196), obi=(176, 128, 58), hakama=(104, 96, 82), himo=(214, 200, 168), fabric="gi_cotton"),
-    "ash": dict(gi=(132, 112, 92), eri=(84, 68, 56), juban=(234, 226, 208), obi=(64, 84, 104), hakama=(106, 100, 96), himo=(200, 188, 166), fabric="gi_cotton"),
-    "oxblood": dict(gi=(124, 52, 50), eri=(78, 34, 34), juban=(230, 222, 204), obi=(196, 160, 86), hakama=(98, 90, 96), himo=(210, 196, 170), fabric="gi_cotton"),
-    "dove": dict(gi=(168, 168, 166), eri=(96, 98, 104), juban=(244, 240, 232), obi=(132, 46, 46), hakama=(96, 106, 128), himo=(220, 214, 200), fabric="sashiko"),
+    # bots (plain: a small self-coloured mon, a collar a shade darker than the gi)
+    "bot_indigo": dict(gi=(62, 76, 128), eri=(40, 46, 74), juban=(226, 220, 204), obi=(168, 44, 44), hakama=(80, 86, 108), himo=(196, 186, 164), fabric="sashiko"),
+    "bot_slate": dict(gi=(92, 112, 138), eri=(58, 70, 90), juban=(232, 226, 212), obi=(150, 52, 46), hakama=(92, 98, 112), himo=(206, 196, 172), fabric="gi_cotton"),
+    "bot_moss": dict(gi=(96, 112, 74), eri=(60, 70, 48), juban=(228, 220, 196), obi=(176, 128, 58), hakama=(104, 96, 82), himo=(214, 200, 168), fabric="gi_cotton"),
+    "bot_ash": dict(gi=(132, 112, 92), eri=(84, 68, 56), juban=(234, 226, 208), obi=(64, 84, 104), hakama=(106, 100, 96), himo=(200, 188, 166), fabric="gi_cotton"),
+    "bot_oxblood": dict(gi=(124, 52, 50), eri=(78, 34, 34), juban=(230, 222, 204), obi=(196, 160, 86), hakama=(98, 90, 96), himo=(210, 196, 170), fabric="gi_cotton"),
+    "bot_dove": dict(gi=(168, 168, 166), eri=(96, 98, 104), juban=(244, 240, 232), obi=(132, 46, 46), hakama=(96, 106, 128), himo=(220, 214, 200), fabric="sashiko"),
+    # players (Catalog outfit.indigo .. .dove): the bots' gi and hakama colours, but a contrasting
+    # collar and cuffs, a contrasting obi and a large mon across the back (`mon`), so a player in
+    # Moss Gi never reads as a moss bot.
+    "indigo": dict(gi=(62, 76, 128), eri=(222, 206, 160), juban=(236, 230, 214), obi=(34, 32, 36), hakama=(80, 86, 108), himo=(222, 206, 160), fabric="sashiko", mon=(222, 206, 160)),
+    "slate": dict(gi=(92, 112, 138), eri=(236, 230, 214), juban=(244, 240, 230), obi=(204, 164, 82), hakama=(92, 98, 112), himo=(236, 230, 214), fabric="gi_cotton", mon=(236, 230, 214)),
+    "moss": dict(gi=(96, 112, 74), eri=(232, 224, 200), juban=(240, 234, 216), obi=(34, 32, 36), hakama=(104, 96, 82), himo=(232, 224, 200), fabric="gi_cotton", mon=(232, 224, 200)),
+    "ash": dict(gi=(132, 112, 92), eri=(40, 38, 40), juban=(234, 226, 208), obi=(150, 34, 46), hakama=(106, 100, 96), himo=(40, 38, 40), fabric="gi_cotton", mon=(40, 38, 40)),
+    "oxblood": dict(gi=(124, 52, 50), eri=(232, 224, 204), juban=(240, 234, 220), obi=(34, 32, 36), hakama=(98, 90, 96), himo=(232, 224, 204), fabric="gi_cotton", mon=(232, 224, 204)),
+    "dove": dict(gi=(168, 168, 166), eri=(40, 44, 60), juban=(244, 240, 232), obi=(204, 164, 82), hakama=(96, 106, 128), himo=(40, 44, 60), fabric="sashiko", mon=(40, 44, 60)),
     # bosses (Clothing.Boss maps ids onto these)
     "nameless": dict(gi=(74, 84, 118), eri=(46, 52, 74), juban=(226, 220, 206), obi=(214, 206, 190), hakama=(82, 86, 102), himo=(214, 206, 190), fabric="sashiko"),
     "miko": dict(gi=(236, 232, 226), eri=(220, 214, 206), juban=(178, 36, 40), obi=(178, 36, 40), hakama=(176, 38, 42), himo=(236, 232, 226), fabric="gi_cotton"),
@@ -216,19 +225,34 @@ def torso_panel(cw: dict, face: str, w: int, h: int, seed: int) -> np.ndarray:
             3,
         )
         gi = darken_by(gi, folds, 0.25)
-        # A small family crest (mon) between the shoulders, in the collar colour.
-        cx, cy, r = w / 2, 26, 9
-        mon = mask_of(
-            w,
-            h,
-            lambda d: [
-                d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=255, width=2),
-                d.rectangle([cx - 6, cy - 4, cx + 6, cy - 2], fill=255),
-                d.rectangle([cx - 6, cy + 2, cx + 6, cy + 4], fill=255),
-            ],
-            0.5,
-        )
-        gi = blend(gi, cloth(cw["fabric"], w, h, cw["juban"], 0.3, seed + 7), mon * 0.8)
+        if "mon" in cw:
+            # Players: a large crest across the shoulders in the trim colour, a ring around a
+            # four-petal hanabishi (a diamond of four lozenges) and a centre dot; reads at 30 studs.
+            cx, cy, r = w / 2, 42, 27
+
+            def crest(d):
+                d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=255, width=4)
+                for ox, oy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+                    px, py = cx + ox * 11, cy + oy * 11
+                    d.polygon([(px, py - 8), (px + 8, py), (px, py + 8), (px - 8, py)], fill=255)
+                d.ellipse([cx - 2.5, cy - 2.5, cx + 2.5, cy + 2.5], fill=255)
+
+            mon = mask_of(w, h, crest, 0.5)
+            gi = blend(gi, cloth(cw["fabric"], w, h, cw["mon"], 0.25, seed + 7), mon * 0.95)
+        else:
+            # Bots: a small family crest (mon) between the shoulders, in the collar colour.
+            cx, cy, r = w / 2, 26, 9
+            mon = mask_of(
+                w,
+                h,
+                lambda d: [
+                    d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=255, width=2),
+                    d.rectangle([cx - 6, cy - 4, cx + 6, cy - 2], fill=255),
+                    d.rectangle([cx - 6, cy + 2, cx + 6, cy + 4], fill=255),
+                ],
+                0.5,
+            )
+            gi = blend(gi, cloth(cw["fabric"], w, h, cw["juban"], 0.3, seed + 7), mon * 0.8)
     else:  # sides: a side seam and an armpit fold
         seam = mask_of(w, h, lambda d: d.line([(w / 2, 0), (w / 2, h)], fill=255, width=2), 0.6)
         gi = darken_by(gi, seam, 0.3)

@@ -31,13 +31,21 @@ local Clothing = {}
 
 Clothing.Sets = {
 	-- Printed by `art/clothing/build.py --luau` from its colourways and ids.json.
-	-- Bots: mid-tone colourways that read in daylight.
-	indigo = set(110797153136516, 128739961680161, rgb(62, 76, 128), rgb(80, 86, 108), rgb(168, 44, 44)),
-	slate = set(115540805126236, 82735952171343, rgb(92, 112, 138), rgb(92, 98, 112), rgb(150, 52, 46)),
-	moss = set(131790916582641, 136171148407637, rgb(96, 112, 74), rgb(104, 96, 82), rgb(176, 128, 58)),
-	ash = set(104393994802980, 125217363795838, rgb(132, 112, 92), rgb(106, 100, 96), rgb(64, 84, 104)),
-	oxblood = set(111909768698876, 138532302461412, rgb(124, 52, 50), rgb(98, 90, 96), rgb(196, 160, 86)),
-	dove = set(70898554975562, 95488731884119, rgb(168, 168, 166), rgb(96, 106, 128), rgb(132, 46, 46)),
+	-- Bots: mid-tone colourways that read in daylight, a plain collar and a small mon.
+	bot_indigo = set(110797153136516, 128739961680161, rgb(62, 76, 128), rgb(80, 86, 108), rgb(168, 44, 44)),
+	bot_slate = set(115540805126236, 82735952171343, rgb(92, 112, 138), rgb(92, 98, 112), rgb(150, 52, 46)),
+	bot_moss = set(131790916582641, 136171148407637, rgb(96, 112, 74), rgb(104, 96, 82), rgb(176, 128, 58)),
+	bot_ash = set(104393994802980, 125217363795838, rgb(132, 112, 92), rgb(106, 100, 96), rgb(64, 84, 104)),
+	bot_oxblood = set(111909768698876, 138532302461412, rgb(124, 52, 50), rgb(98, 90, 96), rgb(196, 160, 86)),
+	bot_dove = set(70898554975562, 95488731884119, rgb(168, 168, 166), rgb(96, 106, 128), rgb(132, 46, 46)),
+	-- Players (Shared/Catalog outfit.indigo .. .dove): the bots' colours with a contrasting collar, cuffs
+	-- and obi and a large mon across the back, so a player never reads as one of the bots.
+	indigo = set(121790763639690, 71599435873703, rgb(62, 76, 128), rgb(80, 86, 108), rgb(34, 32, 36)),
+	slate = set(93329532244072, 75168952204408, rgb(92, 112, 138), rgb(92, 98, 112), rgb(204, 164, 82)),
+	moss = set(115347304026428, 70785654484007, rgb(96, 112, 74), rgb(104, 96, 82), rgb(34, 32, 36)),
+	ash = set(111021513323878, 109958690324395, rgb(132, 112, 92), rgb(106, 100, 96), rgb(150, 34, 46)),
+	oxblood = set(71633066355164, 106638547998947, rgb(124, 52, 50), rgb(98, 90, 96), rgb(34, 32, 36)),
+	dove = set(77608515307631, 118129693365477, rgb(168, 168, 166), rgb(96, 106, 128), rgb(204, 164, 82)),
 	-- Bosses (see Clothing.Boss).
 	nameless = set(99881287256629, 78963930919062, rgb(74, 84, 118), rgb(82, 86, 102), rgb(214, 206, 190)),
 	miko = set(93103647860858, 112513227039510, rgb(236, 232, 226), rgb(176, 38, 42), rgb(178, 36, 40)),
@@ -55,7 +63,7 @@ Clothing.Sets = {
 }
 
 -- Bots cycle through these by spawn index.
-Clothing.Bots = { "indigo", "slate", "moss", "ash", "oxblood", "dove" }
+Clothing.Bots = { "bot_indigo", "bot_slate", "bot_moss", "bot_ash", "bot_oxblood", "bot_dove" }
 
 -- Each boss's set, by Shared/Bosses id; the colours follow its look.
 Clothing.Boss = {
