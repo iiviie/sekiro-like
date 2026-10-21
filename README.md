@@ -448,10 +448,17 @@ order: naginata (reach), then dual blades; kusarigama last.
   showing, so the grip holds between frames too. While you move, attack clips leave the hips and legs to the walk
   cycle, so you keep stepping under a swing.
 - **Animation.** Every R15 fighter stands in a low swordsman stance: hips dropped, right foot leading, hips turned
-  38° with the chest turned back to the opponent ([Gait.luau](src/shared/Gait.luau) places the feet and hips, Animator
-  solves the legs with IK, scaled to each rig's leg length). Walking, running, strafing and backpedalling are procedural
-  footwork driven by the real ground velocity relative to facing, so planted feet don't slide; Roblox's own animations
-  only show in the air, when seated or climbing. Out of combat the stance stands taller and the blade is carried
+  36° with the chest turned back to the opponent ([Gait.luau](src/shared/Gait.luau) places the feet and hips, Animator
+  solves the legs with IK, scaled to each rig's leg length and foot). Walking, running, strafing and backpedalling are
+  a procedural cycle driven by the motion shown: about 3 steps a second at full speed (longer strides with a flight
+  phase, not faster legs), heel strike or flat landing, a roll onto the toes and push-off, the heel kicking up behind
+  and the knee driving forward. A planted foot is locked where it landed, so it can't slide. The pelvis bobs, sways
+  and turns with the legs, the chest counter-turns, the free arm pumps with a bent elbow and the sword hand swings a
+  little with the blade held steady, and the body leans into the run, into acceleration and into turns. Lock-on
+  strafes turn the hips toward the travel (the waist takes the twist back to the target); standing, feet hold their
+  place and step back under the body when it turns or settles. Fights run lower with smaller steps. Roblox's own
+  animations only show in the air, when seated or climbing. Rigs over 90 studs from the camera are posed 15 times a
+  second. Out of combat the stance stands taller and the blade is carried
   forward and down; locked on, or within 4 s of an exchange, fighters raise a two-handed chudan guard. Combat motion
   is procedural: [Poses.luau](src/shared/Poses.luau)
   describes each pose as directions (where the arm, forearm and blade point), solves them into joint rotations, and
