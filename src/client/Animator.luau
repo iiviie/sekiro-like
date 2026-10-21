@@ -6,7 +6,10 @@
 --   loco   the swordsman stance and footwork (Shared/Gait): a low, wide idle with the hips
 --          turned off the facing, and walk / run / strafe steps along the real ground velocity
 --          with leg IK, so feet stay planted. It replaces Roblox's idle/walk/run on the ground
---          and hands back to Roblox's jump/fall/climb animations in the air.
+--          and hands back to Roblox's jump/fall/climb animations in the air. In Gait's "hybrid"
+--          mode, walking and running forward show Roblox's default R15 walk and run instead
+--          (played here on every rig at the top priority, timed like the Animate script), and
+--          the footwork only takes slow steps, strafes, backpedals and standing.
 --   base   a held stance (Ready, Guard, Broken) that blends smoothly when it changes
 --   action a one-shot clip (a swing, a recoil) that fades in over its first segment
 --          and back out to the base stance when it ends
@@ -78,7 +81,18 @@ type State = {
 	buffers: { { [string]: CFrame } },
 	lodDt: number, -- time banked since the last full step (far rigs step at LOD_RATE)
 	orphanedAt: number?, -- when the model lost its parent (dropped after ORPHAN_TIME)
+	-- Hybrid gait: Roblox's default walk and run tracks on this rig (loaded the first time they're
+	-- wanted), how much of the body they show this frame, the sword-side shoulder swing they show
+	-- (radians, + = forward) and each foot's contact for their footsteps.
+	authored: Authored?,
+	authoredTried: boolean,
+	authoredW: number,
+	authoredSwing: number,
+	footDown: { [string]: boolean },
+	footLow: { [string]: number },
 }
+
+type Authored = { walk: AnimationTrack, run: AnimationTrack, playing: boolean, walkW: number, runW: number }
 
 local BASE_BLEND_RATE = 14
 local MOVE_BLEND_RATE = 10
@@ -99,7 +113,17 @@ local LOD_RATE = 15
 local ORPHAN_TIME = 3
 -- How much a held stance's arm swings with the stride (share of a free arm's swing): a one-handed
 -- carry swings the sword hand a little with the blade kept steady, a two-handed guard barely.
-local HELD_SWING = { one = 0.45, two = 0.08 }
+local HELD_SWING = { one = 0.45, two = 0.08, shoulder = 0.12 }
+-- Out of a fight the blade rests on the right shoulder (Poses.Relaxed): it barely swings, and
+-- doesn't need turning out beside the knee.
+local SHOULDER_CARRY = { Relaxed = true }
+-- Roblox's default R15 walk and run (the Animate script's own), for Gait's hybrid mode, and the
+-- speeds they were authored for (the Animate script's setRunSpeed: studs/s / 16 x 1.25 / height
+-- scale; the walk is drawn for 0.5 of that, the run for 1).
+local DEFAULT_WALK = "rbxassetid://507777826"
+local DEFAULT_RUN = "rbxassetid://507767714"
+local AUTHORED_WALK_SPEED = 0.5
+local AUTHORED_FADE = 0.12
 -- Stances that hold the sword up for a fight: the footwork takes its low, wide shape under them.
 local COMBAT_STANCES = { Ready = true, Guard = true, GuardImpact = true }
 -- Humanoid states where Roblox's own animations (fall, climb, swim, sit, death) take the body.
@@ -435,12 +459,101 @@ local LEG_JOINTS = { "Root", "RightHip", "RightKnee", "RightAnkle", "LeftHip", "
 
 -- The stance layer: advances the footwork and returns its full-body pose (nil when the body is
 -- in the air, dead or not an R15 rig) and how strongly it applies.
+-- Hybrid gait: plays (or stops) Roblox's default walk and run on the rig for `speed` studs/s,
+-- weighted and timed as the Animate script does, at `presence` of full weight (the stance
+-- layer's grounded share, so a jump's own animation takes over as smoothly as the footwork
+-- hands it over). Returns 1 once both tracks are playing (0 while they load, or if the rig has
+-- no Animator).
+local function driveAuthored(state: State, humanoid: Humanoid, want: boolean, speed: number, presence: number): number
+	local a = state.authored
+	if not want or presence < 0.02 then
+		if a and a.playing then
+			a.walk:Stop(AUTHORED_FADE)
+			a.run:Stop(AUTHORED_FADE)
+			a.playing = false
+		end
+		return 0
+	end
+	if not a then
+		if state.authoredTried then
+			return 0
+		end
+		state.authoredTried = true
+		local animator = humanoid:FindFirstChildOfClass("Animator")
+		if not animator then
+			return 0
+		end
+		local function load(id: string): AnimationTrack?
+			local animation = Instance.new("Animation")
+			animation.AnimationId = id
+			local ok, track = pcall(function()
+				return (animator :: Animator):LoadAnimation(animation)
+			end)
+			if not ok or not track then
+				return nil
+			end
+			track.Priority = Enum.AnimationPriority.Action4
+			track.Looped = true
+			return track
+		end
+		local walk, run = load(DEFAULT_WALK), load(DEFAULT_RUN)
+		if not walk or not run then
+			return 0
+		end
+		a = { walk = walk, run = run, playing = false, walkW = 0, runW = 0 }
+		state.authored = a
+	end
+	local tracks = a :: Authored
+	if tracks.walk.Length <= 0 or tracks.run.Length <= 0 then
+		return 0 -- still loading
+	end
+	local height = if humanoid.HipHeight > 0 then humanoid.HipHeight / 2 else 1
+	local pace = speed / 16 * 1.25 / height
+	local walkW, runW, walkRate, runRate = 1e-4, 1e-4, pace / AUTHORED_WALK_SPEED, pace
+	if pace <= AUTHORED_WALK_SPEED then
+		walkW = 1
+	elseif pace < 1 then
+		local f = (pace - AUTHORED_WALK_SPEED) / (1 - AUTHORED_WALK_SPEED)
+		walkW, runW, walkRate, runRate = 1 - f, f, 1, 1
+	else
+		runW = 1
+	end
+	walkW, runW = math.max(walkW * presence, 1e-4), math.max(runW * presence, 1e-4)
+	if not tracks.playing then
+		-- (No fade in: the footwork hands over by Gait's own blend.)
+		tracks.walk:Play(0, walkW, walkRate)
+		tracks.run:Play(0, runW, runRate)
+		tracks.playing = true
+		tracks.walkW, tracks.runW = walkW, runW
+		return 0 -- (it shows from the next frame)
+	end
+	if math.abs(walkW - tracks.walkW) > 0.02 or math.abs(runW - tracks.runW) > 0.02 then
+		tracks.walk:AdjustWeight(walkW, 0.06)
+		tracks.run:AdjustWeight(runW, 0.06)
+		tracks.walkW, tracks.runW = walkW, runW
+	end
+	tracks.walk:AdjustSpeed(walkRate)
+	tracks.run:AdjustSpeed(runRate)
+	return 1
+end
+
+-- An ankle pivot in HumanoidRootPart space under the joint Transforms in `pose`, and the
+-- direction its toes point.
+local function ankleOf(side: string, j: { [string]: any }, pose: { [string]: CFrame }): (Vector3, Vector3)
+	local top = link(j.Root, pose.Root or CFrame.identity)
+		* link(j[side .. "Hip"], pose[side .. "Hip"] or CFrame.identity)
+	local shin = top * link(j[side .. "Knee"], pose[side .. "Knee"] or CFrame.identity)
+	local ankle = j[side .. "Ankle"]
+	return (shin * offsets(ankle)).Position, (shin * link(ankle, pose[side .. "Ankle"] or CFrame.identity)).LookVector
+end
+
 local function locomotion(
 	state: State,
 	dt: number,
 	root: BasePart?,
 	humanoid: Humanoid?,
-	owned: boolean
+	owned: boolean,
+	below: { [string]: CFrame }
 ): ({ [string]: CFrame }?, number)
 	local j = state.joints
 	for _, name in LEG_JOINTS do
@@ -491,6 +604,40 @@ local function locomotion(
 	local facing = math.deg(math.atan2(-look.X, -look.Z))
 	local t = Gait.step(state.gait, dt, velocity, combat, facing, root.Position / k, owned)
 	state.targets = t
+	-- Hybrid: Roblox's default walk / run take forward travel on the ground.
+	local groundSpeed = Vector3.new(state.velocity.X, 0, state.velocity.Z).Magnitude
+	local authored = driveAuthored(state, humanoid, t.authored > 0.02, groundSpeed, state.loco)
+	local h = t.authored * authored
+	state.authoredW = h
+	if h > 1e-3 then
+		local shoulder = below.RightShoulder
+		state.authoredSwing = if shoulder then (shoulder:ToEulerAnglesXYZ()) else 0
+		-- Their feet: footsteps when one comes down, and the standing places when the footwork
+		-- takes over again.
+		for _, side in { "Right", "Left" } do
+			local ankle, toes = ankleOf(side, j, below)
+			local height = (ankle.Y - ankles[side].Y) / k
+			local low = math.min((state.footLow[side] or height) + dt * 0.5, height)
+			state.footLow[side] = low
+			if state.footDown[side] then
+				if height > low + 0.25 then
+					state.footDown[side] = false
+				end
+			elseif height < low + 0.08 then
+				state.footDown[side] = true
+				if h > 0.5 then
+					local at = Vector3.new(ankle.X, groundRest, ankle.Z)
+					Audio.footstep(state.model, hrp:PointToWorldSpace(at), groundSpeed)
+				end
+			end
+			Gait.observeFoot(
+				state.gait,
+				side,
+				Vector3.new(ankle.X, 0, ankle.Z) / k,
+				math.deg(math.atan2(-toes.X, -toes.Z))
+			)
+		end
+	end
 	if state.loco < 1e-3 then
 		state.ground = {}
 		return nil, 0
@@ -528,7 +675,7 @@ local function locomotion(
 	-- The chest squares back up to the facing, leaning into a run or a turn and counter-turning
 	-- against the hips; stance poses build on that. The head steadies itself on top.
 	local square = CFrame.Angles(0, 0, t.bank) * CFrame.Angles(t.lean, 0, 0) * CFrame.Angles(0, t.chestYaw, 0)
-	state.squareRoot = CFrame.new():Lerp(square, state.loco)
+	state.squareRoot = CFrame.new():Lerp(square, state.loco * (1 - h))
 	pose.Waist = rootT.Rotation:Inverse() * square
 	pose.Neck = CFrame.Angles(-t.lean * 0.5, -t.chestYaw * 0.8, -t.bank * 0.6)
 
@@ -537,7 +684,7 @@ local function locomotion(
 		local target = Vector3.new(f.pos.X * k, state.ground[side] + (rest.Y - groundRest) + f.pos.Y * k, f.pos.Z * k)
 		local footRot = CFrame.Angles(0, f.yaw, 0) * CFrame.Angles(f.pitch, 0, 0)
 		solveLeg(side, j, lowerTorso, target, footRot, pose)
-		if f.landed and state.loco > 0.5 then
+		if f.landed and state.loco > 0.5 and h <= 0.5 then
 			local v = state.velocity
 			Audio.footstep(state.model, hrp:PointToWorldSpace(target), Vector3.new(v.X, 0, v.Z).Magnitude)
 		end
@@ -553,7 +700,8 @@ local function locomotion(
 	pose.RightShoulder = CFrame.Angles(-swing + math.rad(3 + 6 * run), inward, math.rad(7 - 2 * run))
 	pose.RightElbow = CFrame.Angles(bend + math.max(-swing, 0) * 0.6, 0, 0)
 	pose.RightWrist = CFrame.Angles(math.rad(-6), 0, 0)
-	return pose, state.loco
+	-- (Hybrid: the authored walk / run below shows through by its share.)
+	return pose, state.loco * (1 - h)
 end
 
 -- Swings an arm a stance holds by `angle` (radians, + = forward) at the shoulder, turning the
@@ -729,7 +877,8 @@ local function step(state: State, dt: number)
 		return if hip then hip.w else 0
 	end
 	local owned = legsKept > 0.5 and math.max(legWeight(actionPose), legWeight(state.base)) > 0.5
-	local locoPose, locoWeight = locomotion(state, dt, root, state.model:FindFirstChildOfClass("Humanoid"), owned)
+	local locoPose, locoWeight =
+		locomotion(state, dt, root, state.model:FindFirstChildOfClass("Humanoid"), owned, results)
 	if locoPose then
 		for name, cf in locoPose do
 			local current = results[name]
@@ -754,23 +903,31 @@ local function step(state: State, dt: number)
 
 	-- The arms a stance holds swing a little with the stride (not under a clip).
 	local targets = state.targets
-	if locoPose and targets and targets.moveW > 1e-3 then
+	if (locoPose or state.authoredW > 1e-3) and targets and targets.moveW > 1e-3 then
 		local clipArm = if actionPose and actionPose.RightShoulder then actionPose.RightShoulder.w else 0
 		local baseArm = if state.base.RightShoulder then state.base.RightShoulder.w else 0
-		local two = state.baseName ~= nil and ClipLibrary.TwoHandedStances[state.baseName] == true
-		local share = (if two then HELD_SWING.two else HELD_SWING.one) * baseArm * (1 - clipArm) * locoWeight
-		-- A one-handed carry also tips the blade up against the run's lean so the tip stays clear
-		-- of the ground.
-		local carry = if two then 0 else baseArm * (1 - clipArm) * locoWeight
-		local running = targets.run * targets.moveW * carry
+		local name = state.baseName
+		local two = name ~= nil and ClipLibrary.TwoHandedStances[name] == true
+		local shouldered = name ~= nil and SHOULDER_CARRY[name] == true
+		-- (Hybrid: the authored cycle's own shoulder swing, so the hand keeps time with its legs.)
+		local h = state.authoredW
+		local presence = math.max(locoWeight, h)
+		local kind = if two then HELD_SWING.two elseif shouldered then HELD_SWING.shoulder else HELD_SWING.one
+		local share = kind * baseArm * (1 - clipArm) * presence
+		local swing = -targets.armSwing * (1 - h) + state.authoredSwing * h
+		-- A one-handed carry held low also tips the blade up against the run's lean so the tip
+		-- stays clear of the ground, and turns it out beside the driving knee (a blade on the
+		-- shoulder needs neither).
+		local carry = if two then 0 else baseArm * (1 - clipArm) * presence
+		local running = if shouldered then 0 else targets.run * targets.moveW * carry
 		swingHeld(
 			state,
 			results,
 			"Right",
-			-targets.armSwing * share,
-			-targets.lean * 1.4 * carry,
-			math.rad(28) * running,
-			math.rad(12) * running
+			swing * share,
+			if shouldered then 0 else -targets.lean * 1.4 * carry * (1 - h),
+			math.rad(10) * running,
+			math.rad(8) * running
 		)
 	end
 
@@ -839,6 +996,12 @@ function Animator.attach(model: Model)
 		buffers = { {}, {}, {}, {} },
 		lodDt = 0,
 		orphanedAt = nil,
+		authored = nil,
+		authoredTried = false,
+		authoredW = 0,
+		authoredSwing = 0,
+		footDown = {},
+		footLow = {},
 	}
 	states[model] = state
 	refreshGroundFilter()
@@ -1074,7 +1237,14 @@ local function idle(state: State): boolean
 end
 
 function Animator.start()
+	local studio = RunService:IsStudio()
 	RunService.PreSimulation:Connect(function(dt)
+		if studio then
+			local mode = workspace:GetAttribute("GaitMode") -- Studio A/B (see Shared/Gait)
+			if mode == "hybrid" or mode == "procedural" then
+				Gait.Mode = mode
+			end
+		end
 		local camera = workspace.CurrentCamera
 		local eye = if camera then camera.CFrame.Position else nil
 		local clock = os.clock()

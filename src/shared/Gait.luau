@@ -20,8 +20,18 @@
 --             into acceleration and into turns.
 -- Distances are for a 1x R15 body (leg 1.8 studs, hip to ankle); the Animator scales them by
 -- the actual leg length, so bosses (BodyScale 1.3-1.4) step in proportion.
+--
+-- Gait.Mode picks who animates walking and running forward (review round 1 A/B):
+--   "hybrid"      Roblox's default R15 walk and run (the Animate script's own clips, what most
+--                 Roblox players know) on the legs and the free arm, with the sword arm and the
+--                 stance layered on top; this cycle only takes slow steps (under ~4 studs/s, where
+--                 its planted feet matter), lock-on strafes and backpedals, and standing.
+--   "procedural"  this cycle for every speed and direction.
+-- In Studio a workspace attribute GaitMode overrides it live (client/Animator).
 
-local Gait = {}
+local Gait = {
+	Mode = "hybrid" :: "hybrid" | "procedural",
+}
 
 local rad = math.rad
 local TAU = 2 * math.pi
@@ -72,8 +82,8 @@ local IDLE_RELAXED: Shape = {
 -- foot's lead (walking); bob: hip bob scale; lean: forward lean running (degrees); swing: chest
 -- counter-turn and arm swing scale.
 local MOVE_COMBAT = {
-	drop = 0.34,
-	runDrop = 0.26,
+	drop = 0.2, -- moving stands taller than the planted fight stance (a guarded side-step, not a crouch)
+	runDrop = 0.14,
 	hipYaw = 12,
 	width = 0.46,
 	stagger = 0.14,
@@ -89,14 +99,16 @@ local MOVE_RELAXED =
 -- share of a stride a foot would like to spend on the ground (a stride too long for the legs to
 -- cover planted shortens it into a flight phase), LIFT = how high the swinging ankle rises.
 local SPEEDS = { 0, 3, 6, 9, 13, 16, 22, 28 }
-local FREQ = { 1.0, 1.15, 1.3, 1.36, 1.42, 1.48, 1.6, 1.72 }
-local DUTY = { 0.64, 0.62, 0.52, 0.36, 0.3, 0.28, 0.25, 0.22 }
+-- Roblox legs are short for the body (~35% of its height, ~50% on a person), so the cadence sits a
+-- little above a real runner's at the same speed: ~3.5 steps a second at 16, never above 4.
+local FREQ = { 1.0, 1.15, 1.3, 1.45, 1.65, 1.75, 1.88, 2.0 }
+local DUTY = { 0.64, 0.62, 0.52, 0.38, 0.34, 0.33, 0.29, 0.26 }
 local LIFT = { 0.08, 0.12, 0.26, 0.38, 0.46, 0.5, 0.56, 0.6 }
 
 -- Degrees the hips turn toward the travel direction, so a lock-on strafe runs on legs pointing
 -- (nearly) where they go instead of crossing over; the waist takes the twist back to the facing,
 -- with CHEST_FOLLOW of it showing in the chest.
-local TURN_LIMIT = 56
+local TURN_LIMIT = 40
 local CHEST_FOLLOW = 0.3
 -- Standing: a foot further than STEP_DIST (studs) or STEP_YAW (degrees) off its place in the stance
 -- steps back to it over STEP_TIME seconds; then the other foot follows if it is off at all.
@@ -110,6 +122,22 @@ local HIP_TURN_RATE = 7
 local MOVE_RATE = 9 -- moving weight in and out
 local SPEED_RATE = 10 -- smoothing of the measured ground speed
 local COMBAT_RATE = 4
+-- Hybrid mode: the authored cycle takes forward travel above AUTHORED_ON studs/s within ~30
+-- degrees of the facing (and lets go below AUTHORED_OFF or past ~55 degrees), blending at this rate.
+local AUTHORED_ON = 5
+local AUTHORED_OFF = 3.5
+local AUTHORED_RATE = 10
+-- A hard stop (from a run to nothing in a frame) shows BRAKE_TIME seconds of braking: hips sink
+-- and the body rocks back over the planted feet before the stance settles.
+local BRAKE_TIME = 0.24
+local BRAKE_DROP = 0.1
+local BRAKE_LEAN = 6 -- degrees back
+-- The relaxed stance breathes (studs of hip rise, degrees of chest pitch) and shifts its weight
+-- from foot to foot every IDLE_SHIFT seconds; the fight stance holds still.
+local BREATH = 0.05
+local BREATH_PITCH = 1.5
+local IDLE_SWAY = 0.08
+local IDLE_SHIFT = 4
 
 type FootMem = {
 	planted: boolean, -- on the ground in the cycle last frame
@@ -133,6 +161,11 @@ export type Memory = {
 	clock: number,
 	facing: number?, -- last frame's facing (world yaw, degrees)
 	yawRate: number, -- smoothed turn rate (degrees/s)
+	authored: number, -- 0..1, how much the authored cycle takes (hybrid mode)
+	authoredOn: boolean,
+	brakeT: number, -- seconds since a hard stop began (BRAKE_TIME and over: none)
+	brakeAmt: number,
+	fastAt: number, -- clock when the body last ran faster than 13 studs/s
 	feet: { [string]: FootMem },
 	stepping: string?, -- the standing foot stepping back under the body ("Right" / "Left")
 	stepFrom: Vector3,
@@ -162,6 +195,7 @@ export type Targets = {
 	moveW: number,
 	run: number, -- 0 walking .. 1 running
 	combat: number,
+	authored: number, -- 0..1, how much of the moving body the authored cycle takes (hybrid mode)
 }
 
 local function footMem(): FootMem
@@ -189,6 +223,11 @@ function Gait.new(): Memory
 		clock = 0,
 		facing = nil,
 		yawRate = 0,
+		authored = 0,
+		authoredOn = false,
+		brakeT = math.huge,
+		brakeAmt = 0,
+		fastAt = -math.huge,
 		feet = { Right = footMem(), Left = footMem() },
 		stepping = nil,
 		stepFrom = Vector3.zero,
@@ -209,6 +248,17 @@ function Gait.setFoot(m: Memory, ankleH: number, toe: number, heel: number)
 			toe = math.clamp(toe, 0.1, 1),
 			heel = math.clamp(heel, 0.05, 0.8),
 		}
+	end
+end
+
+-- Hybrid mode: where a foot the authored cycle is showing stands right now (root space, 1x
+-- studs; yaw in degrees left of the facing), so that when this cycle takes over again (a stop,
+-- a slow step) the standing feet start from what was on screen.
+function Gait.observeFoot(m: Memory, side: string, pos: Vector3, yaw: number)
+	local f = m.feet[side]
+	if f then
+		f.lastPos = Vector3.new(pos.X, 0, pos.Z)
+		f.lastYaw = yaw
 	end
 end
 
@@ -380,6 +430,20 @@ function Gait.step(
 	if dt > 0 then
 		m.accel += ((m.speed - before) / dt - m.accel) * (1 - math.exp(-dt * 6))
 	end
+	-- A hard stop: the (lightly smoothed) ground speed falls from a run to under half of it at once.
+	if speed > 13 then
+		m.fastAt = m.clock
+	end
+	if speed < 7 and m.clock - m.fastAt < 0.25 and m.brakeT >= BRAKE_TIME then
+		m.brakeT = 0
+		m.brakeAmt = clamp01((math.max(before, speed) - 4) / 10)
+		m.fastAt = -math.huge
+	elseif m.brakeT < BRAKE_TIME then
+		m.brakeT += dt
+		if speed > 4 and speed > before then
+			m.brakeT = BRAKE_TIME -- speeding up again: no more braking
+		end
+	end
 	local wasStill = m.moveW < 0.05
 	m.moveW += (clamp01((speed - 0.6) / 2.4) - m.moveW) * (1 - math.exp(-dt * MOVE_RATE))
 	m.combat += (combat - m.combat) * (1 - math.exp(-dt * COMBAT_RATE))
@@ -398,6 +462,18 @@ function Gait.step(
 	local v = m.speed
 	local run = clamp01((v - 4) / 4)
 	local walk = 1 - run
+
+	-- Hybrid: forward travel at a walk or faster goes to the authored cycle (with hysteresis, so a
+	-- turn or a speed change near the limits doesn't flicker between the two).
+	local forwardTravel = -m.dir.Z
+	if Gait.Mode ~= "hybrid" then
+		m.authoredOn = false
+	elseif m.authoredOn then
+		m.authoredOn = v > AUTHORED_OFF and forwardTravel > 0.57
+	else
+		m.authoredOn = v > AUTHORED_ON and forwardTravel > 0.87
+	end
+	m.authored += ((if m.authoredOn then 1 else 0) - m.authored) * (1 - math.exp(-dt * AUTHORED_RATE))
 
 	-- Hips turn toward the direction of travel (degrees left of the facing), or away from it when
 	-- backing off, with some hysteresis so a pure strafe doesn't flip between the two.
@@ -535,8 +611,10 @@ function Gait.step(
 			end
 			cyc[side] = { pos = pos, yaw = yaw, pitch = pitch, planted = 0, landed = false }
 		end
-		f.lastPos = Vector3.new(cyc[side].pos.X, 0, cyc[side].pos.Z)
-		f.lastYaw = yaw
+		if m.authored < 0.5 then -- (otherwise the Animator reports the authored feet: observeFoot)
+			f.lastPos = Vector3.new(cyc[side].pos.X, 0, cyc[side].pos.Z)
+			f.lastYaw = yaw
+		end
 	end
 
 	-- Standing places, blended with the cycle by how much the body is moving.
@@ -569,9 +647,17 @@ function Gait.step(
 	local bobAmp = lerp(-0.035, 0.085 * math.min(v / 12, 1), run) * bobScale
 	local mid = m.phase - duty / 2 -- the right foot's mid-stance
 	local bob = bobAmp * w * math.cos(TAU * 2 * mid)
-	local breath = 0.016 * (1 - w) * math.sin(TAU * 0.3 * m.clock)
-	local drop = lerp(idleDrop, moveDrop, w) + bob + breath
-	local sway = 0.045 * walk * w * math.cos(TAU * mid) * (1 - 0.6 * c)
+	local breathWave = math.sin(TAU * 0.3 * m.clock)
+	local breath = lerp(BREATH, 0.016, c) * (1 - w) * breathWave
+	-- Standing relaxed, the weight rests on one foot, then shifts across to the other.
+	local shift = math.clamp(math.sin(math.pi * m.clock / IDLE_SHIFT) * 2.5, -1, 1) * (1 - w) * (1 - c)
+	local brake = 0
+	if m.brakeT < BRAKE_TIME then
+		local u = m.brakeT / BRAKE_TIME
+		brake = math.sin(math.pi * math.min(u / 0.3, 1) * 0.5) * (1 - smooth((u - 0.3) / 0.7)) * m.brakeAmt
+	end
+	local drop = lerp(idleDrop, moveDrop, w) + bob - breath + BRAKE_DROP * brake
+	local sway = 0.045 * walk * w * math.cos(TAU * mid) * (1 - 0.6 * c) + IDLE_SWAY * shift
 
 	-- The pelvis turns with the legs (right hip forward with the right foot) and drops on the
 	-- swinging side; the chest turns against it; arms swing against the legs.
@@ -580,7 +666,7 @@ function Gait.step(
 	local legSwing = math.cos(TAU * m.phase)
 	local hipOsc = lerp(5, 8, run) * w * along * legSwing * lerp(1, 0.6, c)
 	local chestOsc = -lerp(4, 9, run) * w * along * legSwing * swingScale
-	local roll = lerp(4, 2.5, run) * w * math.cos(TAU * mid) * (1 - 0.5 * c)
+	local roll = lerp(4, 2.5, run) * w * math.cos(TAU * mid) * (1 - 0.5 * c) - 2 * shift
 
 	-- Leaning: into a run (with the travel's forward share), into speeding up, into a turn.
 	local forward = -m.dir.Z
@@ -588,7 +674,10 @@ function Gait.step(
 	local runLean = lerp(MOVE_RELAXED.lean, MOVE_COMBAT.lean, c) * run * w * leanAlong
 	local accelLean = math.clamp(m.accel * 0.22, -6, 6) * w
 	local walkLean = 2 * walk * w
-	local lean = -(runLean + accelLean + walkLean) - 3 * c * (1 - w)
+	local lean = -(runLean + accelLean + walkLean)
+		- 3 * c * (1 - w)
+		+ BREATH_PITCH * (1 - c) * (1 - w) * breathWave
+		+ BRAKE_LEAN * brake
 	local bankDeg = math.clamp(math.deg(math.atan(v * rad(m.yawRate) / GRAVITY)) * 0.8 * w, -12, 12)
 
 	return {
@@ -602,11 +691,13 @@ function Gait.step(
 		chestYaw = rad(chestOsc + m.hipTurn * CHEST_FOLLOW),
 		right = out.Right,
 		left = out.Left,
-		armSwing = rad(lerp(16, 40, run) * w * swingScale) * legSwing,
-		armBend = rad(lerp(16, 78, run * w)),
+		-- A jogger's arm, not a sprinter's: the hand stays at chest height.
+		armSwing = rad(lerp(14, 26, run) * w * swingScale) * legSwing,
+		armBend = rad(lerp(20, 70, run * w)),
 		moveW = w,
 		run = run,
 		combat = c,
+		authored = m.authored,
 	}
 end
 

@@ -86,11 +86,17 @@ local specs: { [string]: PoseSpec } = {
 	-- (relaxed) to ~36 (fight) degrees left of the facing, right hip forward, and squares the
 	-- chest back up; a stance's Waist turns the chest from square, its Neck brings the eyes back.
 
-	-- Out of combat: the sword carried low in the right hand, blade angled forward and down
-	-- about 25 degrees (the tip clears the ground), edge down, clear of the leg. Only the sword arm is posed; the left arm
-	-- swings with the footwork.
+	-- Out of combat: the sword rests on the right shoulder, the fist in front of the shoulder and
+	-- the blade running back and up over it (about 20 degrees above level), edge up. The oversized
+	-- blade (5-6.4 studs past the hand) can't be carried low without trailing along the sand.
+	-- Only the sword arm is posed; the left arm swings with the footwork.
 	Relaxed = {
-		RightArm = { upper = v(0.1, -1, -0.12), fore = v(0.08, -0.42, -0.9), blade = v(0.26, -0.5, -1), edge = DOWN },
+		RightArm = {
+			upper = v(0.2, -0.6, -0.78),
+			fore = v(-0.3, 0.85, 0.2),
+			blade = v(0.14, 0.36, 1),
+			edge = v(0, 1, -0.36),
+		},
 	},
 
 	-- In combat: chudan, both hands on the hilt in front of the navel, blade toward the
