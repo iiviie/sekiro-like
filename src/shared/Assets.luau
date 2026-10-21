@@ -68,6 +68,53 @@ local Assets = {
 			IronWill = "rbxassetid://91335488248400", -- 鉄心
 			RushingMist = "rbxassetid://115682411636483", -- 霧
 		} :: { [string]: string },
+		-- Menu chrome (art/ui/chrome.py, ui_*.png): 9-slice panels and buttons, brush strokes,
+		-- seals, rings and reveal pieces. Read by client/UI.luau; slice rects live there.
+		Chrome = {
+			PanelLacquer = "rbxassetid://94188179801260", -- 256, Rect(40,40,216,216)
+			PanelPlain = "rbxassetid://140077456638811", -- 256, Rect(40,40,216,216)
+			PanelInset = "rbxassetid://82641051910622", -- 128 neutral, Rect(24,24,104,104), tinted
+			PanelWashi = "rbxassetid://99808286014158", -- 256, Rect(36,36,220,220)
+			PaperGrain = "rbxassetid://87124825386883", -- 256 tile
+			ButtonBase = "rbxassetid://123666478281776", -- 192x64 neutral, Rect(24,20,168,44), tinted
+			Pill = "rbxassetid://85636818227882", -- 160x48, Rect(24,0,136,48)
+			SelectRing = "rbxassetid://128621202686013",
+			TouchRing = "rbxassetid://123309743149310",
+			IconClose = "rbxassetid://120715760770615",
+			IconPlus = "rbxassetid://109733084810516",
+			IconPrev = "rbxassetid://96370280083563",
+			IconNext = "rbxassetid://114914842498631",
+			BrushUnderline = "rbxassetid://93649272670693", -- white, tinted
+			BrushSwipe = "rbxassetid://74568738605356", -- white, tinted
+			HankoNew = "rbxassetid://116887751362451", -- 新 seal
+			HankoCheck = "rbxassetid://76706490673326", -- jade done seal
+			Shine = "rbxassetid://85723955666847",
+			LifePip = "rbxassetid://113965690042594",
+			Tomoe = "rbxassetid://107707225620615",
+			CardBack = "rbxassetid://72641545375118",
+			RevealSlip = "rbxassetid://91574914812126", -- 512x160, Rect(48,40,464,120)
+			RevealStick = "rbxassetid://122151871803338",
+			RevealTip = "rbxassetid://100069941422576", -- white, tinted to the rarity
+			RevealBox = "rbxassetid://72246913018679", -- omikuji box (art/icons/png/reveal_box.png)
+			KanjiCommon = "rbxassetid://112427498481709", -- 並
+			KanjiUncommon = "rbxassetid://133300735315254", -- 良
+			KanjiRare = "rbxassetid://86202842054599", -- 稀
+			KanjiEpic = "rbxassetid://111497332918162", -- 秀
+			KanjiLegendary = "rbxassetid://113748455336743", -- 極
+			KanjiTitle = "rbxassetid://84190621069944", -- 最後の刃, vertical
+			-- Boss names in brush kanji, keyed by boss id (Shared/Bosses nameJP).
+			BossNames = {
+				Enemy01 = "rbxassetid://119643877629421",
+				Enemy02 = "rbxassetid://105032761070984",
+				Enemy03 = "rbxassetid://116211708869516",
+				Enemy04 = "rbxassetid://77463795800859",
+				Enemy05 = "rbxassetid://126011615174295",
+				Enemy06 = "rbxassetid://91645956930538",
+				Enemy07 = "rbxassetid://85957877289856",
+				Enemy08 = "rbxassetid://90464489169464",
+				Enemy09 = "rbxassetid://136882575222477",
+			} :: { [string]: string },
+		} :: { [string]: any },
 	},
 
 	-- Painted icons (art/icons: made with ChatGPT image generation from STYLE.md, cut out
@@ -149,6 +196,7 @@ local Assets = {
 		-- item card. Ornaments stay in the outer 96 px: SliceCenter Rect(96, 96, 416, 416).
 		RarityFrames = {
 			Common = "rbxassetid://75591611085355",
+			Uncommon = "rbxassetid://99675224762785", -- jade band, bone corner pips
 			Rare = "rbxassetid://84041968321288",
 			Epic = "rbxassetid://98529384607353",
 			Legendary = "rbxassetid://118071288044032",
