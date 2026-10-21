@@ -554,7 +554,16 @@ local function endSession(s: Session, quick: boolean?)
 		s.skipButton.Visible = false
 	end
 	for _, gui in s.hidden do
-		gui.Enabled = true
+		if gui.Name == "LobbyHUD" and not s.preview then
+			-- The fight's InDuel lands on the server's end of the intro, about when ours ends:
+			-- a beat later, so the lobby HUD doesn't blink on in between. LobbyHUD turns it
+			-- straight back off if a fight is on by then.
+			task.delay(1, function()
+				gui.Enabled = true
+			end)
+		else
+			gui.Enabled = true
+		end
 	end
 	-- Hand the camera back from where play picks up: behind you facing your foe (a skipped
 	-- intro would otherwise swing round from the hero shot, through your body), or for a

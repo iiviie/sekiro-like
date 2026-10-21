@@ -745,15 +745,26 @@ local wasFighting = false -- the character was in a match or duel at the last ch
 local lobbyVisits = 0 -- returns to the lobby from a fight this session
 local offerVisit = math.huge -- the lobby visit the offer card may show on
 
-local function refreshVisibility()
+-- Whether the character is in the lobby (not in a royale, duel or boss fight).
+local function inLobbyNow(): boolean
 	local character = player.Character
-	local inLobby = character ~= nil
+	return character ~= nil
 		and character:GetAttribute("InMatch") ~= true
 		and character:GetAttribute("InDuel") ~= true
+		and character:GetAttribute("InBoss") ~= true
+end
+
+-- Whether the HUD may be on screen. The large panels (Store, Locker, Pass) and the boss
+-- picker take the screen: the HUD steps aside under them.
+local function allowed(): boolean
+	return inLobbyNow() and LobbyHUD.entered and not Panels.isLarge() and not pickerOpen
+end
+
+local function refreshVisibility()
+	local character = player.Character
+	local inLobby = inLobbyNow()
 	local visible = inLobby and LobbyHUD.entered
-	-- The large panels (Store, Locker, Pass) and the boss picker take the screen: the HUD
-	-- steps aside under them.
-	screen.Enabled = visible and not Panels.isLarge() and not pickerOpen
+	screen.Enabled = allowed()
 	-- On a phone or touch tablet a normal panel is centred over PLAY and the pills: they step
 	-- aside under it; the rail stays (it shows which panel is open and switches with one tap).
 	local covered = compact and Panels.isOpen()
@@ -1062,12 +1073,22 @@ function LobbyHUD.start()
 	local function watch(character: Model)
 		character:GetAttributeChangedSignal("InMatch"):Connect(refreshVisibility)
 		character:GetAttributeChangedSignal("InDuel"):Connect(refreshVisibility)
+		character:GetAttributeChangedSignal("InBoss"):Connect(refreshVisibility)
 		refreshVisibility()
 	end
 	player.CharacterAdded:Connect(watch)
 	if player.Character then
 		watch(player.Character)
 	end
+	-- Others hide the HUD for a while and switch it back on (the fight intro, the title card,
+	-- a cosmetic preview). Turning it off is theirs to do; turning it back on is checked here,
+	-- so a restore that lands after a fight has started (an intro that hid the HUD a frame
+	-- before InDuel arrived) can't leave the lobby HUD over the fight.
+	screen:GetPropertyChangedSignal("Enabled"):Connect(function()
+		if screen.Enabled and not allowed() then
+			screen.Enabled = false
+		end
+	end)
 	refresh()
 
 	-- Fit the HUD on small screens.
