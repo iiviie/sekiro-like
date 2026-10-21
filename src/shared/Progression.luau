@@ -1,6 +1,6 @@
 --!strict
 -- Everything a player works toward between fights: Mastery levels (XP from every good
--- play), daily Trials, and the blade skins' looks. Shared so the server awards and the client
+-- play), the old daily Trials entry points, and the blade skins' looks. Shared so the server awards and the client
 -- shows the same numbers. Research: "Why it is not fun" notes; a level every one or two early
 -- matches, three daily goals, and cosmetics with visible, odd unlock conditions.
 --
@@ -8,6 +8,7 @@
 -- unlock rules and ownership in Shared/Catalog. This module keeps the old entry points.
 
 local EconomyConfig = require(script.Parent.EconomyConfig)
+local Season = require(script.Parent.Season)
 
 local Progression = {}
 
@@ -246,6 +247,37 @@ Progression.Skins = {
 		trail = { Color3.fromRGB(210, 255, 250), Color3.fromRGB(40, 170, 170) },
 		glow = Color3.fromRGB(120, 230, 220),
 	},
+	-- Path of the Blade, season 1 (pass rewards).
+	{
+		id = "S1Cedar",
+		name = "Pilgrim's Cedar",
+		blurb = "Warm cedar lacquer from the shrine stairs.",
+		tint = Vector3.new(1.25, 0.9, 0.65),
+		outline = Color3.fromRGB(48, 26, 12),
+		fill = Color3.fromRGB(210, 150, 100),
+		trail = { Color3.fromRGB(250, 220, 180), Color3.fromRGB(170, 100, 50) },
+	},
+	{
+		id = "S1Vermilion",
+		name = "Torii Vermilion",
+		blurb = "The colour of a thousand gates up the mountain.",
+		tint = Vector3.new(1.5, 0.7, 0.45),
+		outline = Color3.fromRGB(60, 16, 6),
+		fill = Color3.fromRGB(255, 120, 70),
+		trail = { Color3.fromRGB(255, 200, 150), Color3.fromRGB(230, 90, 40) },
+		glow = Color3.fromRGB(255, 140, 80),
+	},
+	{
+		id = "S1Hanafubuki",
+		name = "Hanafubuki",
+		blurb = "The season's blade: a storm of petals at the summit.",
+		tint = Vector3.new(1.45, 1.05, 1.2),
+		outline = Color3.fromRGB(255, 205, 120),
+		fill = Color3.fromRGB(255, 200, 220),
+		trail = { Color3.fromRGB(255, 240, 245), Color3.fromRGB(245, 150, 190) },
+		glow = Color3.fromRGB(255, 190, 215),
+		petals = Color3.fromRGB(255, 190, 215),
+	},
 } :: { Skin }
 
 local byId: { [string]: Skin } = {}
@@ -257,44 +289,21 @@ function Progression.skin(id: string?): Skin
 	return (id and byId[id]) or Progression.Skins[1]
 end
 
--- Daily Trials: three a day, drawn per player from this pool by a seed of user id and day,
--- so everyone gets a different set and it is stable through the day. Completed trials pay
--- out at once.
-export type Trial = { id: string, text: string, event: string, goal: number, coins: number, xp: number }
+-- The daily Trials are now the season pass's daily missions (Shared/Season, run by
+-- server/PassService). These keep the old entry points for older panels: a mission has the
+-- Trial fields (id, text, event, goal, coins, xp) plus its Pass XP.
+export type Trial = Season.Mission
 
-Progression.Trials = {
-	{ id = "deflect20", text = "Deflect 20 attacks", event = "Deflect", goal = 20, coins = 120, xp = 80 },
-	{ id = "perfect6", text = "Land 6 perfect deflects", event = "PerfectDeflect", goal = 6, coins = 150, xp = 100 },
-	{ id = "kill3", text = "Cut down 3 fighters", event = "Kill", goal = 3, coins = 120, xp = 80 },
-	{ id = "deathblow2", text = "Land 2 deathblows", event = "Deathblow", goal = 2, coins = 140, xp = 90 },
-	{ id = "play3", text = "Fight 3 royales or duels", event = "Played", goal = 3, coins = 100, xp = 80 },
-	{ id = "top3", text = "Finish in the top 3 twice", event = "Top3", goal = 2, coins = 150, xp = 100 },
-	{ id = "win1", text = "Win a royale", event = "Win", goal = 1, coins = 200, xp = 150 },
-	{ id = "mikiri1", text = "Mikiri Counter a thrust", event = "Mikiri", goal = 1, coins = 150, xp = 100 },
-	{ id = "jump2", text = "Jump 2 sweeps", event = "Jumped", goal = 2, coins = 120, xp = 80 },
-	{ id = "riposte5", text = "Land 5 ripostes", event = "Riposte", goal = 5, coins = 130, xp = 90 },
-} :: { Trial }
-
-Progression.TrialsPerDay = 3
-
-local trialsById: { [string]: Trial } = {}
-for _, trial in Progression.Trials do
-	trialsById[trial.id] = trial
-end
+Progression.TrialsPerDay = Season.DailyCount
 
 function Progression.trial(id: string): Trial?
-	return trialsById[id]
+	return Season.mission(id)
 end
 
+-- The day's missions as first drawn (PassService publishes the live list, after any reroll,
+-- in the `Trials` attribute).
 function Progression.dailyTrials(userId: number, day: number): { string }
-	local rng = Random.new(userId * 7919 + day * 104729)
-	local pool = table.clone(Progression.Trials)
-	local picked = {}
-	for _ = 1, Progression.TrialsPerDay do
-		local trial = table.remove(pool, rng:NextInteger(1, #pool)) :: Trial
-		table.insert(picked, trial.id)
-	end
-	return picked
+	return Season.dailyMissions(userId, day)
 end
 
 return Progression
