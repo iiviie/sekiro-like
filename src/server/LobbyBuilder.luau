@@ -1446,7 +1446,7 @@ local function cloudSea(parent: Instance)
 		decor({
 			Name = "CloudSea",
 			Size = Vector3.new(620, 1, 400),
-			CFrame = CFrame.new(O.X, O.Y - 34, O.Z + 90),
+			CFrame = CFrame.new(O.X, O.Y - 60, O.Z + 90),
 			Transparency = 1,
 		}),
 		parent
@@ -1466,7 +1466,10 @@ local function cloudSea(parent: Instance)
 	})
 	clouds.Lifetime = NumberRange.new(40, 55)
 	clouds.Rate = 9
-	clouds.Speed = NumberRange.new(0.4, 1.2)
+	-- Puffs drift sideways and barely rise, so the sea stays below the island instead of
+	-- climbing through the lobby as haze for the first minute of a server.
+	clouds.Speed = NumberRange.new(0, 0.15)
+	clouds.Acceleration = Vector3.new(0.12, 0, 0.05)
 	clouds.SpreadAngle = Vector2.new(80, 80)
 	clouds.Rotation = NumberRange.new(0, 360)
 	clouds.RotSpeed = NumberRange.new(-2, 2)
