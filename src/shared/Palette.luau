@@ -22,8 +22,10 @@ return {
 	Deck = Color3.fromRGB(124, 90, 62),
 	Earth = Color3.fromRGB(150, 128, 100),
 	Flagstone = Color3.fromRGB(156, 146, 128),
-	Paving = Color3.fromRGB(164, 148, 120), -- fighting floors (terrain sand): quiet, so characters pop
-	Sand = Color3.fromRGB(190, 174, 146), -- sand-material parts (pads, the courtyard's duel circle)
+	-- A notch darker than before: at midday with bloom the old (164, 148, 120) went near white and
+	-- the white slash smears vanished against it.
+	Paving = Color3.fromRGB(146, 128, 100), -- fighting floors (terrain sand): quiet, so characters pop
+	Sand = Color3.fromRGB(172, 154, 124), -- sand-material parts (pads, the courtyard's duel circle)
 	Rock = Color3.fromRGB(140, 128, 98),
 	-- Terrain Rock (the island cliffs): near-neutral, since any warm tint turns the 2022 Rock
 	-- texture's lichen speckle lilac under midday light.

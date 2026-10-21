@@ -35,7 +35,7 @@ LightingProfile.Atmosphere = {
 	Density = 0.26,
 	Offset = 0.25,
 	Color = Color3.fromRGB(220, 228, 238),
-	Decay = Color3.fromRGB(208, 196, 210),
+	Decay = Color3.fromRGB(200, 196, 188), -- neutral warm: a lilac decay cast lavender on grass sides and cliffs
 	Glare = 0.1,
 	Haze = 0.6,
 }
