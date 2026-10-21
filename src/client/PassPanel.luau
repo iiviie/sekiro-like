@@ -40,6 +40,7 @@ local HEADER_H = 60
 local ROW2_Y = 68 -- tabs, Claim all and the tier skips (60 px tall: >= 45 pt on a phone)
 local CONTENT_Y = 136
 local DETAIL_H = 24
+local DETAIL_HINT = "Tap a reward to see it  ·  premium rewards stay claimable once you upgrade"
 
 local function attr(name: string, default: any): any
 	local value = player:GetAttribute(name)
@@ -225,17 +226,21 @@ local function header(body: Frame, width: number)
 		Text = tostring(tier),
 		ZIndex = 3,
 	}, plate)
+	-- The season line wraps onto two lines rather than cutting the subtitle off.
 	UI.label("caption", {
-		Position = UDim2.fromOffset(HEADER_H + 10, 0),
-		Size = UDim2.fromOffset(130, 18),
+		Name = "SeasonName",
+		Position = UDim2.fromOffset(HEADER_H + 10, -2),
+		Size = UDim2.fromOffset(130, 32),
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextWrapped = true,
+		LineHeight = 0.95,
 		Text = if def then def.subtitle else "Path of the Blade",
 	}, body)
 	UI.text({
 		Name = "Tier",
-		Position = UDim2.fromOffset(HEADER_H + 10, 18),
-		Size = UDim2.fromOffset(130, 36),
+		Position = UDim2.fromOffset(HEADER_H + 10, 28),
+		Size = UDim2.fromOffset(130, 32),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		FontFace = UI.Fonts.Display,
 		TextSize = 28,
@@ -463,7 +468,7 @@ local function tabs(body: Frame, size: Vector2, redraw: () -> ()): TextLabel?
 		FontFace = UI.Fonts.Label,
 		TextSize = 15,
 		TextColor3 = T.Dim,
-		Text = detail or "Tap a reward to see it  ·  premium rewards stay claimable once you upgrade",
+		Text = detail or DETAIL_HINT,
 	}, body)
 end
 
@@ -672,10 +677,12 @@ local function trackView(body: Frame, size: Vector2, info: TextLabel?)
 			if reached then
 				UI.rarityGlow(base, rarity, 1)
 			end
+			local first = list[1]
+			local named = first.kind == "item" -- item names take two lines under a smaller icon
 			UI.new("ImageLabel", {
 				AnchorPoint = Vector2.new(0.5, 0.5),
-				Position = UDim2.fromScale(0.5, 0.42),
-				Size = UDim2.fromScale(0.62, 0.62),
+				Position = UDim2.fromScale(0.5, if named then 0.36 else 0.42),
+				Size = UDim2.fromScale(if named then 0.5 else 0.62, if named then 0.5 else 0.62),
 				BackgroundTransparency = 1,
 				Image = image,
 				ImageColor3 = tint,
@@ -686,13 +693,16 @@ local function trackView(body: Frame, size: Vector2, info: TextLabel?)
 			if frame and not reached then
 				frame.ImageTransparency = 0.4
 			end
-			local first = list[1]
 			UI.text({
+				Name = "Label",
 				AnchorPoint = Vector2.new(0.5, 1),
-				Position = UDim2.new(0.5, 0, 1, -5),
-				Size = UDim2.new(1, -12, 0, 17),
-				FontFace = if first.kind == "item" then UI.Fonts.Label else UI.Fonts.Number,
+				Position = UDim2.new(0.5, 0, 1, -4),
+				Size = UDim2.new(1, -8, 0, if named then 32 else 17),
+				FontFace = if named then UI.Fonts.Label else UI.Fonts.Number,
 				TextSize = 14,
+				LineHeight = 0.9,
+				TextWrapped = named,
+				TextYAlignment = Enum.TextYAlignment.Bottom,
 				TextStrokeColor3 = T.Ink,
 				TextStrokeTransparency = 0.25,
 				TextTruncate = Enum.TextTruncate.AtEnd,
@@ -766,6 +776,18 @@ local function trackView(body: Frame, size: Vector2, info: TextLabel?)
 			end
 			UI.juice(card, { hover = 1.05, press = 0.95 })
 			local describe = `Tier {t}  ·  {if isPremium then "Premium" else "Free"}  ·  {fullText(list)}`
+			-- Hovering shows the full reward in the detail line (a tooltip on desktop); a tap
+			-- keeps it there.
+			card.MouseEnter:Connect(function()
+				if info then
+					info.Text = describe
+				end
+			end)
+			card.MouseLeave:Connect(function()
+				if info and info.Parent then
+					info.Text = detail or DETAIL_HINT
+				end
+			end)
 			card.Activated:Connect(function()
 				detail = describe
 				if info then
