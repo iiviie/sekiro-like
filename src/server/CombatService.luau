@@ -1178,6 +1178,11 @@ local function armDeflect(c: Combatant, stamp: number, fresh: boolean)
 	-- Clients mirror this to show their deflects the instant a blow lands.
 	c.model:SetAttribute("DeflectAt", c.deflectStamp)
 	c.model:SetAttribute("DeflectWindow", c.deflectWindow)
+	-- The perfect window as deflect() judges it (the trainer readout quotes both).
+	c.model:SetAttribute(
+		"PerfectWindow",
+		math.min(rules.PerfectWindow * assistMultiplier(c, "PerfectMultiplier"), c.deflectWindow)
+	)
 end
 
 -- `retry` is a press replayed from the buffer: it never feints (it was pressed earlier,
