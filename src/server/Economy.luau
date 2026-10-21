@@ -332,6 +332,33 @@ function Economy.equip(player: Player, slot: Catalog.Slot, id: string): boolean
 		return false
 	end
 	d.Loadout[slot] = id
+	if slot == "title" and id ~= "" and d.Loadout.title2 == id then
+		d.Loadout.title2 = "" -- one title can't fill both slots
+	end
+	StatsService.commit(player)
+	return true
+end
+
+-- The second title slot (pass.TitleSlot, checked by the caller and passed as `hasSlot`):
+-- any owned title other than the first one; "" clears it. Published in Loadout.title2.
+function Economy.equipTitle2(player: Player, id: string, hasSlot: boolean): boolean
+	local d = StatsService.get(player)
+	if not d then
+		return false
+	end
+	if id ~= "" then
+		local item = Catalog.get(id)
+		if not hasSlot or not item or item.category ~= "title" or d.Inventory[id] == nil then
+			return false
+		end
+		if d.Loadout.title == id then
+			return false
+		end
+	end
+	if (d.Loadout.title2 or "") == id then
+		return false
+	end
+	d.Loadout.title2 = id
 	StatsService.commit(player)
 	return true
 end
