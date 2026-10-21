@@ -10,6 +10,7 @@
 
 local Config = require(game:GetService("ReplicatedStorage").Shared.Config)
 local Palette = require(game:GetService("ReplicatedStorage").Shared.Palette)
+local Torii = require(script.Parent.Torii)
 
 local ARENA = Config.Arena
 local WALL_HEIGHT = 9
@@ -551,9 +552,51 @@ local function boulders()
 	end
 end
 
+-- The hand-placed props in Workspace.Props were laid out on the old flat baseplate (top at
+-- y = 0), but the terrain's walkable surface is at FLOOR_Y, so they stood 2 studs deep.
+-- Stand each courtyard prop on the terrain actually under it. Distant set dressing (the
+-- pagoda on its hill, the mountains) is left where it was placed.
+local function seatProps()
+	local props = workspace:FindFirstChild("Props")
+	if not props then
+		return
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { workspace.Terrain }
+	for _, model in props:GetDescendants() do
+		-- Whole props only: a model nested inside another moves with its parent.
+		local whole = model:IsA("Model") and (model.Parent == props or (model.Parent :: Instance):IsA("Folder"))
+		if not whole or model.Name == "Pagoda" or model:FindFirstAncestor("Mountains") then
+			continue
+		end
+		local pivot = model:GetPivot().Position
+		if math.max(math.abs(pivot.X), math.abs(pivot.Z)) > ARENA.WallHalfExtent + 60 then
+			continue
+		end
+		local box, size = model:GetBoundingBox()
+		local hit = workspace:Raycast(
+			Vector3.new(box.Position.X, box.Position.Y + size.Y / 2 + 4, box.Position.Z),
+			Vector3.new(0, -(size.Y + 20), 0),
+			params
+		)
+		if hit then
+			-- Trees sink half a stud so a trunk never shows a seam at its foot.
+			local sink = if model:FindFirstAncestor("Trees") then 0.5 else 0.05
+			local bottom = box.Position.Y - size.Y / 2
+			model:PivotTo(model:GetPivot() + Vector3.new(0, hit.Position.Y - sink - bottom, 0))
+		end
+		if model.Name == "Torii" then
+			Torii.openGate(model) -- the flagstone path runs through it to the gate
+		end
+	end
+end
+
 function MapBuilder.build()
 	terrain()
 	boulders()
+	task.wait() -- terrain filled this frame isn't hit by raycasts until the next
+	seatProps()
 
 	-- Safe to re-run (e.g. once in edit mode for layout): replace any earlier build.
 	local previous = workspace:FindFirstChild("Castle")
