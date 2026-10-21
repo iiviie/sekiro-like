@@ -27,7 +27,7 @@ local N = {
 	-- Coins on reaching level L: Base + PerLevel * L, never more than Max.
 	LevelCoins = { Base = 50, PerLevel = 5, Max = 150 },
 	-- Every Every-th level is a milestone: extra coins, gems and Whetstones on top.
-	Milestone = { Every = 5, Coins = 100, Gems = 10, Whetstones = 3 },
+	Milestone = { Every = 5, Coins = 100, Gems = 10, Whetstones = 2 },
 
 	-- Match events (XP and coins). Coins for kills and deathblows are paid once per victim
 	-- per match: finishing someone who already rose from a cut-down pays XP only.
@@ -49,7 +49,7 @@ local N = {
 		Fought = { XP = 25, Coins = 10 },
 		Phase = { XP = 20 },
 		Clear = { XP = 80, Coins = 30, Whetstones = 1 },
-		FirstClear = { XP = 150, Coins = 120, Whetstones = 3, Gems = 10, GemsPerStar = 10 },
+		FirstClear = { XP = 150, Coins = 120, Whetstones = 2, Gems = 10, GemsPerStar = 10 },
 	},
 
 	-- Whetstones: earned only, never sold. They level premium blade lines (Catalog).
@@ -57,7 +57,9 @@ local N = {
 		RoyaleWin = 1,
 		DuelWin = 1,
 		Trial = 1, -- per daily trial completed
-		WinCapPerDay = 3, -- wins (royale + duel) that pay Whetstones per UTC day
+		-- Wins (royale + duel) that pay Whetstones per UTC day. With the caps here a 40 min/day
+		-- player earns a full line's L2-L4 (120) in about 12 days (04_pacing_sim.md).
+		WinCapPerDay = 2,
 	},
 
 	-- Shrine Draws: earned random rewards (no Robux), opened by the shrine (later part).
