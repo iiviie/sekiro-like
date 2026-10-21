@@ -40,6 +40,7 @@ local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Season = require(ReplicatedStorage.Shared.Season)
 local Economy = require(script.Parent.Economy)
 local Monetization = require(script.Parent.Monetization)
+local ShopService = require(script.Parent.ShopService)
 local StatsService = require(script.Parent.StatsService)
 
 type Data = StatsService.Data
@@ -123,7 +124,9 @@ local function premiumOwned(d: Data, st: PassState): boolean
 end
 
 -- Grants a list of rewards (quietly: the caller commits). Returns their display texts.
-local function grantRewards(player: Player, rewards: { Reward }, label: string): { string }
+-- `paid`: the premium track, bought with Robux, so its Shrine Draws are paid random items
+-- (a policy-restricted player gets ShopService's fixed reward instead).
+local function grantRewards(player: Player, rewards: { Reward }, label: string, paid: boolean): { string }
 	local texts = {}
 	for _, reward in rewards do
 		local amount = reward.amount or 0
@@ -134,7 +137,7 @@ local function grantRewards(player: Player, rewards: { Reward }, label: string):
 		elseif reward.kind == "whetstones" then
 			Economy.grant(player, "Whetstones", amount, label, "Gameplay", true)
 		elseif reward.kind == "draws" then
-			Economy.grant(player, "Draws", amount, label, "Gameplay", true)
+			ShopService.grantDraws(player, amount, label, paid, true)
 		elseif reward.kind == "item" and reward.id then
 			Economy.own(player, reward.id, "pass", true)
 		end
@@ -184,7 +187,7 @@ local function claim(player: Player, d: Data, st: PassState, track: string, tier
 	else
 		st.premium[key] = true
 	end
-	return grantRewards(player, rewards, `Pass {st.season} T{tier} {track}`)
+	return grantRewards(player, rewards, `Pass {st.season} T{tier} {track}`, track ~= "free")
 end
 
 local function claimAll(player: Player, d: Data, st: PassState): { string }
