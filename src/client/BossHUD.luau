@@ -54,6 +54,10 @@ local counting = false
 local bannerToken = 0
 
 local PENDING_TIMEOUT = 5 -- seconds before an unanswered pick says so
+-- The picker's height: the list shows two whole rows of cards above Challenge (and the top of
+-- the third, so it reads as a scroll), never a row cut through its pips.
+local PICKER_H = 600
+local BLURB_TIME = 5 -- seconds the boss's description line stays under its name
 local PICK_REACH = 10 -- studs off the pad edge before the picker closes (server allows 12)
 local THEME = UI.Theme
 local CHROME = (Assets.UI :: any).Chrome or {}
@@ -143,7 +147,7 @@ local function build()
 		sliceScale = 1,
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(660, 520),
+		Size = UDim2.fromOffset(660, PICKER_H),
 		Visible = false,
 	}, screen)
 	-- Small screens (a phone in landscape): shrink to fit, LEAVE always on screen.
@@ -151,7 +155,7 @@ local function build()
 	local camera = workspace.CurrentCamera
 	local function refit()
 		local size = camera.ViewportSize
-		pickerFit.Scale = math.clamp(math.min((size.Y - 24) / 520, (size.X - 32) / 660), 0.5, 1)
+		pickerFit.Scale = math.clamp(math.min((size.Y - 24) / PICKER_H, (size.X - 32) / 660), 0.5, 1)
 	end
 	camera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
 	refit()
@@ -643,6 +647,13 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			kanjiName.Image = jp
 		end
 		subLabel.Text = stars(data.stars or 0) .. (if def and def.blurb then "   ·   " .. def.blurb else "")
+		subLabel.Visible = true
+		local token = fightToken
+		task.delay(BLURB_TIME, function()
+			if fightToken == token then
+				subLabel.Visible = false -- read once; the name and bars are what matter now
+			end
+		end)
 		bar.Visible = true
 		lesson.Visible = false
 		fightAt = data.fightAt or now()
@@ -665,6 +676,8 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	end,
 	End = function(data)
 		lesson.Visible = false
+		banner.Visible = false
+		bannerToken += 1
 		if data.left then
 			clearFight() -- stopped or abandoned: no result to show
 			return
@@ -683,10 +696,11 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		else
 			CombatHUD.splash(Assets.UI.KanjiEnd, `{Bosses.the(data.name or "", true)} stands`, UI.Parchment, 3)
 		end
+		-- The result splash takes the top of the screen: the boss band goes as it comes in.
+		bar.Visible = false
 		local token = fightToken
 		task.delay(4, function()
 			if fightToken == token then
-				bar.Visible = false
 				unwatch()
 			end
 		end)
