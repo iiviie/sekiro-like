@@ -20,6 +20,7 @@ local CombatService = require(script.Parent.CombatService)
 local LobbyService = require(script.Parent.LobbyService)
 local ProgressService = require(script.Parent.ProgressService)
 local StatsService = require(script.Parent.StatsService)
+local Telemetry = require(script.Parent.Telemetry)
 
 type Combatant = CombatService.Combatant
 type Phase = Round.Phase
@@ -49,6 +50,8 @@ local places: { [Player]: number } = {} -- humans' finishing place among every f
 type Fallen = { name: string, player: Player?, skin: string? }
 local fallen: { Fallen } = {} -- every fighter out of the match (bots too), first out first
 local fighterCount = 0
+local matchTier = "Adept" -- the bots' tier this match (for Telemetry)
+local matchStartedAt = 0
 local RETURN_DELAY = 5 -- eliminated players watch for a moment, then return to the lobby
 
 local function now(): number
@@ -198,7 +201,8 @@ end
 local function match()
 	local queued = queuedPlayers()
 	BotService.setRespawn(false)
-	BotService.setTier(BotService.tierFor(queued))
+	matchTier = BotService.tierFor(queued)
+	BotService.setTier(matchTier)
 	BotService.setCount(math.max(0, Config.Round.MinFighters - #queued))
 
 	-- Queued players and the filler bots fight; place them evenly around the courtyard.
@@ -249,6 +253,7 @@ local function match()
 	state:SetAttribute("Omen", omen and omen.id)
 
 	local t = now()
+	matchStartedAt = t
 	local center = Vector3.new(
 		math.random(-zone.CenterJitter, zone.CenterJitter),
 		0,
@@ -364,6 +369,7 @@ local function results(winner: Combatant?)
 		end
 	end
 	ProgressService.matchEnded(places, fighterCount, if winner then winner.player else nil)
+	Telemetry.royaleEnded(places, matchWeapons, matchTier, now() - matchStartedAt)
 	sendPodium(survivors)
 	roundEvent:FireAllClients("Victory", {
 		winner = if winner then winner.model else nil,

@@ -524,7 +524,10 @@ order: naginata (reach), then dual blades; kusarigama last.
 perfect, Mikiri, jumped, dodged, whiffed, deathblow), the move behind each kill and how many attackers each victim had,
 humans and bots separately; only royale fighters count (duels and boss trials that run during a match are left out). After each match the server prints running totals to the output and raises alarms once the
 sample is large enough: perilous above 20% of human attacks, perilous countered under 40% of the time, or one move
-landing over 35% of kills. Tune numbers in `Config` and `Weapons`, then watch the alarms.
+landing over 35% of kills. Moves are keyed by weapon (`Light1@Odachi`). Each royale's end (from RoundService) also
+records the humans who fought: results by bot tier and by weapon (wins, average place) and the average match length
+in the printout, and `MatchPlayed`, `RoyaleResult` (place; tier, weapon, win/loss fields) and `RoyaleSeconds` custom
+analytics events for participants only. Tune numbers in `Config` and `Weapons`, then watch the alarms.
 
 ## Performance
 

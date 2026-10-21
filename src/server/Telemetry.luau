@@ -9,10 +9,15 @@
 --   * perilous above 20% of attack inputs
 --   * perilous countered (deflected, Mikiri'd, jumped, dodged) under 40% of the time
 --   * any one move landing over 35% of the killing blows
--- Bots are counted separately from humans: they play by fixed odds.
+-- Bots are counted separately from humans: they play by fixed odds. Moves are keyed
+-- "kind@weapon" (Light1@Odachi), so each weapon's numbers read on their own.
+--
+-- RoundService reports each royale's end (Telemetry.royaleEnded): every human who fought
+-- gets a MatchPlayed and a RoyaleResult event (value: place; fields: bot tier, weapon, win or
+-- loss) and a RoyaleSeconds event (the match's length), and the printout keeps human results
+-- by bot tier and by weapon, and the average match length. Lobby idlers aren't counted.
 
 local AnalyticsService = game:GetService("AnalyticsService")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Round = require(ReplicatedStorage.Shared.Round)
@@ -32,7 +37,11 @@ local outnumberedDeaths = 0
 local deaths = 0
 local deathblowKills = 0
 local matches = 0
+local matchSeconds = 0
 local lastBlow: { [Combatant]: string } = {}
+type Record = { played: number, wins: number, places: number }
+local byTier: { [string]: Record } = {} -- humans' royale results by the match's bot tier
+local byWeapon: { [string]: Record } = {} -- ...and by the weapon they fought with
 
 -- Only the royale's blows count: duels and boss trials (Bosses' scripted hits, and your
 -- swings against a boss) can run during a match and would skew its balance.
@@ -42,6 +51,10 @@ end
 
 local function bucket(c: Combatant): Tally
 	return if c.player then tallies.human else tallies.bot
+end
+
+local function moveKey(c: Combatant, kind: string): string
+	return `{kind}@{c.weapon}`
 end
 
 local function bump(tally: Tally, kind: string, field: string)
@@ -67,7 +80,7 @@ local function summarize(): { string }
 			end
 			table.sort(parts)
 			table.insert(lines, `  [{side}] {kind}: {table.concat(parts, ", ")}`)
-			if PERILOUS[kind] then
+			if PERILOUS[string.split(kind, "@")[1]] then
 				perilousStarts += row.Started or 0
 				for field, count in row do
 					if field ~= "Started" then
@@ -118,35 +131,88 @@ local function summarize(): { string }
 		lines,
 		`  deaths by deathblow: {deathblowKills}/{deaths}   while outnumbered: {outnumberedDeaths}/{deaths}`
 	)
+	for label, records in { ["by bot tier"] = byTier, ["by weapon"] = byWeapon } do
+		local parts = {}
+		for key, r in records do
+			table.insert(
+				parts,
+				string.format("%s %d/%d won, avg place %.1f", key, r.wins, r.played, r.places / r.played)
+			)
+		end
+		table.sort(parts)
+		table.insert(lines, `  human results {label}: {table.concat(parts, "; ")}`)
+	end
+	if matches > 0 then
+		table.insert(lines, string.format("  average match length: %.0f s", matchSeconds / matches))
+	end
 	for _, alarm in alarms do
 		table.insert(lines, `  ALARM: {alarm}`)
 	end
 	return lines
 end
 
-local function flush()
-	local lines = summarize()
-	matches += 1
-	print(`[Telemetry] totals after {matches} match(es) on this server\n{table.concat(lines, "\n")}`)
-	-- Roblox custom analytics: one event per human per match (the dashboard groups them).
-	for _, player in Players:GetPlayers() do
-		pcall(function()
-			AnalyticsService:LogCustomEvent(player, "MatchPlayed", 1)
-		end)
+local function record(records: { [string]: Record }, key: string, place: number)
+	local r = records[key]
+	if not r then
+		r = { played = 0, wins = 0, places = 0 }
+		records[key] = r
 	end
+	r.played += 1
+	r.places += place
+	if place == 1 then
+		r.wins += 1
+	end
+end
+
+-- A royale has ended: `places` holds each human's finishing place, `weapons` the weapon
+-- every human who fought started it with, `tier` the bots' tier, `seconds` its length.
+function Telemetry.royaleEnded(
+	places: { [Player]: number },
+	weapons: { [Player]: string },
+	tier: string,
+	seconds: number
+)
+	matches += 1
+	matchSeconds += seconds
+	for player, weapon in weapons do
+		local place = places[player]
+		if place then
+			record(byTier, tier, place)
+			record(byWeapon, weapon, place)
+		end
+		-- Roblox custom analytics, for the humans who fought (published games only).
+		if player.Parent then
+			pcall(function()
+				AnalyticsService:LogCustomEvent(player, "MatchPlayed", 1)
+				AnalyticsService:LogCustomEvent(player, "RoyaleResult", place or 0, {
+					[Enum.AnalyticsCustomFieldKeys.CustomField01.Name] = tier,
+					[Enum.AnalyticsCustomFieldKeys.CustomField02.Name] = weapon,
+					[Enum.AnalyticsCustomFieldKeys.CustomField03.Name] = if place == 1 then "win" else "loss",
+				})
+				AnalyticsService:LogCustomEvent(player, "RoyaleSeconds", math.round(seconds))
+			end)
+		end
+	end
+	local lines = summarize()
+	print(
+		`[Telemetry] royale {matches} ended after {math.round(seconds)} s (bots: {tier}); totals on this server\n{table.concat(
+			lines,
+			"\n"
+		)}`
+	)
 end
 
 function Telemetry.start()
 	CombatService.onWindup(function(attacker: Combatant, kind: string)
 		if inRoyale(attacker) then
-			bump(bucket(attacker), kind, "Started")
+			bump(bucket(attacker), moveKey(attacker, kind), "Started")
 		end
 	end)
 	CombatService.onOutcome(function(kind: string, outcome: string, attacker: Combatant, target: Combatant?)
 		if not inRoyale(attacker) or (target and not inRoyale(target)) then
 			return
 		end
-		bump(bucket(attacker), kind, outcome)
+		bump(bucket(attacker), moveKey(attacker, kind), outcome)
 		-- Credit kills to the move that struck, deathblow or not: a deathblow is the
 		-- intended way to win, so it's reported as a share, not alarmed on.
 		if target and (outcome == "Hit" or outcome == "Deathblow") then
@@ -172,11 +238,6 @@ function Telemetry.start()
 		local blow = lastBlow[victim] or "Mist"
 		kills[blow] = (kills[blow] or 0) + 1
 		lastBlow[victim] = nil
-	end)
-	Round.state():GetAttributeChangedSignal("Phase"):Connect(function()
-		if Round.phase() == "Results" then
-			flush()
-		end
 	end)
 end
 
