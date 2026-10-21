@@ -123,7 +123,9 @@ local function applyLayout()
 	local height = viewport.Y / scale -- the HUD's height in scale-1 units
 	if compact then
 		local railTop = 92
-		local visible = math.max(3, math.min(#NAV, math.floor((height - railTop - 12) / (RAIL_ITEM.Y + 4))))
+		-- Four (or as many as fit) visible, the rest scroll: the bottom-left corner stays free
+		-- for the thumbstick.
+		local visible = math.max(3, math.min(4, math.floor((height - railTop - 12) / (RAIL_ITEM.Y + 4))))
 		navLayout.FillDirection = Enum.FillDirection.Vertical
 		navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 		navLayout.VerticalAlignment = Enum.VerticalAlignment.Top
@@ -133,18 +135,20 @@ local function applyLayout()
 		nav.Size = UDim2.fromOffset(RAIL_ITEM.X, visible * (RAIL_ITEM.Y + 4))
 		nav.ScrollingDirection = Enum.ScrollingDirection.Y
 		nav.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		nav.ClipsDescendants = true
+		nav.ScrollBarThickness = 3
 		navPlate.AnchorPoint = Vector2.zero
 		navPlate.Position = UDim2.fromOffset(8, railTop)
 		navPlate.Size = UDim2.fromOffset(RAIL_ITEM.X + 12, visible * (RAIL_ITEM.Y + 4) + 12)
 		playCluster.AnchorPoint = Vector2.new(1, 0.5)
-		playCluster.Position = UDim2.new(1, -20, 0.5, -20)
+		playCluster.Position = UDim2.new(1, -20, 0.5, 0)
 		-- Invite and PvP under PLAY, the leave link under them.
 		inviteButton.AnchorPoint = Vector2.new(1, 0)
-		inviteButton.Position = UDim2.new(0.5, -4, 0, 112)
-		inviteButton.Size = UDim2.fromOffset(138, 56)
+		inviteButton.Position = UDim2.new(0.5, -4, 0, 108)
+		inviteButton.Size = UDim2.fromOffset(142, 60)
 		pvpButton.AnchorPoint = Vector2.new(0, 0)
-		pvpButton.Position = UDim2.new(0.5, 4, 0, 112)
-		pvpButton.Size = UDim2.fromOffset(138, 56)
+		pvpButton.Position = UDim2.new(0.5, 4, 0, 108)
+		pvpButton.Size = UDim2.fromOffset(142, 60)
 		leaveButton.Position = UDim2.new(0.5, 0, 0, 170)
 	else
 		navLayout.FillDirection = Enum.FillDirection.Horizontal
@@ -157,6 +161,8 @@ local function applyLayout()
 		nav.Size = UDim2.fromOffset(width, BAR_ITEM.Y + 24)
 		nav.ScrollingDirection = Enum.ScrollingDirection.X
 		nav.AutomaticCanvasSize = Enum.AutomaticSize.None
+		nav.ClipsDescendants = false
+		nav.ScrollBarThickness = 0
 		navPlate.AnchorPoint = Vector2.new(0.5, 1)
 		navPlate.Position = UDim2.new(0.5, 0, 1, -8)
 		navPlate.Size = UDim2.fromOffset(width + 28, 70)
@@ -164,11 +170,11 @@ local function applyLayout()
 		playCluster.Position = UDim2.new(0.5, 0, 1, -BAR_ITEM.Y + 34)
 		inviteButton.AnchorPoint = Vector2.new(1, 0)
 		inviteButton.Position = UDim2.new(0.5, -152, 0, 10)
-		inviteButton.Size = UDim2.fromOffset(150, 56)
+		inviteButton.Size = UDim2.fromOffset(150, 60)
 		pvpButton.AnchorPoint = Vector2.new(0, 0)
 		pvpButton.Position = UDim2.new(0.5, 152, 0, 10)
-		pvpButton.Size = UDim2.fromOffset(150, 56)
-		leaveButton.Position = UDim2.new(0.5, 0, 0, 104)
+		pvpButton.Size = UDim2.fromOffset(150, 60)
+		leaveButton.Position = UDim2.new(0.5, 0, 0, 98)
 	end
 	for _, item in NAV do
 		local button = navItems[item.id]
@@ -376,7 +382,7 @@ local function build()
 	}, screen)
 	playCluster = UI.new("Frame", {
 		Name = "PlayCluster",
-		Size = UDim2.fromOffset(300, 214),
+		Size = UDim2.fromOffset(300, 232),
 		BackgroundTransparency = 1,
 	}, bottom)
 	playSwipe = UI.brush(playCluster, "swipe", {
@@ -425,7 +431,7 @@ local function build()
 		Name = "LeaveQueue",
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 104),
-		Size = UDim2.fromOffset(160, 44),
+		Size = UDim2.fromOffset(170, 60),
 		Text = "Leave queue",
 		TextSize = 16,
 		Visible = false,
@@ -604,7 +610,9 @@ function refresh()
 	stonesPill.frame.Visible = stones > 0
 	lastCoins, lastGems, lastStones = coins, gems, stones
 	local offerOpen = StoreUI.initiateOpen()
-	offerChip.Visible = offerOpen
+	-- On a phone the chip would crowd PLAY; the Store's Offers tab and the one-time card
+	-- still show the bundle.
+	offerChip.Visible = offerOpen and not compact
 	if offerOpen then
 		local left = StoreUI.duration(StoreUI.attr("InitiateEndsAt", 0) - StoreUI.now())
 		offerText.Text = `{left} left  ·  take a look`
@@ -654,10 +662,11 @@ function refresh()
 	inviteButton.TextColor3 = if alone then UI.Theme.GoldHi else UI.Theme.Bone
 
 	local pvp = player:GetAttribute("LobbyPvP")
+	local pvpWord = if compact then "PvP" else "Lobby PvP"
 	pvpButton.Text = if pvp == true
-		then "Lobby PvP: On"
-		elseif pvp == "Pending" then "Lobby PvP: ..."
-		else "Lobby PvP: Off"
+		then `{pvpWord}: On`
+		elseif pvp == "Pending" then `{pvpWord}: ...`
+		else `{pvpWord}: Off`
 	pvpPip.BackgroundColor3 = if pvp == true then UI.Theme.JadeText else UI.Theme.Ash
 
 	rewardsBadge.Visible = player:GetAttribute("DataLoaded") == true and player:GetAttribute("DailyClaimed") == false
@@ -933,6 +942,7 @@ function LobbyHUD.start()
 		local fitScale = screen:FindFirstChild("Fit") :: UIScale
 		fitScale.Scale = UI.lobbyScale(camera.ViewportSize)
 		applyLayout()
+		refresh()
 	end
 	camera:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
 	player:GetAttributeChangedSignal("UIViewport"):Connect(fit)
