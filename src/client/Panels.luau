@@ -7,6 +7,7 @@
 -- owns, what's unlocked and what day it is come from the server (attributes), never from
 -- client-side rules or clocks.
 
+local GuiService = game:GetService("GuiService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -33,6 +34,8 @@ local titleLabel: TextLabel
 local body: Frame
 local current: string? = nil
 local lobbyAction: RemoteEvent
+local gamepad: () -> boolean
+local selectIn: (previous: { name: string, parent: string }?) -> ()
 
 local function attr(name: string, default: any): any
 	local value = player:GetAttribute(name)
@@ -766,7 +769,17 @@ function Panels.redraw()
 	end
 	drawn = current
 	titleLabel.Text = def.title
+	-- A gamepad selection inside the window survives the redraw (the same button, rebuilt).
+	local selected = GuiService.SelectedObject
+	local keep = if selected
+			and selected:IsDescendantOf(window)
+			and selected.Parent
+		then { name = selected.Name, parent = selected.Parent.Name }
+		else nil
 	local ok, err = pcall(def.build, body)
+	if keep then
+		task.defer(selectIn, keep)
+	end
 	if not ok then
 		warn(`[Panels] {current} failed to draw: {err}`)
 	end
@@ -781,6 +794,37 @@ function Panels.redraw()
 end
 
 local openedCallbacks: { () -> () } = {}
+
+-- Gamepad menus (Roblox's selection): which input the player is using, and picking a
+-- button in the window.
+function gamepad(): boolean
+	return InputNames.scheme() == "Gamepad"
+end
+
+-- Selects `name` under a parent called `parentName` in the window if it's still there (a
+-- redraw rebuilt it), else the first tab, else the first button in the body, else the close.
+function selectIn(previous: { name: string, parent: string }?)
+	local pick: GuiObject? = nil
+	local tabs: GuiObject? = nil
+	local first: GuiObject? = nil
+	for _, d in window:GetDescendants() do
+		if d:IsA("GuiButton") and d.Selectable and d.Visible then
+			local parent = d.Parent
+			if previous and d.Name == previous.name and parent and parent.Name == previous.parent then
+				pick = d
+				break
+			end
+			if not tabs and parent and parent.Name == "Tabs" then
+				tabs = d
+			end
+			if not first and d:IsDescendantOf(body) then
+				first = d
+			end
+		end
+	end
+	local close = window:FindFirstChild("Close", true)
+	GuiService.SelectedObject = pick or tabs or first or (if close and close:IsA("GuiObject") then close else nil)
+end
 local changeCallbacks: { (string?) -> () } = {}
 
 -- Runs `callback` whenever a panel opens (the boss picker closes itself so the two never
@@ -854,6 +898,14 @@ function Panels.open(id: string)
 	window.Visible = true
 	refit()
 	Panels.redraw()
+	-- A gamepad gets something selected straight away: the first tab, else the first button.
+	if gamepad() then
+		task.defer(function()
+			if current == id then
+				selectIn(nil)
+			end
+		end)
+	end
 	for _, callback in openedCallbacks do
 		task.spawn(callback)
 	end
@@ -866,6 +918,10 @@ function Panels.closeAll()
 	if window then
 		if window.Visible then
 			UI.sound("Cancel")
+		end
+		local selected = GuiService.SelectedObject
+		if selected and selected:IsDescendantOf(window) then
+			GuiService.SelectedObject = nil
 		end
 		window.Visible = false
 		local sheet = window:FindFirstChild("Sheet")
@@ -914,6 +970,18 @@ function Panels.start(remote: RemoteEvent)
 	refit = function()
 		local large = Panels.isLarge()
 		local dims = if large then LARGE else NORMAL
+		-- Desktop and tablet (the large window fits at scale 1): taller, up to 600, so the
+		-- Store's packs, the Locker's rows and the Pass's bounties aren't cut in half. A phone
+		-- keeps 420 (its scale stays >= 0.8).
+		if large then
+			local area = screen.AbsoluteSize
+			if area.X < 1 then
+				area = camera.ViewportSize
+			end
+			if math.min((area.X - 16) / LARGE.X, (area.Y - 12) / LARGE.Y) >= 1 then
+				dims = Vector2.new(LARGE.X, math.clamp(area.Y - 80, LARGE.Y, 600))
+			end
+		end
 		window.Size = UDim2.fromOffset(dims.X, dims.Y)
 		-- On a phone the lobby nav is a rail on the left, so normal panels centre too, clear
 		-- of the rail.
@@ -942,6 +1010,14 @@ function Panels.start(remote: RemoteEvent)
 	local chrome = UI.windowChrome(window)
 	titleLabel = chrome.title
 	chrome.close.Activated:Connect(Panels.closeAll)
+	-- B on a gamepad closes the window (a sheet over it closes first: UI).
+	UI.onBack(function(): boolean
+		if current then
+			Panels.closeAll()
+			return true
+		end
+		return false
+	end)
 	body = UI.new("Frame", {
 		Name = "Body",
 		Position = UDim2.fromOffset(24, 76),

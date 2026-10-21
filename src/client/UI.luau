@@ -1425,12 +1425,16 @@ local lastTab: { [string]: { x: number, w: number } } = {}
 
 function UI.tabs(
 	parent: Instance,
-	tabs: { { id: string, label: string, dot: boolean?, icon: string? } },
+	tabs: { { id: string, label: string, dot: boolean?, icon: string?, caption: string? } },
 	selected: string,
 	onPick: (string) -> (),
 	height: number?
 ): Frame
-	local h = math.max(height or 48, 48)
+	-- Touch: at least a full touch target tall (60 at scale 1, ~46 pt on a phone).
+	local h = math.max(height or 48, if UI.touchSized() then UI.Touch else 48)
+	-- Icon tabs on a wide screen stack a small caption (`caption`, else `label`) under every
+	-- icon, so each tab says what it is; a phone keeps icon + the open tab's name in a row.
+	local stacked = not UI.compact(UI.viewport())
 	local key = ""
 	for _, tab in tabs do
 		key ..= tab.id .. "|"
@@ -1480,46 +1484,59 @@ function UI.tabs(
 			AutoButtonColor = false,
 			Text = "",
 		}, row)
-		UI.new("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, button)
-		UI.new("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			Padding = UDim.new(0, 6),
-			SortOrder = Enum.SortOrder.LayoutOrder,
+		-- The content row sits in its own frame, so the 新 seal (a direct child of the button)
+		-- isn't laid out after the label but pinned inside the tab's top-right corner.
+		local content = UI.new("Frame", {
+			Name = "Content",
+			Size = UDim2.fromScale(0, 1),
+			AutomaticSize = Enum.AutomaticSize.X,
+			BackgroundTransparency = 1,
 		}, button)
+		UI.new("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, content)
+		local caption = tab.caption or tab.label
+		local column = tab.icon ~= nil and stacked and caption ~= ""
+		UI.new("UIListLayout", {
+			FillDirection = if column then Enum.FillDirection.Vertical else Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			Padding = UDim.new(0, if column then 0 else 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}, content)
 		if tab.icon then
+			local size = if column then math.min(30, h - 22) else 34
 			UI.new("ImageLabel", {
 				Name = "Icon",
 				LayoutOrder = 1,
-				Size = UDim2.fromOffset(34, 34),
+				Size = UDim2.fromOffset(size, size),
 				BackgroundTransparency = 1,
 				Image = tab.icon,
 				ImageTransparency = if on then 0 else 0.25,
-			}, button)
+			}, content)
 		end
 		UI.text({
 			Name = "Label",
 			LayoutOrder = 2,
-			Size = UDim2.new(0, 0, 1, -8),
+			Size = if column then UDim2.fromOffset(0, 16) else UDim2.new(0, 0, 1, -8),
 			AutomaticSize = Enum.AutomaticSize.X,
 			FontFace = if on then UI.Fonts.Number else UI.Fonts.Label,
-			TextSize = 17,
+			TextSize = if column then 14 else 17,
 			TextColor3 = if on then T.Bone else T.Dim,
-			Text = string.upper(tab.label),
-		}, button)
+			Text = string.upper(if column then caption else tab.label),
+		}, content)
 		if tab.dot then
 			local seal = UI.badge(button, "new", 22)
-			seal.Position = UDim2.new(1, 8, 0, 12)
+			seal.AnchorPoint = Vector2.new(1, 0)
+			seal.Position = UDim2.new(1, -2, 0, 2)
 		end
 		button.MouseEnter:Connect(function()
 			if not on then
-				local l = button:FindFirstChild("Label") :: TextLabel
+				local l = content:FindFirstChild("Label") :: TextLabel
 				l.TextColor3 = T.Bone
 			end
 		end)
 		button.MouseLeave:Connect(function()
 			if not on then
-				local l = button:FindFirstChild("Label") :: TextLabel
+				local l = content:FindFirstChild("Label") :: TextLabel
 				l.TextColor3 = T.Dim
 			end
 		end)
@@ -1992,11 +2009,14 @@ function UI.card(props: CardProps, parent: Instance?): TextButton
 	}, card)
 	UI.rarityGlow(base, props.rarity, 1)
 	local bottomH = if props.price or props.robux or props.status then 30 else 0
+	-- The name gets two lines (40 px), the rarity caption 18 under it.
+	local NAME_H = 40
+	local labelsH = NAME_H + 1 + 18 + 7
 	local artArea = UI.new("Frame", {
 		Name = "Art",
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 10),
-		Size = UDim2.new(0.74, 0, 1, -(bottomH + 54 + 12)),
+		Size = UDim2.new(0.74, 0, 1, -(bottomH + labelsH + 12)),
 		BackgroundTransparency = 1,
 		ZIndex = 2,
 	}, card)
@@ -2034,12 +2054,13 @@ function UI.card(props: CardProps, parent: Instance?): TextButton
 			ZIndex = 5,
 		}, card)
 	end
-	-- Name band and rarity caption.
-	local bandY = -(bottomH + 54 + (if bottomH > 0 then 4 else 0))
+	-- Name band and rarity caption. A long name wraps onto a second line instead of running
+	-- off both edges of the card ("rozakura Finale").
+	local bandY = -(bottomH + labelsH + (if bottomH > 0 then 4 else 0))
 	local band = UI.new("Frame", {
 		Name = "Band",
 		Position = UDim2.new(0, 6, 1, bandY),
-		Size = UDim2.new(1, -12, 0, 26),
+		Size = UDim2.new(1, -12, 0, NAME_H),
 		BackgroundColor3 = T.Ink,
 		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
@@ -2056,16 +2077,17 @@ function UI.card(props: CardProps, parent: Instance?): TextButton
 	UI.text({
 		Name = "ItemName",
 		Position = UDim2.new(0, 8, 1, bandY),
-		Size = UDim2.new(1, -16, 0, 26),
+		Size = UDim2.new(1, -16, 0, NAME_H),
 		FontFace = UI.Fonts.Label,
 		TextSize = 16,
-		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextWrapped = true,
+		LineHeight = 0.95,
 		Text = props.name,
 		ZIndex = 4,
 	}, card)
 	UI.text({
 		Name = "Rarity",
-		Position = UDim2.new(0, 8, 1, bandY + 27),
+		Position = UDim2.new(0, 8, 1, bandY + NAME_H + 1),
 		Size = UDim2.new(1, -16, 0, 18),
 		FontFace = UI.Fonts.Number,
 		TextSize = 14,
@@ -2171,11 +2193,20 @@ function UI.sheetOpen(): boolean
 	return openSheet ~= nil and (openSheet :: GuiObject).Parent ~= nil
 end
 
+-- What B does on a gamepad when no sheet is open (client/Panels closes its window).
+local backHandler: (() -> boolean)? = nil
+
+function UI.onBack(handler: () -> boolean)
+	backHandler = handler
+end
+
 UserInputService.InputBegan:Connect(function(input, processed)
 	if openSheet and (input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.ButtonB) then
 		if not processed or input.KeyCode == Enum.KeyCode.ButtonB then
 			UI.closeSheet()
 		end
+	elseif input.KeyCode == Enum.KeyCode.ButtonB and backHandler then
+		backHandler()
 	end
 end)
 
@@ -2194,6 +2225,9 @@ function UI.sheet(
 	local dims = size or Vector2.new(560, 320)
 	local shade = UI.scrim(window, 0.45, 20)
 	shade.Name = "Sheet"
+	-- Inside the window's frame art (its deckled, chamfered edge), not a hard rectangle over it.
+	shade.Position = UDim2.fromOffset(10, 10)
+	shade.Size = UDim2.new(1, -20, 1, -20)
 	local card = UI.panel({
 		Name = "Card",
 		material = material,

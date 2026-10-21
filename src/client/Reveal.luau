@@ -89,6 +89,26 @@ local function stinger(rank: number)
 end
 
 local current: ScreenGui? = nil
+-- The lobby window behind a reveal steps out of the way while it plays (guide 11.1, "Panels
+-- fade back"), so its rows and buttons don't read through the result; Done brings it back.
+local hiddenPanels: ScreenGui? = nil
+
+local function hidePanels()
+	local gui = player:FindFirstChild("PlayerGui")
+	local panels = gui and gui:FindFirstChild("LobbyPanels")
+	if panels and panels:IsA("ScreenGui") and panels.Enabled then
+		panels.Enabled = false
+		hiddenPanels = panels
+	end
+end
+
+local function restorePanels()
+	local panels = hiddenPanels
+	hiddenPanels = nil
+	if panels then
+		panels.Enabled = true
+	end
+end
 
 -- Whether a reveal is on screen (the Store holds its balance pills until it closes, so the
 -- coin count doesn't spoil the slip).
@@ -101,6 +121,7 @@ function Reveal.close()
 		current:Destroy()
 		current = nil
 	end
+	restorePanels()
 end
 
 function Reveal.play(results: { Outcome }, opts: Options?)
@@ -132,6 +153,7 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	})
 	current = screen
+	hidePanels()
 	local scrim = UI.scrim(screen, 0.25, 1)
 	scrim.Name = "Backdrop"
 	local stage = UI.new("Frame", {
