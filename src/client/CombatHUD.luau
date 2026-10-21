@@ -43,8 +43,14 @@ local FRAME_INSET = 10 -- transparent shadow margin baked into the frame art
 local ENEMY_BAR_LINGER = 4
 local CONTROLS_HINT_TIME = 14
 local CONTROLS_HINT_FIGHTS = 3 -- the keycap reminder shows for your first few fights only
+-- The posture group's bottom edge above the screen's: its bar sits in the bottom ~15%, under
+-- the fighters' feet. Coach prompts and the trainer readout sit just above it.
+local POSTURE_BOTTOM = 70
 
 local CombatHUD = {}
+
+-- How far above the screen's bottom edge the posture group's top sits (scale 1).
+CombatHUD.PostureTop = POSTURE_BOTTOM + 72
 
 type Bar = { root: ImageLabel, fill: ImageLabel, trail: ImageLabel? }
 type EnemyEntry = {
@@ -75,6 +81,33 @@ local function tween(instance: Instance, time: number, goal: { [string]: any }, 
 	local t = TweenService:Create(instance, info, goal)
 	t:Play()
 	return t
+end
+
+-- CanvasGroups that ran out of texture budget fall back to plain drawing and ignore
+-- GroupTransparency, so a faded-out group is also hidden (never rely on the fade alone).
+-- `lobbyHidden` groups stay hidden whatever their fade says.
+local lobbyHidden: { [CanvasGroup]: boolean } = {}
+local function fadeGroup(group: CanvasGroup, time: number, target: number)
+	local token = (group:GetAttribute("FadeToken") or 0) + 1
+	group:SetAttribute("FadeToken", token)
+	if target < 1 then
+		group.Visible = not lobbyHidden[group]
+	end
+	if time <= 0 then
+		group.GroupTransparency = target
+		if target >= 1 then
+			group.Visible = false
+		end
+		return
+	end
+	local t = tween(group, time, { GroupTransparency = target })
+	if target >= 1 then
+		t.Completed:Once(function(state)
+			if state == Enum.PlaybackState.Completed and group:GetAttribute("FadeToken") == token then
+				group.Visible = false
+			end
+		end)
+	end
 end
 
 local function image(parent: Instance, id: string, props: { [string]: any }?): ImageLabel
@@ -191,7 +224,9 @@ local function refreshPosture(model: Model)
 	local bloom = if broken then 0.1 else 1 - math.clamp((ratio - 0.4) * 1.4, 0, 0.75)
 	tween(postureGlow, 0.2, { ImageTransparency = bloom })
 	local visible = ratio > 0.01 or broken
-	tween(postureGroup, 0.3, { GroupTransparency = if visible then 0 else 1 })
+	if visible or postureGroup.Visible then
+		fadeGroup(postureGroup, 0.3, if visible then 0 else 1)
+	end
 end
 
 local function refreshStamina(model: Model)
@@ -202,7 +237,10 @@ local function refreshStamina(model: Model)
 	setBar(stamina, ratio)
 	stamina.fill.ImageColor3 = if ratio < 0.2 then STAMINA_LOW else STAMINA
 	-- Only dodges spend stamina now: hidden while full, shown while spent and recovering.
-	tween(staminaGroup, 0.3, { GroupTransparency = if ratio >= 0.999 then 1 else 0 })
+	local full = ratio >= 0.999
+	if not full or staminaGroup.Visible then
+		fadeGroup(staminaGroup, 0.3, if full then 1 else 0)
+	end
 end
 
 local function trackCharacter(character: Model)
@@ -221,17 +259,17 @@ local function trackCharacter(character: Model)
 	setBar(vitality, 1, true)
 	setBar(stamina, 1, true)
 	setBar(posture, 0, true)
-	postureGroup.GroupTransparency = 1
-	ownGroup.GroupTransparency = 0
-	staminaGroup.GroupTransparency = 1
+	fadeGroup(postureGroup, 0, 1)
+	fadeGroup(ownGroup, 0, 0)
+	fadeGroup(staminaGroup, 0, 1)
 	onHealth()
 	table.insert(characterConnections, humanoid.HealthChanged:Connect(onHealth))
 	table.insert(
 		characterConnections,
 		humanoid.Died:Connect(function()
-			tween(ownGroup, 0.6, { GroupTransparency = 1 })
-			tween(staminaGroup, 0.6, { GroupTransparency = 1 })
-			tween(postureGroup, 0.6, { GroupTransparency = 1 })
+			fadeGroup(ownGroup, 0.6, 1)
+			fadeGroup(staminaGroup, 0.6, 1)
+			fadeGroup(postureGroup, 0.6, 1)
 		end)
 	)
 
@@ -261,48 +299,67 @@ end
 ---------------------------------------------------------------------------------------
 -- Splashes and screen effects
 
--- A brush-kanji banner on an ink band, with a small spaced-caps subtitle.
+-- A brush-kanji banner on an ink band, with a small spaced-caps subtitle: top-centre, under
+-- the round banner and over the fighters' heads, never across them. One at a time: a new
+-- splash replaces the one showing.
+local SPLASH = Vector2.new(520, 150)
+local SPLASH_TOP = Kit.Hud.StageTop
+local currentSplash: CanvasGroup? = nil
 function CombatHUD.splash(kanjiImage: string, subtitle: string, color: Color3, hold: number)
+	if currentSplash then
+		currentSplash:Destroy()
+	end
 	local group = Instance.new("CanvasGroup")
-	group.AnchorPoint = Vector2.new(0.5, 0.5)
-	group.Position = UDim2.fromScale(0.5, 0.46)
-	group.Size = UDim2.fromOffset(1000, 380)
+	group.Name = "Splash"
+	group.AnchorPoint = Vector2.new(0.5, 0)
+	group.Position = UDim2.new(0.5, 0, 0, SPLASH_TOP)
+	group.Size = UDim2.fromOffset(SPLASH.X, SPLASH.Y)
 	group.BackgroundTransparency = 1
 	group.GroupTransparency = 1
 	group.ZIndex = 50
 	group.Parent = screen
+	currentSplash = group
 
 	image(group, UI.InkBand, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(980, 250),
-		ImageTransparency = 0.12,
+		Position = UDim2.fromScale(0.5, 0.48),
+		Size = UDim2.fromOffset(SPLASH.X, 112),
+		ImageTransparency = 0.18,
 	})
 	local glyph = image(group, kanjiImage, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.45),
-		Size = UDim2.fromScale(1.02, 0.7),
+		Position = UDim2.fromScale(0.5, 0.4),
+		Size = UDim2.fromScale(1, 0.62),
 		ScaleType = Enum.ScaleType.Fit,
 		ImageColor3 = color,
 	})
 	local caption = Instance.new("TextLabel")
 	caption.AnchorPoint = Vector2.new(0.5, 0)
-	caption.Position = UDim2.fromScale(0.5, 0.76)
-	caption.Size = UDim2.fromOffset(700, 26)
+	caption.Position = UDim2.fromScale(0.5, 0.72)
+	caption.Size = UDim2.new(1, 0, 0, 22)
 	caption.BackgroundTransparency = 1
 	caption.Font = FONT
 	-- Letter-spaced, one UTF-8 character at a time (a byte-wise pattern splits "·").
 	caption.Text = (string.upper(subtitle):gsub(utf8.charpattern, "%0 ")):sub(1, -2)
-	caption.TextSize = 20
+	caption.TextSize = 18
 	caption.TextColor3 = PARCHMENT
 	caption.TextTransparency = 0.1
+	caption.TextStrokeColor3 = Kit.Theme.Ink
+	caption.TextStrokeTransparency = 0.5
 	caption.Parent = group
 
-	tween(group, 0.4, { GroupTransparency = 0 })
-	tween(glyph, 1.4, { Size = UDim2.fromScale(0.9, 0.62) }, Enum.EasingStyle.Sine)
-	task.delay(hold, function()
-		tween(group, 0.9, { GroupTransparency = 1 })
-		task.wait(0.95)
+	tween(group, 0.3, { GroupTransparency = 0 })
+	tween(glyph, 1.2, { Size = UDim2.fromScale(0.9, 0.56) }, Enum.EasingStyle.Sine)
+	-- Brief: at most 2.4 s on screen before it fades.
+	task.delay(math.min(hold, 2.4), function()
+		if not group.Parent then
+			return
+		end
+		tween(group, 0.6, { GroupTransparency = 1 })
+		task.wait(0.65)
+		if currentSplash == group then
+			currentSplash = nil
+		end
 		group:Destroy()
 	end)
 end
@@ -322,9 +379,9 @@ local function keyboardPlayer(): boolean
 	return not (last.Name:find("Gamepad") ~= nil)
 end
 
--- In the lobby the bottom of the screen belongs to PLAY and the nav bar: hide your own
--- vitality and stamina (nothing there can hurt you unless you opt into sparring) and lift
--- the posture bar above PLAY, where it still teaches the trainer's rhythm.
+-- In the lobby: hide your own vitality and stamina (nothing there can hurt you unless you
+-- opt into sparring); the posture bar stays where it is in a fight (bottom-centre, clear of
+-- PLAY in the corner), where it still teaches the trainer's rhythm.
 local lobbyMode: boolean? = nil
 function CombatHUD.setLobbyMode(on: boolean)
 	if not ownGroup then
@@ -332,12 +389,13 @@ function CombatHUD.setLobbyMode(on: boolean)
 	end
 	local entering = lobbyMode == true and not on -- lobby -> a fight (royale, duel or boss)
 	lobbyMode = on
-	ownGroup.Visible = not on
-	staminaGroup.Visible = not on
-	-- The lobby's nav bar owns the bottom of the screen; the keyboard reminder is for fights,
-	-- and a phone has no keyboard.
-	controlsHint.Visible = not on and keyboardPlayer()
-	postureGroup.Position = if on then UDim2.new(0.5, 0, 1, -260) else UDim2.new(0.5, 0, 1, -100)
+	lobbyHidden[ownGroup] = on
+	lobbyHidden[staminaGroup] = on
+	-- The keyboard reminder is for fights, and a phone has no keyboard.
+	lobbyHidden[controlsHint] = on or not keyboardPlayer()
+	ownGroup.Visible = not on and ownGroup.GroupTransparency < 0.99
+	staminaGroup.Visible = not on and staminaGroup.GroupTransparency < 0.99
+	controlsHint.Visible = not lobbyHidden[controlsHint] and controlsHint.GroupTransparency < 0.99
 	if entering then
 		CombatHUD.showControls()
 	end
@@ -367,10 +425,10 @@ function CombatHUD.showControls()
 	hintFights += 1
 	hintToken += 1
 	local mine = hintToken
-	controlsHint.GroupTransparency = 0.1
+	fadeGroup(controlsHint, 0, 0.1)
 	task.delay(CONTROLS_HINT_TIME, function()
 		if hintToken == mine then
-			tween(controlsHint, 2, { GroupTransparency = 1 })
+			fadeGroup(controlsHint, 2, 1)
 		end
 	end)
 end
@@ -517,6 +575,16 @@ local function buildScreen()
 	screen.ResetOnSpawn = false
 	screen.IgnoreGuiInset = true
 	screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	-- Phones get the HUD at their own scale (UI.hudScale); full-screen pieces still fill.
+	local fit = Instance.new("UIScale")
+	fit.Name = "Fit"
+	fit.Parent = screen
+	local function refit()
+		fit.Scale = Kit.hudScale()
+	end
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	player:GetAttributeChangedSignal("UIViewport"):Connect(refit)
+	refit()
 
 	-- A light cinematic vignette over the whole frame, and a red one for perilous flashes.
 	image(screen, UI.Vignette, { Size = UDim2.fromScale(1, 1), ImageTransparency = 0.45, ZIndex = 0 })
@@ -538,8 +606,8 @@ local function buildScreen()
 	ownGroup = Instance.new("CanvasGroup")
 	ownGroup.BackgroundTransparency = 1
 	ownGroup.AnchorPoint = Vector2.new(0, 1)
-	ownGroup.Position = UDim2.new(0, 36, 1, -60)
-	ownGroup.Size = UDim2.fromOffset(470, 52)
+	ownGroup.Position = UDim2.new(0, 28, 1, -44)
+	ownGroup.Size = UDim2.fromOffset(390, 52)
 	ownGroup.Parent = screen
 
 	gourdIcon = image(ownGroup, UI.Gourd, {
@@ -562,35 +630,37 @@ local function buildScreen()
 	}, gourdIcon)
 
 	vitality =
-		makeBar(ownGroup, Vector2.new(380, 8), UDim2.new(0, 48, 0.5, 0), Vector2.new(0, 0.5), false, true, CRIMSON)
+		makeBar(ownGroup, Vector2.new(320, 8), UDim2.new(0, 48, 0.5, 0), Vector2.new(0, 0.5), false, true, CRIMSON)
 
 	staminaGroup = Instance.new("CanvasGroup")
 	staminaGroup.BackgroundTransparency = 1
 	staminaGroup.AnchorPoint = Vector2.new(0, 1)
-	staminaGroup.Position = UDim2.new(0, 84, 1, -42)
-	staminaGroup.Size = UDim2.fromOffset(330, 26)
+	staminaGroup.Position = UDim2.new(0, 76, 1, -26)
+	staminaGroup.Size = UDim2.fromOffset(290, 26)
 	staminaGroup.GroupTransparency = 1
+	staminaGroup.Visible = false
 	staminaGroup.Parent = screen
 	stamina =
-		makeBar(staminaGroup, Vector2.new(300, 4), UDim2.fromScale(0, 0.5), Vector2.new(0, 0.5), false, false, STAMINA)
+		makeBar(staminaGroup, Vector2.new(260, 4), UDim2.fromScale(0, 0.5), Vector2.new(0, 0.5), false, false, STAMINA)
 
 	-- Posture, bottom-centre: bloom, framed bar, and the ornament over its middle.
 	postureGroup = Instance.new("CanvasGroup")
 	postureGroup.BackgroundTransparency = 1
 	postureGroup.AnchorPoint = Vector2.new(0.5, 1)
-	postureGroup.Position = UDim2.new(0.5, 0, 1, -100)
-	postureGroup.Size = UDim2.fromOffset(560, 80)
+	postureGroup.Position = UDim2.new(0.5, 0, 1, -POSTURE_BOTTOM)
+	postureGroup.Size = UDim2.fromOffset(520, 72)
 	postureGroup.GroupTransparency = 1
+	postureGroup.Visible = false
 	postureGroup.Parent = screen
 	postureGlow = image(postureGroup, UI.BarGlow, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(560, 80),
+		Size = UDim2.fromOffset(520, 72),
 		ImageTransparency = 1,
 	})
 	posture = makeBar(
 		postureGroup,
-		Vector2.new(440, 8),
+		Vector2.new(400, 8),
 		UDim2.fromScale(0.5, 0.5),
 		Vector2.new(0.5, 0.5),
 		true,
@@ -600,7 +670,7 @@ local function buildScreen()
 	image(postureGroup, UI.PostureOrnament, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(140, 42),
+		Size = UDim2.fromOffset(124, 38),
 		ZIndex = 3,
 	})
 
@@ -608,10 +678,11 @@ local function buildScreen()
 	controlsHint = Instance.new("CanvasGroup")
 	controlsHint.Name = "ControlsHint"
 	controlsHint.AnchorPoint = Vector2.new(1, 1)
-	controlsHint.Position = UDim2.new(1, -24, 1, -24)
+	controlsHint.Position = UDim2.new(1, -20, 1, -20)
 	controlsHint.Size = UDim2.fromOffset(420, 4 * 32)
 	controlsHint.BackgroundTransparency = 1
 	controlsHint.GroupTransparency = 1
+	controlsHint.Visible = false
 	controlsHint.Parent = screen
 	Kit.new("UIListLayout", {
 		Padding = UDim.new(0, 6),
@@ -698,7 +769,7 @@ function CombatHUD.start()
 	player:GetAttributeChangedSignal("SettingControlsHint"):Connect(function()
 		if player:GetAttribute("SettingControlsHint") == false then
 			hintToken += 1
-			controlsHint.GroupTransparency = 1
+			fadeGroup(controlsHint, 0, 1)
 		end
 	end)
 
