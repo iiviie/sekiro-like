@@ -9,6 +9,7 @@ local Players = game:GetService("Players")
 local SocialService = game:GetService("SocialService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local BossHUD = require(script.Parent.BossHUD)
 local CombatHUD = require(script.Parent.CombatHUD)
 local Panels = require(script.Parent.Panels)
 local Toasts = require(script.Parent.Toasts)
@@ -388,6 +389,10 @@ end
 function LobbyHUD.start()
 	build()
 	Panels.start(lobbyAction)
+	-- The boss picker is a modal window: PLAY and the nav bar step aside under it.
+	BossHUD.onPicker(function(open: boolean)
+		bottom.Visible = not open
+	end)
 
 	player.AttributeChanged:Connect(refresh)
 	Round.state().AttributeChanged:Connect(refresh)

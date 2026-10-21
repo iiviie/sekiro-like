@@ -17,12 +17,18 @@
 -- hit rule. Boss model attributes: Boss (id), BossLives, BossPhase.
 --
 -- Remote (ReplicatedStorage.Remotes.Boss):
---   server -> client: "Pick" { bosses = { { id, name, nameJP, stars, cleared, blurb } } }
+--   server -> client: "Pick" { bosses = { { id, name, nameJP, stars, cleared, blurb } },
+--                              busy = { player, boss }?, line = position? }
 --                     "Start" { boss, name, nameJP, stars, model, fightAt, lives }
 --                     "Phase" { phase, lives, stage?, lesson? }
 --                     "End" { won, boss, name, time, firstClear }
---                     "Busy" {}
---   client -> server: "Choose" bossId | "Close"
+--                     "Notice" { text, kind, line? }   kind: "Refused" | "Line" | "Turn" | "Failed"
+--                              (every Choose gets a Start or a Notice; a "Line" notice carries
+--                              your place in line, none when you're out of it)
+--   client -> server: "Choose" bossId | "Cancel" (leave the line)
+--
+-- One arena, one fight at a time: choosing while it's taken puts you in line, and your
+-- trial starts by itself when the fight before yours ends (wherever you are in the lobby).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -52,6 +58,7 @@ export type Fight = {
 	fightAt: number,
 	lives: number, -- deathblows landed on the boss
 	down: boolean, -- the player is cut down (will rise)
+	placed: boolean, -- the player was moved to the arena (gets a fresh body afterwards)
 	result: string?, -- "Won" | "Lost" | "Left"
 	tally: { [string]: number }, -- outcomes of blows involving the boss (tests)
 }
@@ -59,6 +66,10 @@ export type Fight = {
 local RULES = Config.Bosses
 local TICK = 0.1
 local PICK_COOLDOWN = 2
+-- The picker stays usable a few steps off the pad (players overshoot it): a Choose counts
+-- from this far, if the picker was opened in the last PICK_GRACE seconds.
+local PICK_REACH = 12
+local PICK_GRACE = 90
 
 local BossService = {}
 
@@ -69,7 +80,9 @@ local padRadius = 4
 local status: TextLabel? = nil
 local fight: Fight? = nil
 local testGod: { [Player]: boolean } = {} -- Studio BossTest god(true), per player
-local picking: { [Player]: number } = {} -- last time the picker was opened for a player
+local picking: { [Player]: number } = {} -- last time the player stood on the pad (picker up)
+local offered: { [Player]: number } = {} -- last time the picker was sent to a player
+local line: { { player: Player, id: string } } = {} -- waiting for the arena, first come first served
 local folder: Folder
 local stash: Folder
 
@@ -85,6 +98,11 @@ local function send(player: Player, kind: string, data: { [string]: any })
 	if player.Parent then
 		remote:FireClient(player, kind, data)
 	end
+end
+
+-- Feedback for a request: every Choose ends in a Start or one of these.
+local function notice(player: Player, kind: string, text: string, place: number?)
+	send(player, "Notice", { kind = kind, text = text, line = place })
 end
 
 local function setStatus(text: string)
@@ -326,17 +344,27 @@ end
 ---------------------------------------------------------------------------------------
 -- The fight
 
-local function eligible(player: Player): boolean
+-- Why a player can't start a trial right now, or nil if they can.
+local function whyNot(player: Player): string?
 	local character = player.Character
 	local c = character and CombatService.get(character)
-	if not player:GetAttribute("Entered") or not alive(c) then
-		return false
+	if not player:GetAttribute("Entered") then
+		return "Enter the game first"
+	elseif not alive(c) then
+		return "You can't start a trial while you're down"
 	end
 	local model = (c :: Combatant).model
-	if model:GetAttribute("InMatch") or model:GetAttribute("InDuel") then
-		return false
+	local state = player:GetAttribute("DuelState")
+	if state == "Boss" then
+		return "You're already in a trial"
+	elseif model:GetAttribute("InMatch") then
+		return "You're in the royale: finish it first"
+	elseif state == "Waiting" then
+		return "Step off the duel pad first"
+	elseif state ~= nil or model:GetAttribute("InDuel") then
+		return "Finish your duel first"
 	end
-	return player:GetAttribute("DuelState") == nil
+	return nil
 end
 
 local function finish(f: Fight, result: string)
@@ -346,45 +374,30 @@ local function finish(f: Fight, result: string)
 	f.result = result
 end
 
-local function runFight(player: Player, id: string)
-	local def = Bosses.def(id)
-	local character = player.Character
-	local pc = character and CombatService.get(character)
-	if fight or not def or not pc or not eligible(player) then
-		if fight then
-			send(player, "Busy", {})
-		end
-		return
-	end
-	player:SetAttribute("DuelState", "Boss")
-	unstash(id)
+local serveLine: () -> ()
 
-	local f: Fight = {
-		id = id,
-		def = def,
-		player = player,
-		pc = pc,
-		boss = nil :: any,
-		brain = nil :: any,
-		fightAt = now() + RULES.Countdown,
-		lives = 0,
-		down = false,
-		result = nil,
-		tally = {},
-	}
-	fight = f
+-- The fight, from the boss's arrival to the end of the results pause. Anything that throws
+-- in here ends the trial cleanly through runFight's cleanup instead of leaving the arena
+-- taken and the player stuck as DuelState "Boss" (the shrine would ignore them for good).
+local function fightBody(f: Fight)
+	local player, id, def, pc = f.player, f.id, f.def, f.pc
+	unstash(id)
 	local boss, brain = spawnBoss(f, id)
 	if not boss or not brain then
-		fight = nil
-		player:SetAttribute("DuelState", nil)
-		return
+		error("the boss's body could not be made")
 	end
 	f.boss, f.brain = boss, brain
 	brain.target = pc
+	-- Building the boss's body can take a moment: the countdown starts once it's there.
+	f.fightAt = now() + RULES.Countdown
+	if not alive(pc) then
+		error("the challenger fell before the trial began")
+	end
 
 	-- Both on their marks, the player fresh, the boss untouchable until the countdown ends.
 	pc.root.AssemblyLinearVelocity = Vector3.zero
 	pc.model:PivotTo(mark(1))
+	f.placed = true
 	CombatService.reset(pc, RULES.Countdown)
 	CombatService.setResurrections(pc, RULES.PlayerResurrections)
 	pc.god = testGod[player] == true
@@ -484,19 +497,147 @@ local function runFight(player: Player, id: string)
 	end
 	setStatus(if won then `{player.DisplayName} defeated the {def.name}` else `The {def.name} stands`)
 	task.wait(RULES.Results)
+end
 
-	if boss.model.Parent then
+-- Puts everything back however the fight ended (or broke): the boss gone, the player out of
+-- the arena with a fresh body, the arena free for whoever is next in line.
+local function cleanup(f: Fight)
+	local player = f.player
+	local brain = f.brain :: BossAI.Brain?
+	if brain then
+		pcall(BossAI.stop, brain)
+	end
+	local boss = f.boss :: Combatant?
+	if boss and boss.model.Parent then
 		boss.model:Destroy()
 	end
 	if f.pc.model.Parent then
 		LobbyService.setInBoss(f.pc.model, nil)
 	end
 	player:SetAttribute("DuelState", nil)
-	if player.Parent then
+	if f.placed and player.Parent then
 		player:LoadCharacter()
 	end
-	fight = nil
+	if fight == f then
+		fight = nil
+	end
 	setStatus("Step on the shrine to choose a boss")
+	task.defer(serveLine)
+end
+
+local function runFight(player: Player, id: string)
+	local def = Bosses.def(id)
+	if not def then
+		return
+	end
+	if fight then
+		notice(player, "Refused", "A trial is already underway")
+		return
+	end
+	local reason = whyNot(player)
+	local pc = player.Character and CombatService.get(player.Character)
+	if reason or not pc then
+		notice(player, "Refused", reason or "You can't start a trial right now")
+		return
+	end
+	player:SetAttribute("DuelState", "Boss")
+
+	local f: Fight = {
+		id = id,
+		def = def,
+		player = player,
+		pc = pc,
+		boss = nil :: any,
+		brain = nil :: any,
+		fightAt = now() + RULES.Countdown,
+		lives = 0,
+		down = false,
+		placed = false,
+		result = nil,
+		tally = {},
+	}
+	fight = f
+	local ok, err = xpcall(fightBody, debug.traceback, f)
+	if not ok then
+		warn(`[BossService] the {def.name} trial broke off: {err}`)
+		notice(player, "Failed", "The trial broke off. Step on the shrine to try again.")
+	end
+	cleanup(f)
+end
+
+---------------------------------------------------------------------------------------
+-- The line: one arena, so later challengers wait their turn.
+
+local function linePosition(player: Player): number?
+	for i, entry in line do
+		if entry.player == player then
+			return i
+		end
+	end
+	return nil
+end
+
+local function leaveLine(player: Player)
+	local i = linePosition(player)
+	if i then
+		table.remove(line, i)
+	end
+end
+
+local function joinLine(player: Player, id: string)
+	local i = linePosition(player)
+	if i then
+		line[i].id = id -- a different pick keeps the place in line
+	else
+		table.insert(line, { player = player, id = id })
+		i = #line
+	end
+	local f = fight
+	local holder = if f then `{f.player.DisplayName} is facing the {f.def.name}` else "A trial is underway"
+	local def = Bosses.def(id) :: Bosses.BossDef
+	notice(
+		player,
+		"Line",
+		`{holder}. You're {if i == 1 then "next" else `#{i} in line`} for the {def.name}: it starts by itself when the arena frees up.`,
+		i
+	)
+end
+
+-- The arena is free: start the first challenger in line who still can, telling anyone who
+-- can't any more why their place went.
+function serveLine()
+	while not fight and #line > 0 do
+		local entry = table.remove(line, 1) :: { player: Player, id: string }
+		local player = entry.player
+		if player.Parent then
+			local reason = whyNot(player)
+			if reason then
+				notice(player, "Line", `Your turn at the shrine passed: {string.lower(reason)}`)
+			else
+				notice(player, "Turn", "Your trial begins")
+				task.spawn(runFight, player, entry.id)
+				return
+			end
+		end
+	end
+end
+
+-- A pick from the picker (or BossTest).
+local function choose(player: Player, id: string)
+	if fight and fight.player == player then
+		return -- already fighting; a stray second click
+	end
+	local reason = whyNot(player)
+	if reason then
+		notice(player, "Refused", reason)
+		return
+	end
+	if fight then
+		joinLine(player, id)
+		return
+	end
+	leaveLine(player)
+	task.spawn(runFight, player, id)
 end
 
 -- Public for tests (DevHooks / BossTest).
@@ -548,15 +689,47 @@ local function onPad(player: Player): boolean
 	return Vector3.new(offset.X, 0, offset.Z).Magnitude <= padRadius and math.abs(offset.Y) < 6
 end
 
--- Stepping onto the pad opens the picker (again after stepping off, or every few seconds).
+-- Close enough to the shrine for a pick to count: on the pad, or a few steps off it with
+-- the picker opened recently (it closes itself client-side beyond PICK_REACH).
+local function nearShrine(player: Player): boolean
+	if onPad(player) then
+		return true
+	end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local opened = offered[player]
+	if not root or not root:IsA("BasePart") or not opened or os.clock() - opened > PICK_GRACE then
+		return false
+	end
+	local offset = root.Position - pad
+	return Vector3.new(offset.X, 0, offset.Z).Magnitude <= padRadius + PICK_REACH and math.abs(offset.Y) < 10
+end
+
+local function sendPick(player: Player)
+	local f = fight
+	offered[player] = os.clock()
+	send(player, "Pick", {
+		bosses = pickList(player),
+		busy = if f then { player = f.player.DisplayName, boss = f.def.name } else nil,
+		line = linePosition(player),
+	})
+end
+
+-- Stepping onto the pad opens the picker (again after stepping off for a moment). Someone
+-- who can't fight right now hears why once per visit instead of the pad doing nothing.
 local function watchPad()
 	while true do
 		task.wait(0.2)
 		local t = os.clock()
 		for _, player in Players:GetPlayers() do
-			if onPad(player) and eligible(player) then
-				if not picking[player] or t - picking[player] > 60 then
-					send(player, "Pick", { bosses = pickList(player), busy = fight ~= nil })
+			if onPad(player) and (fight == nil or fight.player ~= player) then
+				if not picking[player] then
+					local reason = whyNot(player)
+					if reason then
+						notice(player, "Refused", reason)
+					else
+						sendPick(player)
+					end
 				end
 				picking[player] = t
 			elseif picking[player] and t - picking[player] > PICK_COOLDOWN then
@@ -619,14 +792,23 @@ function BossService.start()
 
 	remote.OnServerEvent:Connect(function(player: Player, action: unknown, argument: unknown)
 		if action == "Choose" and typeof(argument) == "string" and Bosses.def(argument) then
-			if onPad(player) or (RunService:IsStudio() and player:GetAttribute("BossAnywhere")) then
-				task.spawn(runFight, player, argument)
+			if nearShrine(player) or (RunService:IsStudio() and player:GetAttribute("BossAnywhere")) then
+				choose(player, argument)
+			else
+				notice(player, "Refused", "Step back onto the shrine to begin a trial")
+			end
+		elseif action == "Cancel" then
+			if linePosition(player) then
+				leaveLine(player)
+				notice(player, "Line", "You left the line for the arena")
 			end
 		end
 	end)
 	Players.PlayerRemoving:Connect(function(player)
 		picking[player] = nil
+		offered[player] = nil
 		testGod[player] = nil
+		leaveLine(player)
 	end)
 
 	CombatService.onWindup(onWindup)

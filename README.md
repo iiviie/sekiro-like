@@ -74,7 +74,10 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   Mikiri the thrust, then two real lives. A fight pays "Boss fought", XP per life taken, a clear (× stars) and a
   first-clear bonus once per boss (`Config.Bosses.Rewards`, clears saved in `BossClears`), with the report card
   ("Trial cleared", counting the deathblows that took the boss's lives). The camera locks on to the boss as the fight
-  starts.
+  starts. There's one boss terrace, so one trial runs at a time: picking while it's taken puts you in line (the picker
+  says who's fighting and your place; LEAVE LINE gives it up) and your trial starts by itself when the arena frees up.
+  Every pick gets an answer: the fight starts, or the picker (or a toast) says why not. The picker stays usable a few
+  steps off the pad and closes once you walk away or the royale takes you.
   Numbers in `Config.Bosses`; the AI is [BossAI.luau](src/server/BossAI.luau), the fight loop and shrine are
   [BossService.luau](src/server/BossService.luau), bosses' looks, weapons and stat scaling are
   [Bosses.luau](src/shared/Bosses.luau) (over the generated `Shared/KannagiMoves` data), and the picker and boss bar

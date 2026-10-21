@@ -14,6 +14,8 @@ local Bosses = require(ReplicatedStorage.Shared.Bosses)
 local BossVisuals = require(script.Parent.BossVisuals)
 local CombatHUD = require(script.Parent.CombatHUD)
 local LockOn = require(script.Parent.LockOn)
+local Panels = require(script.Parent.Panels)
+local Toasts = require(script.Parent.Toasts)
 local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
@@ -24,6 +26,13 @@ local remote: RemoteEvent
 local screen: ScreenGui
 local picker: Frame
 local list: ScrollingFrame
+local statusLabel: TextLabel
+local cancelButton: TextButton
+local pickerFit: UIScale
+local pendingAt: number? = nil -- os.clock() of a pick still waiting for the server's answer
+local inLine = false
+local pickerCallbacks: { (open: boolean) -> () } = {}
+local fightToken = 0
 local bar: Frame
 local nameLabel: TextLabel
 local subLabel: TextLabel
@@ -39,6 +48,8 @@ local fightAt = 0
 local counting = false
 local bannerToken = 0
 
+local PENDING_TIMEOUT = 5 -- seconds before an unanswered pick says so
+local PICK_REACH = 10 -- studs off the pad edge before the picker closes (server allows 12)
 local VITALITY = Color3.fromRGB(176, 30, 28)
 local POSTURE_LOW = Color3.fromRGB(255, 204, 96)
 local POSTURE_HIGH = Color3.fromRGB(214, 44, 22)
@@ -91,6 +102,15 @@ local function build()
 		Visible = false,
 	}, screen)
 	UI.new("UISizeConstraint", { MaxSize = Vector2.new(620, 500) }, picker)
+	-- Small screens (a phone in landscape): shrink to fit, LEAVE always on screen.
+	pickerFit = UI.new("UIScale", {}, picker)
+	local camera = workspace.CurrentCamera
+	local function refit()
+		local size = camera.ViewportSize
+		pickerFit.Scale = math.clamp(math.min((size.Y - 60) / 500, (size.X - 32) / 620), 0.5, 1)
+	end
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	refit()
 	UI.text({
 		Text = "BOSS TRIALS  ·  試練",
 		Font = UI.Display,
@@ -105,10 +125,22 @@ local function build()
 		Size = UDim2.new(1, -40, 0, 22),
 		Position = UDim2.fromOffset(20, 54),
 	}, picker)
+	-- What's going on: the arena taken, your place in line, a pick on its way, a refusal.
+	statusLabel = UI.text({
+		Name = "Status",
+		Text = "",
+		TextSize = 15,
+		Font = UI.Bold,
+		TextColor3 = UI.Gold,
+		TextWrapped = true,
+		Size = UDim2.new(1, -40, 0, 36),
+		Position = UDim2.fromOffset(20, 76),
+		Visible = false,
+	}, picker)
 	list = UI.new("ScrollingFrame", {
 		Name = "List",
-		Size = UDim2.new(1, -32, 1, -140),
-		Position = UDim2.fromOffset(16, 84),
+		Size = UDim2.new(1, -32, 1, -174),
+		Position = UDim2.fromOffset(16, 114),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 6,
@@ -118,20 +150,33 @@ local function build()
 	UI.new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, list)
 	local close = UI.button({
 		Name = "Close",
-		Text = "LEAVE",
+		Text = "CLOSE",
 		Size = UDim2.fromOffset(140, 38),
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -12),
 	}, picker)
 	close.Activated:Connect(function()
-		picker.Visible = false
+		BossHUD.closePicker()
+	end)
+	-- While you wait for the arena: give up your place.
+	cancelButton = UI.button({
+		Name = "LeaveLine",
+		Text = "LEAVE LINE",
+		Size = UDim2.fromOffset(140, 38),
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0.5, 80, 1, -12),
+		BackgroundColor3 = UI.Crimson,
+		Visible = false,
+	}, picker)
+	cancelButton.Activated:Connect(function()
+		remote:FireServer("Cancel")
 	end)
 
-	-- The boss bar.
+	-- The boss bar, just above your own posture bar (CombatHUD's, 80 px tall at -100).
 	bar = UI.new("Frame", {
 		Name = "BossBar",
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -118),
+		Position = UDim2.new(0.5, 0, 1, -188),
 		Size = UDim2.new(0.5, 0, 0, 64),
 		BackgroundTransparency = 1,
 		Visible = false,
@@ -271,7 +316,49 @@ local function watch(model: Model)
 	refresh()
 end
 
-local function openPicker(bosses: { { [string]: any } }, busy: boolean?)
+local function setStatus(text: string?, color: Color3?)
+	statusLabel.Text = text or ""
+	statusLabel.TextColor3 = color or UI.Gold
+	statusLabel.Visible = text ~= nil and text ~= ""
+	-- The list moves up into the status line's room while there's nothing to say.
+	local gap = if statusLabel.Visible then 30 else 0
+	list.Position = UDim2.fromOffset(16, 84 + gap)
+	list.Size = UDim2.new(1, -32, 1, -144 - gap)
+end
+
+local function setLine(position: number?)
+	inLine = position ~= nil
+	cancelButton.Visible = inLine
+end
+
+local function setPickerVisible(open: boolean)
+	if picker.Visible == open then
+		return
+	end
+	picker.Visible = open
+	if not open then
+		pendingAt = nil
+	end
+	for _, callback in pickerCallbacks do
+		task.spawn(callback, open)
+	end
+end
+
+function BossHUD.closePicker()
+	setPickerVisible(false)
+end
+
+function BossHUD.pickerOpen(): boolean
+	return picker ~= nil and picker.Visible
+end
+
+-- Runs `callback(open)` whenever the picker opens or closes (LobbyHUD hides PLAY and the nav
+-- bar under it).
+function BossHUD.onPicker(callback: (open: boolean) -> ())
+	table.insert(pickerCallbacks, callback)
+end
+
+local function openPicker(bosses: { { [string]: any } }, busy: { [string]: any }?, line: number?)
 	for _, child in list:GetChildren() do
 		if child:IsA("GuiButton") then
 			child:Destroy()
@@ -313,26 +400,66 @@ local function openPicker(bosses: { { [string]: any } }, busy: boolean?)
 			Size = UDim2.fromOffset(130, 22),
 		}, button)
 		button.Activated:Connect(function()
-			picker.Visible = false
+			if pendingAt then
+				return -- one pick at a time
+			end
+			-- Stays open until the server answers with a Start (closes it) or a Notice (says
+			-- why not), so a pick can never just vanish.
+			pendingAt = os.clock()
+			setStatus(`Opening the gate to the {entry.name}...`, UI.Parchment)
 			BossVisuals.prepare(id)
 			remote:FireServer("Choose", id)
 		end)
 	end
-	picker.Visible = true
-	if busy then
-		showBanner("The arena is taken", "Another trial is underway. Wait for it to end.", 3)
+	setLine(line)
+	if line then
+		setStatus(
+			`{if busy then `{busy.player} is facing the {busy.boss}. ` else ""}You're {if line == 1
+				then "next"
+				else `#{line}`} in line: your trial starts by itself.`
+		)
+	elseif busy then
+		setStatus(`The arena is taken: {busy.player} is facing the {busy.boss}. Pick a boss to wait your turn.`)
+	else
+		setStatus(nil)
 	end
+	Panels.closeAll()
+	setPickerVisible(true)
 end
 
 local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	Pick = function(data)
-		openPicker(data.bosses or {}, data.busy)
+		openPicker(data.bosses or {}, data.busy, data.line)
 	end,
-	Busy = function()
-		showBanner("The arena is taken", "Another trial is underway. Wait for it to end.", 3)
+	Notice = function(data)
+		pendingAt = nil
+		local text = data.text or ""
+		local kind = data.kind
+		if kind == "Line" then
+			setLine(data.line)
+		elseif kind == "Turn" then
+			setLine(nil)
+		end
+		if kind == "Failed" then
+			-- The trial broke off mid-fight: take its HUD down with it.
+			fightToken += 1
+			counting = false
+			bar.Visible = false
+			banner.Visible = false
+			lesson.Visible = false
+			unwatch()
+		end
+		local color = if kind == "Refused" or kind == "Failed" then Color3.fromRGB(240, 120, 100) else UI.Gold
+		if picker.Visible then
+			setStatus(text, color)
+		else
+			Toasts.notice(text, color)
+		end
 	end,
 	Start = function(data)
-		picker.Visible = false
+		fightToken += 1
+		setLine(nil)
+		setPickerVisible(false)
 		BossVisuals.prepare(data.boss)
 		local def = Bosses.def(data.boss)
 		nameLabel.Text = `{data.nameJP}   {data.name}`
@@ -373,9 +500,12 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		else
 			CombatHUD.splash(Assets.UI.KanjiEnd, `{data.name} stands`, UI.Parchment, 3)
 		end
+		local token = fightToken
 		task.delay(4, function()
-			bar.Visible = false
-			unwatch()
+			if fightToken == token then
+				bar.Visible = false
+				unwatch()
+			end
 		end)
 	end,
 }
@@ -390,8 +520,37 @@ function BossHUD.start()
 			handler(data)
 		end
 	end)
-	-- The countdown, and closing the picker if you walk away from the shrine.
+	-- The countdown, and closing the picker if you walk away from the shrine (or the royale
+	-- or a duel takes you), or saying so if a pick goes unanswered.
+	local function walkedAway(): boolean
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if not character or not root or not root:IsA("BasePart") then
+			return true
+		end
+		if character:GetAttribute("InMatch") == true or character:GetAttribute("InDuel") == true then
+			return true
+		end
+		local lobby = workspace:FindFirstChild("Lobby")
+		local shrine = lobby and lobby:FindFirstChild("BossShrine")
+		local pad = shrine and shrine:GetAttribute("Pad")
+		if not shrine or typeof(pad) ~= "Vector3" then
+			return false
+		end
+		local radius = shrine:GetAttribute("PadRadius")
+		local offset = root.Position - pad
+		local flat = Vector3.new(offset.X, 0, offset.Z).Magnitude
+		return flat > (if typeof(radius) == "number" then radius else 4) + PICK_REACH or math.abs(offset.Y) > 10
+	end
 	RunService.Heartbeat:Connect(function()
+		if picker.Visible then
+			if walkedAway() then
+				setPickerVisible(false)
+			elseif pendingAt and os.clock() - pendingAt > PENDING_TIMEOUT then
+				pendingAt = nil
+				setStatus("The shrine didn't answer. Pick again.", Color3.fromRGB(240, 120, 100))
+			end
+		end
 		if counting then
 			if now() < fightAt then
 				banner.Visible = true
@@ -403,7 +562,11 @@ function BossHUD.start()
 		end
 	end)
 	player.CharacterAdded:Connect(function()
-		picker.Visible = false
+		setPickerVisible(false)
+	end)
+	-- One window at a time: a lobby panel opening closes the picker.
+	Panels.onOpen(function()
+		setPickerVisible(false)
 	end)
 end
 
