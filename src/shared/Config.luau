@@ -169,6 +169,14 @@ local moveDefaults = {
 --     openers are only knocked aside and the rally goes on; enders recoil.
 --   * The Riposte stays at 0.18 s (Kannagi Attack04 0.325): it must land inside our 0.5 s attacker recoil
 --     at 250 ms ping, where Kannagi's bosses recoil for 0.78 s.
+--
+-- Hit areas (`range` deep x `width` wide) follow the blade (Weapons: "reach follows the blade"), sized
+-- for the 1.3x katana whose tip is 4.95 studs from the hand (was 3.85). Each box grew by what its clip's
+-- tip sweep gained, measured in Edit mode over the strike segments: +1.1 deep on every move, and wider by
+-- how much further the tip swings sideways (Light1/2 and the Riposte +1.5; Light3, DodgeSlash, MikiriSlash
+-- and the sweep +2). The Overhead and the thrust are straight cuts and the Riposte2's arc barely widened,
+-- so those keep their width. Weapons scales `range` by reach (the odachi's +1.4). Bots' AttackDistance /
+-- StrafeDistance and the Coach's range moved with them.
 local attacks: { [AttackKind]: MoveDef } = {
 	Light1 = {
 		windup = 0.5, -- PvP opener floor (Kannagi 0.43)
@@ -176,8 +184,8 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0,
 		damage = 9,
 		postureDamage = 18,
-		range = 7,
-		width = 6,
+		range = 8.1,
+		width = 7.5,
 		lunge = 56, -- 3.7 studs at impact (clip root travel; Kannagi 4.3)
 		unblockable = false,
 		deflectSide = "Left", -- Kannagi Attack01 deflectReaction LeftSmall
@@ -192,8 +200,8 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0,
 		damage = 9,
 		postureDamage = 18,
-		range = 7,
-		width = 6,
+		range = 8.1,
+		width = 7.5,
 		lunge = 56, -- 3.7 studs
 		unblockable = false,
 		deflectSide = "Right", -- Kannagi Attack02 deflectReaction RightSmall
@@ -211,8 +219,8 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0,
 		damage = 11,
 		postureDamage = 22,
-		range = 7.5,
-		width = 6,
+		range = 8.6,
+		width = 8,
 		lunge = 62, -- 4.1 studs
 		lungeAt = -0.04,
 		unblockable = false,
@@ -232,7 +240,7 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0,
 		damage = 14,
 		postureDamage = 34,
-		range = 7.5,
+		range = 8.6,
 		width = 5,
 		lunge = 56, -- 3.7 studs
 		lungeAt = -0.05,
@@ -258,8 +266,8 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0,
 		damage = 11,
 		postureDamage = 24,
-		range = 7.5,
-		width = 6,
+		range = 8.6,
+		width = 7.5,
 		lunge = 55, -- 3.6 studs (Kannagi Attack04 4.13)
 		lungeAt = -0.01,
 		unblockable = false,
@@ -279,7 +287,7 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0,
 		damage = 10,
 		postureDamage = 22,
-		range = 7.5,
+		range = 8.6,
 		width = 6,
 		lunge = 55, -- 3.6 studs
 		lungeAt = 0,
@@ -298,8 +306,8 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0,
 		damage = 10,
 		postureDamage = 20,
-		range = 7.5,
-		width = 5,
+		range = 8.6,
+		width = 7,
 		lunge = 67, -- 4.4 studs (Kannagi 5.08)
 		lungeAt = -0.01,
 		unblockable = false,
@@ -315,8 +323,8 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0,
 		damage = 13,
 		postureDamage = 26,
-		range = 7.5,
-		width = 6,
+		range = 8.6,
+		width = 8,
 		lunge = 67, -- 4.4 studs
 		lungeAt = -0.01,
 		unblockable = false,
@@ -335,7 +343,7 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0, -- see Cooldowns.Perilous, shared with the sweep
 		damage = 18, -- ~2x a slash: strong when it lands, but a read costs far more
 		postureDamage = 35,
-		range = 9,
+		range = 10.1,
 		width = 4,
 		lunge = 85, -- 4.7 studs in the last 0.06 s before impact
 		lungeAt = -0.06,
@@ -359,8 +367,8 @@ local attacks: { [AttackKind]: MoveDef } = {
 		cooldown = 0, -- see Cooldowns.Perilous, shared with the thrust
 		damage = 16,
 		postureDamage = 30,
-		range = 8.5,
-		width = 10,
+		range = 9.6,
+		width = 12,
 		lunge = 76, -- 5 studs: the clip spins 9.7 studs forward, capped so a PvP sweep never carries past its victim
 		unblockable = true,
 		perilous = true,
@@ -849,9 +857,11 @@ local Config = {
 		ThinkInterval = 0.1,
 		TurnResponsiveness = 18,
 		TurnSpeed = 720, -- degrees/s while free; inside a swing the move's tracking applies
-		-- Spacing: circle at StrafeDistance while waiting, step in to AttackDistance to swing.
-		AttackDistance = 5,
-		StrafeDistance = 8,
+		-- Spacing: circle at StrafeDistance while waiting, step in to AttackDistance to swing. Both
+		-- keep their margins to the slash's hit area (8.1 deep): waiting just outside it, swinging
+		-- well inside it.
+		AttackDistance = 6,
+		StrafeDistance = 9,
 		SeparationRadius = 4, -- push away from other fighters closer than this
 		RetreatPosture = 0.7, -- back off to recover when own posture passes this fraction
 		AttackInterval = { 0.9, 2.0 },

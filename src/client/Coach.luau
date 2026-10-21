@@ -18,7 +18,7 @@ local player = Players.LocalPlayer
 local MATCHES = 3 -- coach for this many matches...
 local DEFLECTS = 12 -- ...or until this many lifetime deflects, whichever comes first
 local GLINT_LEAD = 0.3 -- matches CombatVisuals' glint
-local RANGE = 11 -- studs: swings from further away aren't aimed at you
+local RANGE = 12 -- studs: swings from further away aren't aimed at you (a thrust reaches ~11)
 
 -- What beat you, and the answer to it: shown when you're cut down or killed, for everyone.
 -- Losing is only useful if you learn something from it.

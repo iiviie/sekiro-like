@@ -136,7 +136,9 @@ stomp window) are per-move fields in `Config.Attacks` with defaults in `Config.M
   apart, Kannagi's rhythm); enders and perilous moves later. The mapping and every deviation are commented above
   `Config.Attacks`.
 - **Hit area.** A box in front of where the attacker stood and faced at the moment of the strike (turning afterwards
-  can't re-aim it): slashes 6 wide × 7 deep, finisher 5 × 7.5, thrust 4 × 9, sweep 10 × 8.5, all 6 tall. Targets are
+  can't re-aim it): Light1/Light2 7.5 wide × 8.1 deep, Light3 8 × 8.6, Overhead 5 × 8.6, Riposte 7.5 × 8.6, Riposte2
+  6 × 8.6, DodgeSlash 7 × 8.6, MikiriSlash 8 × 8.6, thrust 4 × 10.1, sweep 12 × 9.6, all 6 tall. They follow the blade:
+  sized to where each clip sweeps the 1.3× katana's tip; a weapon's reach scales the depth (odachi 1.25×). Targets are
   judged where they stood at the moment of impact (the server keeps a short position history), not where they are when
   the blow resolves.
 - **Strings.** Slashes chain Light1 → Light2 → third hit, and speed up only while they keep landing (0.42 s windups on
@@ -312,7 +314,7 @@ order: naginata (reach), then dual blades; kusarigama last.
 - **Swords.** Stylised and slightly oversized, like Dueling Grounds': the katana is 5.7 studs (the odachi 7.6), with
   a code-built dark iron tsuba with a gold rim, a gold pommel cap and a bright neon line along the edge welded over the
   mesh ([SwordRig.luau](src/server/SwordRig.luau)), and a thin ink outline (a Highlight) so it reads at camera
-  distance. The visible blade is longer than the hit box (`Config` hit areas are gameplay and weren't scaled). Each
+  distance. The hit areas in `Config` are sized to this blade, so a cut that visibly reaches someone lands. Each
   strike draws a wide gradient crescent that follows the blade's real sweep, steel-white for slashes (or the skin's
   colour) and red for perilous attacks. **Blade skins**
   ([Progression.luau](src/shared/Progression.luau)) tint the mesh through `SpecialMesh.VertexColor` and recolour the
