@@ -722,6 +722,7 @@ function LockerPanel.build(body: Frame)
 		table.insert(tabs, {
 			id = entry.id,
 			label = if entry.id == t.id then entry.label else "",
+			caption = entry.label, -- every tab names itself under its icon (UI.tabs, wide screens)
 			icon = TAB_ICONS[entry.id],
 			dot = fresh and entry.id ~= t.id,
 		})
