@@ -127,81 +127,72 @@ end
 local function card(parent: Instance, item: Catalog.Item, order: number, state: { [string]: any })
 	local owns = state.have[item.id] == true or item.default == true
 	local equipped = state.worn == item.id
+	local second = state.second == item.id
 	local isSelected = state.selected == item.id
 	local entry = state.progress[item.id]
-	local locked = not owns and (item.rule ~= nil and typeof(entry) == "table" and entry[1] < entry[2])
-	local button = UI.button({
+	local price = item.price
+	local ruleMet = not item.rule or not (typeof(entry) == "table" and entry[1] < entry[2])
+	local priced = not owns
+		and ruleMet
+		and price ~= nil
+		and not price.product
+		and (price.coins ~= nil or price.gems ~= nil)
+		and Catalog.isReady(item)
+	local text = if second then "2nd title" else status(item, owns, equipped, state.progress)
+	UI.card({
 		Name = StoreUI.key(item.id),
 		LayoutOrder = order,
-		Text = "",
-		BackgroundColor3 = if isSelected then UI.Selected elseif owns then UI.PanelLight else UI.Muted,
+		Size = UDim2.fromScale(1, 1),
+		name = item.name,
+		rarity = item.rarity,
+		art = function(holder: Frame)
+			StoreUI.thumb(holder, item, false)
+		end,
+		state = if equipped then "equipped" elseif owns then "owned" elseif priced then "buy" else "locked",
+		selected = isSelected,
+		price = if priced and price
+			then { currency = if price.gems then "gems" else "coins", amount = price.gems or price.coins or 0 }
+			else nil,
+		status = if priced then nil else text,
+		statusColor = if equipped or second then UI.Theme.GoldHi elseif owns then UI.Theme.JadeText else UI.Theme.Dim,
+		onActivated = function()
+			selected[tab] = item.id
+			Panels.redraw()
+		end,
 	}, parent)
-	StoreUI.frame(button, item.rarity)
-	if isSelected then
-		UI.stroke(button, UI.Gold, 2.5, 0)
-	end
-	local art = UI.new("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 8),
-		Size = UDim2.fromOffset(76, 76),
-		BackgroundTransparency = 1,
-	}, button)
-	StoreUI.thumb(art, item, locked)
-	if not owns then
-		for _, child in art:GetDescendants() do
-			if child:IsA("ImageLabel") and child.Image ~= ICONS.Lock then
-				child.ImageTransparency = 0.35
-			end
-		end
-	end
-	UI.text({
-		Position = UDim2.fromOffset(6, 86),
-		Size = UDim2.new(1, -12, 0, 20),
-		Font = UI.Display,
-		TextSize = 17,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		TextColor3 = if item.category == "title" then Flair.Rarity[item.rarity] or UI.Parchment else UI.Parchment,
-		Text = item.name,
-	}, button)
-	UI.text({
-		Position = UDim2.fromOffset(6, 108),
-		Size = UDim2.new(1, -12, 0, 18),
-		TextSize = 14,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		TextColor3 = if equipped then UI.Gold elseif owns then UI.Jade else UI.Dim,
-		Text = status(item, owns, equipped, state.progress),
-	}, button)
-	button.Activated:Connect(function()
-		selected[tab] = item.id
-		Panels.redraw()
-	end)
 end
 
+-- Blade line levels L1-L4 as gold diamonds (filled up to the current level).
 local function levelPips(parent: Instance, item: Catalog.Item, level: number, y: number)
 	local row = UI.new("Frame", {
-		Position = UDim2.fromOffset(12, y),
-		Size = UDim2.new(1, -24, 0, 18),
+		Name = "Levels",
+		Position = UDim2.fromOffset(14, y),
+		Size = UDim2.new(1, -28, 0, 20),
 		BackgroundTransparency = 1,
 	}, parent)
 	UI.new("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
-		Padding = UDim.new(0, 6),
+		Padding = UDim.new(0, 12),
 		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, row)
 	for i = 1, #(item.levels or {}) do
 		local pip = UI.new("Frame", {
-			Size = UDim2.fromOffset(34, 10),
-			BackgroundColor3 = if i <= level then UI.Gold else UI.Ink,
+			Name = `L{i}`,
+			LayoutOrder = i,
+			Size = UDim2.fromOffset(13, 13),
+			Rotation = 45,
+			BackgroundColor3 = if i <= level then UI.Theme.GoldHi else UI.Ink,
 			BorderSizePixel = 0,
 		}, row)
-		UI.corner(pip, UDim.new(1, 0))
-		UI.stroke(pip, UI.Bronze, 1, 0.3)
+		UI.new("UIStroke", { Color = UI.Theme.Gold, Thickness = 1.5 }, pip)
 	end
-	UI.text({
-		Size = UDim2.fromOffset(50, 18),
-		Font = UI.Bold,
-		TextSize = 15,
-		TextColor3 = UI.Gold,
+	UI.label("number", {
+		LayoutOrder = 99,
+		Size = UDim2.fromOffset(50, 20),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextSize = 16,
+		TextColor3 = UI.Theme.GoldHi,
 		Text = `L{level}`,
 	}, row)
 end
@@ -219,9 +210,13 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 	local box = UI.panel({
 		Name = "Preview",
 		Size = UDim2.new(0, 250, 1, 0),
-		BackgroundColor3 = UI.PanelLight,
+		material = "inset",
 	}, parent)
-	StoreUI.frame(box, item.rarity)
+	UI.rarityGlow(box, item.rarity, 1)
+	UI.rarityFrame(box, item.rarity, 4, 0.16)
+	if item.rarity == "legendary" then
+		UI.shine(box, 5)
+	end
 	-- The art sits left of centre so the Preview button (top right) never covers it.
 	local art = UI.new("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0),
@@ -231,20 +226,21 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 	}, box)
 	StoreUI.thumb(art, item, false)
 	UI.text({
-		Position = UDim2.fromOffset(12, y),
-		Size = UDim2.new(1, -24, 0, 26),
-		Font = UI.Display,
-		TextSize = 24,
+		Position = UDim2.fromOffset(14, y),
+		Size = UDim2.new(1, -28, 0, 28),
+		FontFace = UI.Fonts.Display,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextSize = 22,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		TextColor3 = if item.category == "title" then Flair.Rarity[item.rarity] or UI.Parchment else UI.Parchment,
 		Text = item.name,
 	}, box)
-	UI.text({
-		Position = UDim2.fromOffset(12, y + 26),
-		Size = UDim2.new(1, -24, 0, 16),
-		TextSize = 14,
-		TextColor3 = Flair.Rarity[item.rarity] or UI.Parchment,
-		Text = StoreUI.rarityName(item.rarity),
+	UI.label("caption", {
+		Position = UDim2.fromOffset(14, y + 26),
+		Size = UDim2.new(1, -28, 0, 18),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = UI.rarity(item.rarity).text,
+		Text = item.rarity,
 	}, box)
 	local level = if isLine and owns then StoreUI.lineLevel(item.id) else 0
 	local text: string
@@ -261,12 +257,14 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		end
 	end
 	UI.text({
-		Position = UDim2.fromOffset(12, y + 46),
-		Size = UDim2.new(1, -24, 0, if upgradable then 20 else 56),
+		Name = "Text",
+		Position = UDim2.fromOffset(14, y + 46),
+		Size = UDim2.new(1, -28, 0, if upgradable then 22 else 58),
 		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
 		TextSize = 15,
-		TextTransparency = 0.1,
+		TextColor3 = UI.Theme.Dim,
 		Text = text,
 	}, box)
 	if isLine and owns then
@@ -275,14 +273,18 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 
 	-- The action button at the bottom.
 	local touch = UI.Touch
+	-- A title you own, with the second title slot: [Equip] and [As 2nd] side by side.
+	local twoTitles = item.category == "title" and owns and StoreUI.attr("TitleSlots", 1) >= 2
+	local split = upgradable or twoTitles
 	-- Side by side with Upgrade for a line that can still level up.
 	local action = UI.button({
 		Name = "Action",
 		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.new(0, 12, 1, -10),
-		Size = if upgradable then UDim2.new(0.4, -12, 0, touch) else UDim2.new(1, -24, 0, touch),
-		TextSize = 19,
+		Position = UDim2.new(0, 12, 1, -12),
+		Size = if split then UDim2.new(0.5, -15, 0, touch) else UDim2.new(1, -24, 0, touch),
+		TextSize = 18,
 		Text = "",
+		ZIndex = 6,
 	}, box)
 	local coins, gems = StoreUI.attr("Coins", 0), StoreUI.attr("Gems", 0)
 	local whetstones = StoreUI.attr("Whetstones", 0)
@@ -290,7 +292,7 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 	local ruleMet = not item.rule or not (typeof(entry) == "table" and entry[1] < entry[2])
 	local price = item.price
 
-	-- Lines: an Upgrade button above the action once owned.
+	-- Lines: an Upgrade button beside the action once owned.
 	if isLine and owns and item.levels and item.levels[level + 1] then
 		local nextLevel = (item.levels :: { Catalog.LineLevel })[level + 1]
 		local rules = EconomyConfig.LineUpgrade
@@ -303,31 +305,55 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		local canMixed = not canStones and shortBy <= maxGemStones and gems >= gemCost
 		local upgrade = UI.button({
 			Name = "Upgrade",
+			variant = if canStones or canMixed then "reward" else "disabled",
 			AnchorPoint = Vector2.new(1, 1),
-			Position = UDim2.new(1, -12, 1, -10),
-			Size = UDim2.new(0.6, -6, 0, touch),
+			Position = UDim2.new(1, -12, 1, -12),
+			Size = UDim2.new(0.5, -15, 0, touch),
+			TextSize = 18,
+			FontFace = UI.Fonts.Number,
+			Text = `To L{nextLevel.level}`,
+			ZIndex = 6,
+		}, box)
+		upgrade:SetAttribute("Quiet", nil)
+		-- The cost as a Whetstone pill over the buttons, the gem top-up as a line under it.
+		UI.price({
+			currency = "stones",
+			amount = cost,
+			AnchorPoint = Vector2.new(1, 1),
+			Position = UDim2.new(1, -16, 1, -touch - 20),
+			Size = UDim2.fromOffset(92, 28),
+			height = 28,
+			ZIndex = 6,
+		}, box)
+		UI.text({
+			Name = "Cost",
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.new(0, 14, 1, -touch - 22),
+			Size = UDim2.new(1, -124, 0, 22),
+			TextXAlignment = Enum.TextXAlignment.Left,
 			TextSize = 14,
-			TextWrapped = true,
-			BackgroundColor3 = if canStones or canMixed then UI.Crimson else UI.Panel,
-			TextColor3 = if canStones or canMixed then UI.Parchment else UI.Dim,
+			TextColor3 = if canStones then UI.Theme.Dim elseif canMixed then UI.Theme.JadeText else UI.Theme.CrimsonText,
 			Text = if canStones
-				then `Upgrade to L{nextLevel.level}\n{cost} whetstones`
-				elseif canMixed then `L{nextLevel.level}: {cost - viaGems} whetstones\n+ {gemCost} gems`
-				else `L{nextLevel.level}: {cost} whetstones\n(you have {whetstones})`,
+				then `You have {whetstones}`
+				elseif canMixed then `{cost - viaGems} + {gemCost} gems`
+				else `You have {whetstones}`,
+			ZIndex = 6,
 		}, box)
 		upgrade.Activated:Connect(function()
 			if canStones then
+				UI.sound("Claim")
 				StoreUI.fire("UpgradeLine", item.id)
 			elseif canMixed then
-				UI.confirm(
-					window,
-					`Upgrade {item.name}`,
-					`Level {nextLevel.level} costs {cost} whetstones. Use {cost - viaGems} whetstones and {gemCost} gems for the rest?`,
-					"Upgrade",
-					function()
+				UI.confirm(window, {
+					title = `{item.name} to L{nextLevel.level}`,
+					text = `Use {cost - viaGems} Whetstones and pay the other {viaGems} with gems.`,
+					price = { currency = "gems", amount = gemCost },
+					balance = gems,
+					yes = "Upgrade",
+					onYes = function()
 						StoreUI.fire("UpgradeLine", { id = item.id, gems = viaGems })
-					end
-				)
+					end,
+				})
 			else
 				Toasts.notice(
 					`Whetstones come from trials, wins and boss clears · gems can cover up to {maxGemStones} of these {cost}`,
@@ -337,10 +363,32 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		end)
 	end
 
+	local function confirmUnlock(currency: string, cost: number)
+		UI.confirm(window, {
+			title = `Unlock {item.name}?`,
+			art = function(holder: Frame)
+				StoreUI.thumb(holder, item)
+			end,
+			rarity = item.rarity,
+			price = { currency = currency, amount = cost },
+			balance = if currency == "gems" then gems else coins,
+			yes = "Unlock",
+			shortLabel = if currency == "gems" then "Get gems" else "Not enough",
+			onShort = if currency == "gems"
+				then function()
+					StorePanel.show("Gems")
+				end
+				else nil,
+			onYes = function()
+				StoreUI.fire("BuyItem", item.id)
+			end,
+		})
+	end
+
 	if equipped then
 		action.Text = if item.category == "title" then "Take off" else "Equipped"
-		UI.setButtonColor(action, UI.Panel)
-		action.TextColor3 = UI.Gold
+		UI.setVariant(action, if item.category == "title" then "secondary" else "disabled")
+		action.TextColor3 = UI.Theme.GoldHi
 		if item.category == "title" then
 			action.Activated:Connect(function()
 				StoreUI.fire("EquipItem", NO_TITLE)
@@ -348,58 +396,102 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		end
 	elseif owns then
 		action.Text = "Equip"
-		UI.setButtonColor(action, UI.Crimson)
+		UI.setVariant(action, "primary")
 		action.Activated:Connect(function()
+			UI.sound("Equip")
 			StoreUI.fire("EquipItem", item.id)
 		end)
 	elseif price and not price.product and ruleMet and not Catalog.isReady(item) then
 		action.Text = "Coming soon"
-		UI.setButtonColor(action, UI.Panel)
-		action.TextColor3 = UI.Dim
+		UI.setVariant(action, "disabled")
 	elseif price and price.coins and ruleMet then
 		local afford = coins >= price.coins
-		action.Text = if afford
-			then `Unlock  ·  {UI.number(price.coins)} coins`
-			else `{UI.number(price.coins - coins)} more coins`
-		UI.setButtonColor(action, if afford then UI.Crimson else UI.Panel)
-		action.TextColor3 = if afford then UI.Parchment else UI.Dim
+		action.Text = if afford then "Unlock" else `{UI.number(price.coins - coins)} more coins`
+		UI.setVariant(action, if afford then "primary" else "disabled")
+		action:SetAttribute("Quiet", nil)
 		action.Activated:Connect(function()
 			if not afford then
 				Toasts.notice("Coins come from every match, trials and the daily reward.", UI.Gold)
 				return
 			end
-			UI.confirm(window, item.name, `Unlock {item.name} for {UI.number(price.coins)} coins?`, "Unlock", function()
-				StoreUI.fire("BuyItem", item.id)
-			end)
+			confirmUnlock("coins", price.coins :: number)
 		end)
 	elseif price and price.gems and ruleMet then
 		local afford = gems >= price.gems
-		action.Text = if afford then `Unlock  ·  {UI.number(price.gems)} gems` else "Get gems"
-		UI.setButtonColor(action, if afford then UI.Crimson else UI.PanelLight)
-		if not afford then
-			UI.stroke(action, UI.Jade, 1.5, 0.2)
-		end
+		action.Text = if afford then "Unlock" else "Get gems"
+		UI.setVariant(action, if afford then "primary" else "premium")
 		action.Activated:Connect(function()
 			if not afford then
 				StorePanel.show("Gems")
 				return
 			end
-			UI.confirm(window, item.name, `Spend {UI.number(price.gems)} gems on {item.name}?`, "Spend gems", function()
-				StoreUI.fire("BuyItem", item.id)
-			end)
+			confirmUnlock("gems", price.gems :: number)
 		end)
 	elseif price and price.product then
 		action.Text = "See it in the Store"
-		UI.setButtonColor(action, UI.PanelLight)
+		UI.setVariant(action, "premium")
 		action.Activated:Connect(function()
 			StorePanel.show("Offers")
 		end)
 	else
 		action.Text = "Locked"
-		UI.setButtonColor(action, UI.Panel)
-		action.TextColor3 = UI.Dim
+		UI.setVariant(action, "disabled")
+		action:SetAttribute("Quiet", nil)
 		action.Activated:Connect(function()
 			Toasts.notice(howToGet(item, state.progress), UI.Parchment)
+		end)
+	end
+	-- A price line over the button for something you can unlock.
+	if
+		not owns
+		and price
+		and not price.product
+		and ruleMet
+		and Catalog.isReady(item)
+		and (price.coins or price.gems)
+	then
+		UI.price({
+			currency = if price.gems then "gems" else "coins",
+			amount = price.gems or price.coins or 0,
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.new(0.5, 0, 1, -touch - 20),
+			Size = UDim2.fromOffset(130, 30),
+			ZIndex = 6,
+		}, box)
+	end
+
+	-- The second title slot (pass.TitleSlot): wear another owned title under the first.
+	if twoTitles then
+		local isSecond = state.second == item.id
+		local second = UI.button({
+			Name = "Second",
+			variant = if equipped then "disabled" else "secondary",
+			AnchorPoint = Vector2.new(1, 1),
+			Position = UDim2.new(1, -12, 1, -12),
+			Size = UDim2.new(0.5, -15, 0, touch),
+			TextSize = 17,
+			Text = if isSecond then "Off 2nd" else "As 2nd",
+			ZIndex = 6,
+		}, box)
+		second.Activated:Connect(function()
+			if equipped then
+				return
+			end
+			UI.sound("Equip")
+			StoreUI.fire("EquipTitle2", if isSecond then NO_TITLE else item.id)
+		end)
+	elseif item.category == "title" and owns and not StoreUI.passes()["pass.TitleSlot"] then
+		local link = UI.tertiary({
+			Name = "SecondSlot",
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.new(0.5, 0, 1, -touch - 14),
+			Size = UDim2.new(1, -24, 0, 30),
+			Text = "Wear two titles: Second title slot",
+			TextSize = 15,
+			ZIndex = 6,
+		}, box)
+		link.Activated:Connect(function()
+			StorePanel.show("Offers")
 		end)
 	end
 
@@ -408,13 +500,14 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 	if previewer then
 		local look = UI.button({
 			Name = "Preview",
+			variant = "secondary",
 			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.new(1, -8, 0, 8),
-			Size = UDim2.fromOffset(92, 54),
-			TextSize = 15,
+			Position = UDim2.new(1, -10, 0, 10),
+			Size = UDim2.fromOffset(96, 54),
+			TextSize = 16,
 			Text = "Preview",
+			ZIndex = 6,
 		}, box)
-		UI.stroke(look)
 		look.Activated:Connect(function()
 			Panels.closeAll()
 			previewer(item)
@@ -426,35 +519,36 @@ end
 local function noTitleCard(parent: Instance, state: { [string]: any })
 	local isSelected = state.selected == NO_TITLE
 	local equipped = state.worn == "" or state.worn == nil
-	local button = UI.button({
+	UI.card({
 		Name = "NoTitle",
 		LayoutOrder = 0,
-		Text = "",
-		BackgroundColor3 = if isSelected then UI.Selected else UI.PanelLight,
+		Size = UDim2.fromScale(1, 1),
+		name = "No title",
+		caption = "plain name",
+		captionColor = UI.Theme.Dim,
+		state = if equipped then "equipped" else "owned",
+		selected = isSelected,
+		status = if equipped then "Equipped" else "Owned",
+		statusColor = if equipped then UI.Theme.GoldHi else UI.Theme.JadeText,
+		onActivated = function()
+			if not equipped then
+				StoreUI.fire("EquipItem", NO_TITLE)
+			end
+			selected.title = NO_TITLE
+			Panels.redraw()
+		end,
 	}, parent)
-	UI.stroke(button, if isSelected then UI.Gold else UI.Bronze, if isSelected then 2.5 else 1, 0.2)
-	UI.text({
-		Position = UDim2.fromOffset(6, 30),
-		Size = UDim2.new(1, -12, 0, 40),
-		Font = UI.Display,
-		TextSize = 20,
-		Text = "No title",
-	}, button)
-	UI.text({
-		Position = UDim2.fromOffset(6, 108),
-		Size = UDim2.new(1, -12, 0, 18),
-		TextSize = 14,
-		TextColor3 = if equipped then UI.Gold else UI.Jade,
-		Text = if equipped then "Equipped" else "Owned",
-	}, button)
-	button.Activated:Connect(function()
-		if not equipped then
-			StoreUI.fire("EquipItem", NO_TITLE)
-		end
-		selected.title = NO_TITLE
-		Panels.redraw()
-	end)
 end
+
+local TAB_ICONS: { [string]: string? } = {
+	weapon = ICONS.Weapons,
+	bladeSkin = ICONS.Katana,
+	finisher = ICONS.Tabs and ICONS.Tabs.Finishers or ICONS.Deathblow,
+	outfit = ICONS.Tabs and ICONS.Tabs.Outfits or ICONS.Profile,
+	title = ICONS.Tabs and ICONS.Tabs.Titles or ICONS.Guide,
+	banner = ICONS.Tabs and ICONS.Tabs.Banners or ICONS.Trophy,
+	nameplate = ICONS.Profile,
+}
 
 function LockerPanel.build(body: Frame)
 	local header = Panels.header()
@@ -470,7 +564,7 @@ function LockerPanel.build(body: Frame)
 
 	local tabs = {}
 	for _, entry in TABS do
-		table.insert(tabs, { id = entry.id, label = entry.label })
+		table.insert(tabs, { id = entry.id, label = entry.label, icon = TAB_ICONS[entry.id] })
 	end
 	UI.tabs(body, tabs, t.id, function(id)
 		tab = id :: Catalog.Slot
@@ -497,18 +591,19 @@ function LockerPanel.build(body: Frame)
 	local state = {
 		have = have,
 		worn = worn[t.id],
+		second = if t.id == "title" and StoreUI.attr("TitleSlots", 1) >= 2 then worn.title2 else nil,
 		progress = progress,
 		selected = pick,
 	}
 	if pickItem then
 		preview(area, pickItem, state)
 	else
-		local box = UI.panel({ Size = UDim2.new(0, 250, 1, 0), BackgroundColor3 = UI.PanelLight }, area)
+		local box = UI.panel({ Name = "Preview", Size = UDim2.new(0, 250, 1, 0), material = "inset" }, area)
 		UI.text({
-			Position = UDim2.fromOffset(12, 40),
-			Size = UDim2.new(1, -24, 0, 80),
+			Position = UDim2.fromOffset(14, 40),
+			Size = UDim2.new(1, -28, 0, 80),
 			TextWrapped = true,
-			Font = UI.Display,
+			FontFace = UI.Fonts.Display,
 			TextSize = 22,
 			Text = "No title shown over your head.",
 		}, box)
@@ -520,15 +615,15 @@ function LockerPanel.build(body: Frame)
 		Size = UDim2.new(1, -262, 1, 0),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		ScrollBarThickness = 6,
-		ScrollBarImageColor3 = UI.Bronze,
+		ScrollBarThickness = 5,
+		ScrollBarImageColor3 = UI.Theme.Gold,
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		CanvasSize = UDim2.new(),
 		ScrollingDirection = Enum.ScrollingDirection.Y,
 	}, area)
 	UI.new("UIGridLayout", {
-		CellSize = UDim2.fromOffset(116, 134),
-		CellPadding = UDim2.fromOffset(8, 8),
+		CellSize = UDim2.fromOffset(118, 160),
+		CellPadding = UDim2.fromOffset(6, 8),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, grid)
 	UI.new("UIPadding", {
@@ -546,8 +641,8 @@ function LockerPanel.build(body: Frame)
 		local note = UI.text({
 			LayoutOrder = 999,
 			TextWrapped = true,
-			TextSize = 13,
-			TextTransparency = 0.3,
+			TextSize = 14,
+			TextColor3 = UI.Theme.Dim,
 			Text = "Weapons are earned with coins, never sold for Robux.",
 		}, grid)
 		note.Name = "Note"
@@ -589,14 +684,14 @@ local function startPreview(cosmetic: CosmeticModule, run: () -> ())
 	})
 	local back = UI.button({
 		Name = "Back",
+		variant = "primary",
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 132),
-		Size = UDim2.fromOffset(240, UI.Touch),
+		Size = UDim2.fromOffset(260, UI.Touch),
 		Text = "Back to the Locker",
 		TextSize = 20,
-		BackgroundColor3 = UI.Crimson,
+		sound = "Cancel",
 	}, gui)
-	UI.stroke(back, UI.Parchment, 1.5, 0.3)
 	back.Activated:Connect(function()
 		endPreview(cosmetic, true)
 	end)
