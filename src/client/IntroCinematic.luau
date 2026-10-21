@@ -314,18 +314,40 @@ local function unblocked(eye: Vector3, focus: Vector3): Vector3
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.IgnoreWater = true
+	local function solid(part: BasePart): boolean
+		local model = part:FindFirstAncestorOfClass("Model")
+		return part.Transparency < 0.6
+			and not (model and model:FindFirstChildOfClass("Humanoid"))
+			and not part:FindFirstAncestor("IntroFX") -- props and effects
+	end
 	for _ = 1, 6 do
 		local hit = workspace:Raycast(focus, along, params)
 		if not hit then
-			return eye
+			break
 		end
-		local part = hit.Instance
-		local model = part:FindFirstAncestorOfClass("Model")
-		local body = model and model:FindFirstChildOfClass("Humanoid")
-		if not body and part.Transparency < 0.6 and part.CanCollide then
-			return hit.Position - along.Unit * 0.6
+		local part = hit.Instance :: BasePart
+		if solid(part) and part.CanCollide then
+			eye = hit.Position - along.Unit * 0.6
+			break
 		end
-		params:AddToFilter(if body then model :: Model else part)
+		params:AddToFilter(part)
+	end
+	-- Something right beside the lens fills a corner of the frame even off the line of sight (a
+	-- sign board, a post): step in until the lens is clear of it.
+	local near = OverlapParams.new()
+	near.FilterType = Enum.RaycastFilterType.Exclude
+	for _ = 1, 5 do
+		local blocked = false
+		for _, part in workspace:GetPartBoundsInRadius(eye, 2.2, near) do
+			if solid(part) and part.Size.Magnitude < 60 then
+				blocked = true
+				break
+			end
+		end
+		if not blocked or (eye - focus).Magnitude < 5 then
+			break
+		end
+		eye = focus + (eye - focus) * 0.85
 	end
 	return eye
 end
