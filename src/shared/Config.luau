@@ -555,10 +555,11 @@ local Config = {
 		DamageScale = 1,
 		-- Kannagi's PlayerAttackSignSet_ANS: a boss "sees" your swing from this long before its
 		-- impact until just after, within SignRadius studs (the 300 cm sign sphere plus the
-		-- boss's capsule), and an idle boss raises guard on it.
+		-- boss's capsule), and an idle boss raises guard on it. Widened past Kannagi's ~10.7 so it
+		-- still covers the longest player reach after the 1.3x blades (an odachi thrust, ~13.4).
 		SignLead = 0.12,
 		SignTail = 0.03,
-		SignRadius = 12,
+		SignRadius = 14,
 		-- When a boss parries you, you recoil (Kannagi's ReHajiki: guard and dodge come back
 		-- 0.41 s in) and take ParryPosture x your move's deflectPosture (the boss's
 		-- AttackBaseTDamage, so Nanashi's parry costs you 25 of 100).
