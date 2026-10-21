@@ -33,6 +33,7 @@ local trialsBadge: Frame
 local levelLabel: TextLabel
 local xpFill: Frame
 local xpText: TextLabel
+local saveNotice: TextLabel
 
 local inviteButton: TextButton
 local bottom: Frame
@@ -117,6 +118,29 @@ local function build()
 	}, top)
 	coinsLabel = currencyPill(top, 1, UI.Gold, ICONS.Coin)
 	gemsLabel = currencyPill(top, 2, UI.Jade, ICONS.Gem)
+
+	-- The profile didn't load (or another server took it): say so, plainly and for as long as
+	-- it's true. The server also blocks purchases and spends for the session.
+	saveNotice = UI.text({
+		Name = "SaveNotice",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -16, 0, 58),
+		Size = UDim2.fromOffset(420, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		TextSize = 15,
+		TextColor3 = Color3.fromRGB(240, 150, 120),
+		TextStrokeTransparency = 0.4,
+		Visible = false,
+		Text = "",
+	}, screen)
+	UI.new("UIPadding", {
+		PaddingLeft = UDim.new(0, 10),
+		PaddingRight = UDim.new(0, 10),
+		PaddingTop = UDim.new(0, 6),
+		PaddingBottom = UDim.new(0, 6),
+	}, saveNotice)
 
 	-- Top-left: Mastery level and the XP bar toward the next one.
 	local mastery = UI.panel({
@@ -353,8 +377,12 @@ function refresh()
 		else "Lobby PvP: Off"
 	pvpButton.TextColor3 = if pvp == true then UI.Crimson else UI.Parchment
 
-	local today = math.floor(os.time() / 86400)
-	rewardsBadge.Visible = player:GetAttribute("DataLoaded") == true and (player:GetAttribute("LastDaily") or 0) < today
+	rewardsBadge.Visible = player:GetAttribute("DataLoaded") == true and player:GetAttribute("DailyClaimed") == false
+	local failed = player:GetAttribute("DataFailed") == true
+	saveNotice.Visible = failed or player:GetAttribute("DataWaiting") == true
+	saveNotice.Text = if failed
+		then player:GetAttribute("DataError") or "Your progress couldn't be loaded; this session won't be saved."
+		else "Waiting for your save to free up from another server..."
 	trialsBadge.Visible = player:GetAttribute("DataLoaded") == true and not trialsSeen
 
 	local xp = player:GetAttribute("XP") or 0

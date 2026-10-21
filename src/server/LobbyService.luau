@@ -4,18 +4,24 @@
 -- and can opt into lobby sparring. Duel pads are DuelService's. A deflect trainer swings at whoever steps into its ring.
 --
 -- Client requests arrive on the LobbyAction remote as (action, argument):
---   "Queue" boolean   | "PvP" boolean | "Equip" weaponId | "Buy" weaponId | "ClaimDaily"
---   "BuySkin" skinId  | "EquipSkin" skinId
--- Everything is validated here; the client only ever asks.
+--   "Queue" boolean | "PvP" boolean | "ClaimDaily"
+--   "BuyItem" catalogId    buy with coins or gems (server/Economy.buy)
+--   "EquipItem" catalogId  put an owned item in its slot (a title: "title.X", or "title." for none)
+--   "UpgradeLine" catalogId  raise an owned blade line one level with Whetstones
+--   "Purchase" productKey  prompt a Robux purchase (server/Monetization.prompt)
+-- Everything is validated here; the client only ever asks. Requests are rate-limited per
+-- player (a token bucket), so spamming equips can't flood the rig or the attributes.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Config = require(ReplicatedStorage.Shared.Config)
-local Weapons = require(ReplicatedStorage.Shared.Weapons)
+local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local CombatService = require(script.Parent.CombatService)
-local ProgressService = require(script.Parent.ProgressService)
+local Economy = require(script.Parent.Economy)
+local Monetization = require(script.Parent.Monetization)
 local StatsService = require(script.Parent.StatsService)
 local SwordRig = require(script.Parent.SwordRig)
 
@@ -24,7 +30,9 @@ type Combatant = CombatService.Combatant
 local LOBBY = Config.Lobby
 local TRAINER_RANGE = 9
 local TRAINER_INTERVAL = { 1.1, 1.9 }
-local SECONDS_PER_DAY = 86400
+-- LobbyAction rate limit: a bucket of BURST requests refilling at RATE per second.
+local BURST = 8
+local RATE = 3
 
 local LobbyService = {}
 
@@ -32,6 +40,7 @@ local LobbyService = {}
 -- Hits only land between fighters in the same one.
 local inMatch: { [Model]: string } = {}
 local pvpPending: { [Player]: number } = {}
+local buckets: { [Player]: { tokens: number, at: number } } = {}
 
 local function remote(name: string): RemoteEvent
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -45,8 +54,21 @@ local function remote(name: string): RemoteEvent
 	return created
 end
 
-local function today(): number
-	return math.floor(os.time() / SECONDS_PER_DAY)
+-- Takes one request token; false when the player is over the rate limit.
+local function allow(player: Player): boolean
+	local now = os.clock()
+	local bucket = buckets[player]
+	if not bucket then
+		bucket = { tokens = BURST, at = now }
+		buckets[player] = bucket
+	end
+	bucket.tokens = math.min(BURST, bucket.tokens + (now - bucket.at) * RATE)
+	bucket.at = now
+	if bucket.tokens < 1 then
+		return false
+	end
+	bucket.tokens -= 1
+	return true
 end
 
 -- Lobby characters with sparring off are "Safe": no one but the trainer can touch them,
@@ -107,24 +129,42 @@ function LobbyService.spawnCFrame(): CFrame
 	return CFrame.lookAt(spawn + Vector3.new(0, 3, 0), Vector3.new(pad.X, spawn.Y + 3, pad.Z))
 end
 
+-- One claim per UTC day. A missed day pauses the streak (no reset); after the last day the
+-- week starts again at day 1. The last day also pays gems and Whetstones.
 local function claimDaily(player: Player)
 	local data = StatsService.get(player)
 	if not data then
 		return
 	end
-	local day = today()
-	if data.LastDaily >= day then
+	local streak, claimed = Economy.dailyNext(data)
+	if claimed then
 		return -- already claimed today
 	end
-	local streak = if data.LastDaily == day - 1 then data.Streak + 1 else 1
-	if streak > #Config.Economy.Daily then
-		streak = 1
+	local daily = EconomyConfig.Daily
+	data.Streak = streak
+	data.LastDaily = EconomyConfig.day()
+	Economy.grant(player, "Coins", daily.Coins[streak], `Daily day {streak}`, "TimedReward", true)
+	if streak == #daily.Coins then
+		Economy.grant(player, "Gems", daily.LastDayGems, `Daily day {streak}`, "TimedReward", true)
+		Economy.grant(player, "Whetstones", daily.LastDayWhetstones, `Daily day {streak}`, "TimedReward", true)
 	end
-	StatsService.add(player, "Streak", streak - data.Streak)
-	StatsService.add(player, "LastDaily", day - data.LastDaily)
-	StatsService.add(player, "Coins", Config.Economy.Daily[streak])
-	if streak == #Config.Economy.Daily then
-		StatsService.add(player, "Gems", Config.Economy.DailyGems)
+	StatsService.commit(player)
+end
+
+-- Puts the equipped weapon and blade on the character when they're in the lobby.
+local function dressInLobby(player: Player, slot: string)
+	local character = player.Character
+	if not character then
+		return
+	end
+	if slot == "weapon" then
+		local c = CombatService.get(character)
+		local weapon = player:GetAttribute("Weapon")
+		if c and not inMatch[c.model] and typeof(weapon) == "string" then
+			CombatService.setWeapon(c, weapon)
+		end
+	elseif slot == "bladeSkin" then
+		SwordRig.applySkin(character)
 	end
 end
 
@@ -151,42 +191,42 @@ local handlers: { [string]: (Player, unknown) -> () } = {
 			end
 		end)
 	end,
-	Equip = function(player, id)
-		if typeof(id) ~= "string" or not StatsService.equip(player, id) then
-			return
-		end
-		-- Swap the blade right away if they're in the lobby.
-		local character = player.Character
-		local c = character and CombatService.get(character)
-		if c and not inMatch[c.model] then
-			CombatService.setWeapon(c, id)
-		end
-	end,
-	Buy = function(player, id)
+	EquipItem = function(player, id)
 		if typeof(id) ~= "string" then
 			return
 		end
-		local def = Weapons.get(id)
-		local data = StatsService.get(player)
-		if def.id ~= id or not data or data.Owned[id] then
+		if id == "title." then
+			Economy.equip(player, "title", "")
 			return
 		end
-		if StatsService.spend(player, "Coins", def.price) then
-			StatsService.grantWeapon(player, id)
+		local item = Catalog.get(id)
+		local slot = item and Catalog.slotOf(item)
+		if slot and Economy.equip(player, slot, id) then
+			dressInLobby(player, slot)
+		end
+	end,
+	BuyItem = function(player, id)
+		if typeof(id) ~= "string" then
+			return
+		end
+		local ok = Economy.buy(player, id)
+		local item = Catalog.get(id)
+		if ok and item and item.category == "bladeSkin" then
+			dressInLobby(player, "bladeSkin")
+		end
+	end,
+	UpgradeLine = function(player, id)
+		if typeof(id) == "string" then
+			Economy.upgradeLine(player, id)
+		end
+	end,
+	Purchase = function(player, key)
+		if typeof(key) == "string" then
+			Monetization.prompt(player, key)
 		end
 	end,
 	ClaimDaily = function(player)
 		claimDaily(player)
-	end,
-	BuySkin = function(player, id)
-		if typeof(id) == "string" and ProgressService.buySkin(player, id) and player.Character then
-			SwordRig.applySkin(player.Character)
-		end
-	end,
-	EquipSkin = function(player, id)
-		if typeof(id) == "string" and ProgressService.equipSkin(player, id) and player.Character then
-			SwordRig.applySkin(player.Character)
-		end
 	end,
 }
 
@@ -256,9 +296,17 @@ function LobbyService.start()
 	local lobbyAction = remote("LobbyAction")
 	lobbyAction.OnServerEvent:Connect(function(player, action: unknown, argument: unknown)
 		local handler = typeof(action) == "string" and handlers[action :: string]
-		if handler then
+		if handler and allow(player) then
 			handler(player, argument)
 		end
+	end)
+
+	-- A profile can finish loading after the character spawned: put its weapon and blade on.
+	StatsService.onLoaded(function(player)
+		task.defer(function()
+			dressInLobby(player, "weapon")
+			dressInLobby(player, "bladeSkin")
+		end)
 	end)
 
 	local function onPlayerAdded(player: Player)
@@ -278,6 +326,7 @@ function LobbyService.start()
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		pvpPending[player] = nil
+		buckets[player] = nil
 	end)
 
 	-- The arena and the lobby never touch: hits only land between two fighters in the

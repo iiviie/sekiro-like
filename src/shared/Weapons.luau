@@ -37,7 +37,7 @@ export type WeaponDef = {
 	name: string,
 	description: string,
 	archetype: string,
-	price: number, -- coins; 0 = owned from the start. Weapons are never sold for Robux.
+	-- Price and unlock rule: Shared/Catalog (`weapon.<id>`), coins only. Never sold for Robux.
 	look: WeaponLook,
 	-- Multipliers on every move unless a move overrides the field.
 	windup: number,
@@ -108,7 +108,6 @@ local defs: { [string]: WeaponDef } = {
 		name = "Katana",
 		description = "Balanced. Fast enough to pressure, safe enough to deflect with.",
 		archetype = "All-rounder",
-		price = 0,
 		-- 5.7 studs, the tip 5 studs from the hand.
 		look = katanaLook(Vector3.new(0.6 * 1.35, 0.6 * 2.6, 0.6 * 1.13) * OVERSIZE, 0.1),
 		windup = 1,
@@ -126,7 +125,6 @@ local defs: { [string]: WeaponDef } = {
 		name = "Odachi",
 		description = "Heavy and long. Breaks guards and posture, but every swing is a commitment.",
 		archetype = "Bruiser",
-		price = 600,
 		-- 7.6 studs, the tip 6.4 studs from the hand.
 		look = katanaLook(Vector3.new(0.6 * 1.6, 0.6 * 3.2, 0.6 * 1.5) * OVERSIZE, 0.12),
 		windup = 1.4,
@@ -195,7 +193,6 @@ for id, def in defs do
 		local value = (def :: any)[field]
 		assert(typeof(value) == "number" and value > 0, `[Weapons] {id}: {field} must be a positive number`)
 	end
-	assert(typeof(def.price) == "number" and def.price >= 0, `[Weapons] {id}: price must be >= 0`)
 	for kind, overrides in def.moves or {} do
 		assert(Config.Attacks[kind :: AttackKind], `[Weapons] {id}: unknown move {kind}`)
 		for field in overrides do

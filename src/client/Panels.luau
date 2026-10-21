@@ -1,14 +1,18 @@
 --!strict
 -- The lobby's menus, one centred panel at a time: Weapons (equip and unlock with coins),
 -- Store, Profile (stats, most used weapons, ranked season), Rewards (daily streak) and
--- Settings. Every panel redraws from player attributes, so it is always current.
+-- Settings. Every panel redraws from player attributes, so it is always current. Prices,
+-- names and rule texts come from Shared/Catalog; what the player owns, what's unlocked and
+-- what day it is come from the server (attributes), never from client-side rules or clocks.
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
+local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Config = require(ReplicatedStorage.Shared.Config)
+local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Ranks = require(ReplicatedStorage.Shared.Ranks)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
@@ -26,21 +30,48 @@ local body: Frame
 local current: string? = nil
 local lobbyAction: RemoteEvent
 
-local function today(): number
-	return math.floor(os.time() / 86400)
-end
-
 local function attr(name: string, default: any): any
 	local value = player:GetAttribute(name)
 	return if value == nil then default else value
 end
 
+-- The server's UTC day and when it ends (Economy publishes both on ReplicatedStorage).
+local function serverDay(): number
+	return ReplicatedStorage:GetAttribute("ServerDay") or 0
+end
+
+local function secondsLeftToday(): number
+	local endsAt = ReplicatedStorage:GetAttribute("DayEndsAt") or 0
+	return math.max(0, endsAt - workspace:GetServerTimeNow())
+end
+
+-- Owned catalogue ids (server-published).
 local function owned(): { [string]: boolean }
 	local set = {}
-	for id in string.gmatch(attr("OwnedWeapons", ""), "[^,]+") do
+	for id in string.gmatch(attr("Inventory", ""), "[^,]+") do
 		set[id] = true
 	end
 	return set
+end
+
+local function loadout(): { [string]: string }
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, attr("Loadout", "{}"))
+	return if ok and typeof(decoded) == "table" then decoded else {}
+end
+
+-- { have, need } toward each ruled item the player doesn't own yet, from the server.
+local function unlockProgress(): { [string]: { number } }
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, attr("UnlockProgress", "{}"))
+	return if ok and typeof(decoded) == "table" then decoded else {}
+end
+
+-- Whether `item`'s rule is met (or it has none), and the "rule (x/y)" text when it isn't.
+local function lockText(item: Catalog.Item, progress: { [string]: { number } }): (boolean, string?)
+	local entry = progress[item.id]
+	if not item.rule or not entry or entry[1] >= entry[2] then
+		return true, nil
+	end
+	return false, `{item.rule.text}  ({entry[1]}/{entry[2]})`
 end
 
 local function clear()
@@ -170,7 +201,8 @@ end
 
 local function weaponsPanel()
 	local have = owned()
-	local equipped = attr("Weapon", Weapons.Default)
+	local worn = loadout()
+	local progress = unlockProgress()
 	local coins = attr("Coins", 0)
 	local list = UI.new("ScrollingFrame", {
 		Size = UDim2.fromScale(1, 1),
@@ -181,15 +213,22 @@ local function weaponsPanel()
 		CanvasSize = UDim2.new(),
 	}, body)
 	UI.new("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, list)
-	for i, id in Weapons.Order do
-		local def = Weapons.get(id)
+	for i, ref in Weapons.Order do
+		local def = Weapons.get(ref)
+		local item = Catalog.get(Catalog.idOf("weapon", ref))
+		if not item then
+			continue
+		end
+		local id = item.id
+		local price = if item.price then item.price.coins or 0 else 0
+		local unlocked, rule = lockText(item, progress)
 		local card =
 			UI.panel({ Size = UDim2.new(1, -8, 0, 104), LayoutOrder = i, BackgroundColor3 = UI.PanelLight }, list)
 		UI.new("ImageLabel", {
 			Position = UDim2.fromOffset(4, 2),
 			Size = UDim2.fromOffset(100, 100),
 			BackgroundTransparency = 1,
-			Image = (Assets.Icons :: any)[id] or Assets.Icons.Weapons,
+			Image = (Assets.Icons :: any)[ref] or Assets.Icons.Weapons,
 		}, card)
 		local textInset = UI.new("Frame", {
 			Position = UDim2.fromOffset(100, 0),
@@ -223,27 +262,41 @@ local function weaponsPanel()
 			Text = def.description,
 		}, textInset)
 		local isOwned = have[id] == true
-		local isEquipped = equipped == id
+		local isEquipped = worn.weapon == id
+		local canBuy = not isOwned and unlocked and coins >= price
 		local button = UI.button({
 			AnchorPoint = Vector2.new(1, 0.5),
 			Position = UDim2.new(1, -14, 0.5, 0),
 			Size = UDim2.fromOffset(136, 44),
-			Text = if isEquipped then "Equipped" elseif isOwned then "Equip" else `Unlock  {UI.number(def.price)} coins`,
-			BackgroundColor3 = if isEquipped
-				then UI.Panel
-				elseif isOwned then UI.Crimson
-				elseif coins >= def.price then UI.Crimson
-				else UI.Panel,
-			TextColor3 = if not isOwned and coins < def.price then Color3.fromRGB(140, 130, 120) else UI.Parchment,
+			Text = if isEquipped
+				then "Equipped"
+				elseif isOwned then "Equip"
+				elseif not unlocked then "Locked"
+				else `Unlock  {UI.number(price)} coins`,
+			BackgroundColor3 = if isEquipped then UI.Panel elseif isOwned or canBuy then UI.Crimson else UI.Panel,
+			TextColor3 = if not isOwned and not canBuy then Color3.fromRGB(140, 130, 120) else UI.Parchment,
 		}, card)
 		UI.stroke(button)
+		if rule then
+			UI.text({
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -14, 0.5, 24),
+				Size = UDim2.fromOffset(200, 18),
+				TextXAlignment = Enum.TextXAlignment.Right,
+				TextSize = 13,
+				TextTransparency = 0.3,
+				Text = rule,
+			}, card)
+		end
 		button.Activated:Connect(function()
 			if isOwned and not isEquipped then
-				lobbyAction:FireServer("Equip", id)
-			elseif not isOwned and coins >= def.price then
-				lobbyAction:FireServer("Buy", id)
+				lobbyAction:FireServer("EquipItem", id)
+			elseif canBuy then
+				lobbyAction:FireServer("BuyItem", id)
+			elseif not isOwned and rule then
+				Toasts.notice(`Locked  ·  {rule}`, UI.Parchment)
 			elseif not isOwned then
-				Toasts.notice(`{UI.number(def.price - coins)} more coins to unlock the {def.name}`, UI.Gold)
+				Toasts.notice(`{UI.number(price - coins)} more coins to unlock the {def.name}`, UI.Gold)
 			end
 		end)
 	end
@@ -277,16 +330,16 @@ local function weaponsPanel()
 		CellPadding = UDim2.fromOffset(10, 10),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, grid)
-	local ownedSkins = {}
-	for id in string.gmatch(attr("OwnedSkins", "Steel"), "[^,]+") do
-		ownedSkins[id] = true
-	end
-	local equippedSkin = attr("Skin", "Steel")
-	for i, skin in Progression.Skins do
-		local isOwned = ownedSkins[skin.id] == true
-		local isEquipped = equippedSkin == skin.id
-		local rule = skin.unlock
-		local unlocked = rule == nil or (attr(rule.stat, 0) :: number) >= rule.amount
+	for i, item in Catalog.list("bladeSkin") do
+		local skin = Progression.skin(item.ref)
+		local isOwned = have[item.id] == true
+		-- Bundle and pass exclusives show once owned; everything else always.
+		if not isOwned and not item.price and not item.rule then
+			continue
+		end
+		local isEquipped = worn.bladeSkin == item.id
+		local unlocked, rule = lockText(item, progress)
+		local price = if item.price then item.price.coins else nil
 		local card = UI.panel({
 			LayoutOrder = i,
 			BackgroundColor3 = if isEquipped then Color3.fromRGB(52, 40, 30) else UI.PanelLight,
@@ -326,9 +379,9 @@ local function weaponsPanel()
 			TextSize = 13,
 			TextTransparency = 0.3,
 			TextWrapped = true,
-			Text = if unlocked or not rule then skin.blurb else `{rule.text}  ({attr(rule.stat, 0)}/{rule.amount})`,
+			Text = if rule then rule elseif not isOwned and not price then "Earned, never sold" else skin.blurb,
 		}, card)
-		local canBuy = not isOwned and unlocked and coins >= skin.price
+		local canBuy = not isOwned and unlocked and price ~= nil and coins >= price
 		local button = UI.button({
 			AnchorPoint = Vector2.new(0.5, 1),
 			Position = UDim2.new(0.5, 0, 1, -8),
@@ -338,19 +391,20 @@ local function weaponsPanel()
 				then "Equipped"
 				elseif isOwned then "Equip"
 				elseif not unlocked then "Locked"
-				else `{UI.number(skin.price)} coins`,
+				elseif price then `{UI.number(price)} coins`
+				else "Earned",
 			BackgroundColor3 = if isEquipped then UI.Panel elseif isOwned or canBuy then UI.Crimson else UI.Panel,
 			TextColor3 = if not isOwned and not canBuy then Color3.fromRGB(140, 130, 120) else UI.Parchment,
 		}, card)
 		button.Activated:Connect(function()
 			if isOwned and not isEquipped then
-				lobbyAction:FireServer("EquipSkin", skin.id)
+				lobbyAction:FireServer("EquipItem", item.id)
 			elseif canBuy then
-				lobbyAction:FireServer("BuySkin", skin.id)
-			elseif not isOwned and not unlocked and rule then
-				Toasts.notice(`Locked  ·  {rule.text}`, UI.Parchment)
-			elseif not isOwned then
-				Toasts.notice(`{UI.number(skin.price - coins)} more coins for {skin.name}`, UI.Gold)
+				lobbyAction:FireServer("BuyItem", item.id)
+			elseif not isOwned and rule then
+				Toasts.notice(`Locked  ·  {rule}`, UI.Parchment)
+			elseif not isOwned and price then
+				Toasts.notice(`{UI.number(price - coins)} more coins for {skin.name}`, UI.Gold)
 			end
 		end)
 	end
@@ -363,9 +417,10 @@ local function trialsPanel()
 	if ok and typeof(decoded) == "table" then
 		progress = decoded
 	end
-	local day = today()
-	local fresh = attr("TrialDay", 0) == day
-	for i, id in Progression.dailyTrials(player.UserId, day) do
+	-- Today's trials as the server picked them; progress counts only if it's from today.
+	local fresh = attr("TrialDay", 0) == serverDay()
+	local today = string.split(attr("Trials", ""), ",")
+	for i, id in today do
 		local trial = Progression.trial(id)
 		if trial then
 			local value = if fresh then math.min(progress[id] or 0, trial.goal) else 0
@@ -441,7 +496,7 @@ local function trialsPanel()
 			}, reward)
 		end
 	end
-	local secondsLeft = 86400 - os.time() % 86400
+	local secondsLeft = secondsLeftToday()
 	UI.text({
 		Position = UDim2.fromOffset(0, 258),
 		Size = UDim2.new(1, 0, 0, 20),
@@ -468,7 +523,7 @@ local function storePanel()
 	local lines = {
 		`Fight a royale  ·  {rewards.Played.Coins} coins`,
 		`Cut someone down  ·  {rewards.Kill.Coins}   ·   deathblow bonus  ·  {rewards.Deathblow.Coins}`,
-		`Win  ·  {rewards.Win.Coins}   ·   each Mastery level  ·  50+`,
+		`Win  ·  {rewards.Win.Coins}   ·   each Mastery level  ·  {EconomyConfig.levelCoins(2)}+`,
 		"Daily Trials and the login streak pay the most",
 	}
 	for i, line in lines do
@@ -589,13 +644,12 @@ local function profilePanel()
 end
 
 local function rewardsPanel()
-	local streak = attr("Streak", 0)
-	local last = attr("LastDaily", 0)
-	local claimedToday = last >= today()
-	local continuing = last == today() - 1
-	local nextDay = if claimedToday then streak elseif continuing then streak % #Config.Economy.Daily + 1 else 1
-	sectionTitle("Daily reward  ·  come back each day to grow the streak", 0)
-	for day, coins in Config.Economy.Daily do
+	-- The server says which day the next claim pays (a missed day pauses the streak).
+	local claimedToday = attr("DailyClaimed", false) == true
+	local nextDay = attr("DailyNext", 1)
+	local daily = EconomyConfig.Daily
+	sectionTitle("Daily reward  ·  a missed day pauses the streak, it never resets", 0)
+	for day, coins in daily.Coins do
 		local done = day < nextDay or (claimedToday and day == nextDay)
 		local isNext = day == nextDay and not claimedToday
 		local card = UI.panel({
@@ -617,13 +671,13 @@ local function rewardsPanel()
 			TextColor3 = UI.Gold,
 			Text = `● {coins}`,
 		}, card)
-		if day == #Config.Economy.Daily then
+		if day == #daily.Coins then
 			UI.text({
 				Position = UDim2.fromOffset(0, 62),
 				Size = UDim2.new(1, 0, 0, 20),
 				TextSize = 15,
 				TextColor3 = Color3.fromRGB(240, 110, 100),
-				Text = `+ ◆ {Config.Economy.DailyGems}`,
+				Text = `+ ◆ {daily.LastDayGems}`,
 			}, card)
 		end
 		if done then
@@ -650,7 +704,7 @@ local function rewardsPanel()
 	claim.Activated:Connect(function()
 		if not claimedToday then
 			-- Say what it paid once the server has granted it.
-			local nextCoins = Config.Economy.Daily[nextDay] or 0
+			local nextCoins = daily.Coins[nextDay] or 0
 			player:GetAttributeChangedSignal("LastDaily"):Once(function()
 				Toasts.notice(`Day {nextDay} reward claimed  ·  +{nextCoins} coins`, UI.Gold)
 			end)

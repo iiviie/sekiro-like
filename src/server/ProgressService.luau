@@ -1,30 +1,35 @@
 --!strict
 -- Rewards for good play, as they happen. Every deflect, kill and win pays XP (and some
 -- coins) the moment it lands, with a toast on the player's screen; XP fills Mastery levels
--- that pay coins; daily Trials track events and pay out when complete; and each match ends
--- with a report card of what you did. Numbers live in Shared/Progression.
+-- that pay coins (and every 5th, gems and Whetstones); daily Trials track events and pay out
+-- when complete; and each match ends with a report card of what you did. Numbers live in
+-- Shared/EconomyConfig; currencies move through server/Economy (logged, checked).
+--
+-- Anti-farm: a fighter's kill coins pay once per match (finishing someone who rose from a
+-- cut-down pays XP only); duels against the same human pay less after the second that day
+-- (EconomyConfig.AntiFarm); Whetstones and Shrine Draws from wins are capped per day.
 --
 -- Remotes (server -> one client), on ReplicatedStorage.Remotes.Progress:
 --   "Reward"  { xp, coins, reason }         a toast
 --   "LevelUp" { level, coins }
 --   "Trial"   { id, text, coins, xp }       a trial completed
+--   "Unlock"  { id, name, category }         an item granted by a rule (server/Economy)
+--   "Notice"  { text }                        a line of feedback (server/Monetization)
 --   "Report"  { placement, fighters, kills, deathblows, deflects, perfects, xp, coins, won,
 --               duel? { score, opponent, rating? } }   (duel: "3 - 1", their name, rating change)
--- Skin requests arrive on LobbyAction ("BuySkin" / "EquipSkin", handled in LobbyService).
 
 local AnalyticsService = game:GetService("AnalyticsService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Config = require(ReplicatedStorage.Shared.Config)
+local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Round = require(ReplicatedStorage.Shared.Round)
 local CombatService = require(script.Parent.CombatService)
+local Economy = require(script.Parent.Economy)
 local StatsService = require(script.Parent.StatsService)
 
 type Combatant = CombatService.Combatant
-
-local SECONDS_PER_DAY = 86400
 
 local ProgressService = {}
 
@@ -56,22 +61,35 @@ local function funnel(player: Player, step: number)
 	end)
 end
 
-local function today(): number
-	return math.floor(os.time() / SECONDS_PER_DAY)
-end
+local today = EconomyConfig.day
+
+-- Victims whose kill reward was already paid this life cycle (a cut-down, then the death).
+local paidVictims: { [Combatant]: boolean } = setmetatable({}, { __mode = "k" }) :: any
 
 local function reportOf(player: Player): Report?
 	return reports[player]
 end
 
--- Pays XP and coins, levels up as often as the XP allows, and shows a toast.
+-- Pays XP and coins, levels up as often as the XP allows, and shows a toast. XP also counts
+-- toward the weapon in hand's Mastery. Milestone levels pay gems and Whetstones on top.
 local function grant(player: Player, xp: number, coins: number, reason: string?)
 	local d = StatsService.get(player)
+	xp, coins = math.floor(xp), math.floor(coins)
 	if not d or (xp <= 0 and coins <= 0) then
 		return
 	end
-	d.Coins += coins
+	if coins > 0 then
+		Economy.grant(player, "Coins", coins, reason or "Reward", "Gameplay", true)
+	end
 	d.XP += xp
+	if xp > 0 then
+		-- The blade in hand (equipping mid-match only changes the saved choice).
+		local character = player.Character
+		local weapon = (character and character:GetAttribute("Weapon")) or player:GetAttribute("Weapon")
+		if typeof(weapon) == "string" and weapon ~= "" then
+			d.WeaponXP[weapon] = (d.WeaponXP[weapon] or 0) + xp
+		end
+	end
 	local report = reportOf(player)
 	if report then
 		report.xp += xp
@@ -81,11 +99,25 @@ local function grant(player: Player, xp: number, coins: number, reason: string?)
 		d.XP -= Progression.xpToNext(d.Level)
 		d.Level += 1
 		local bonus = Progression.levelReward(d.Level)
-		d.Coins += bonus
+		local milestone = EconomyConfig.isMilestone(d.Level)
+		local gems, stones = 0, 0
+		if milestone then
+			local m = EconomyConfig.Milestone
+			bonus += m.Coins
+			gems, stones = m.Gems, m.Whetstones
+			Economy.grant(player, "Gems", gems, `Mastery {d.Level}`, "Gameplay", true)
+			Economy.grant(player, "Whetstones", stones, `Mastery {d.Level}`, "Gameplay", true)
+		end
+		Economy.grant(player, "Coins", bonus, `Mastery {d.Level}`, "Gameplay", true)
 		if report then
 			report.coins += bonus
 		end
-		remote:FireClient(player, "LevelUp", { level = d.Level, coins = bonus })
+		remote:FireClient(player, "LevelUp", {
+			level = d.Level,
+			coins = bonus,
+			gems = if gems > 0 then gems else nil,
+			whetstones = if stones > 0 then stones else nil,
+		})
 	end
 	StatsService.commit(player)
 	if reason then
@@ -93,10 +125,38 @@ local function grant(player: Player, xp: number, coins: number, reason: string?)
 	end
 end
 
-local function reward(player: Player, event: string, reason: string?)
+-- Earn-only extras (Whetstones, Shrine Draws, Pass XP): no toast of their own.
+local function extra(player: Player, currency: Economy.Currency, amount: number, reason: string)
+	if amount > 0 then
+		Economy.grant(player, currency, amount, reason, "Gameplay")
+	end
+end
+
+-- A win's Whetstones and (royale) Shrine Draw, under the daily caps.
+local function winExtras(player: Player, royale: boolean)
+	local stones = EconomyConfig.Whetstones
+	if Economy.dayCount(player, "winStones", 1) < stones.WinCapPerDay then
+		extra(player, "Whetstones", if royale then stones.RoyaleWin else stones.DuelWin, "Win")
+	end
+	local draws = EconomyConfig.Draws
+	if royale then
+		if Economy.dayCount(player, "royaleDraws", 1) < draws.RoyaleWinCapPerDay then
+			extra(player, "Draws", draws.RoyaleWin, "Royale win")
+		end
+	elseif Economy.dayCount(player, "duelDraws", 1) < draws.DuelWinPerDay then
+		extra(player, "Draws", 1, "Duel win")
+	end
+end
+
+local function passXP(player: Player, amount: number, reason: string)
+	extra(player, "PassXP", amount, reason)
+end
+
+local function reward(player: Player, event: string, reason: string?, factor: number?)
 	local r = Progression.Rewards[event]
-	if r then
-		grant(player, r.XP or 0, r.Coins or 0, reason)
+	local f = factor or 1
+	if r and f > 0 then
+		grant(player, (r.XP or 0) * f, (r.Coins or 0) * f, reason)
 	end
 end
 
@@ -127,6 +187,7 @@ local function trialEvent(player: Player, event: string, amount: number?)
 						{ id = id, text = trial.text, coins = trial.coins, xp = trial.xp }
 					)
 					grant(player, trial.xp, trial.coins, nil)
+					extra(player, "Whetstones", EconomyConfig.Whetstones.Trial, "Trial")
 				end
 			end
 		end
@@ -164,6 +225,7 @@ function ProgressService.matchEnded(places: { [Player]: number }, fighters: numb
 		if player.Parent then
 			funnel(player, 5)
 			reward(player, "Played", "Match fought")
+			passXP(player, EconomyConfig.Pass.Played, "Match fought")
 			trialEvent(player, "Played")
 			-- Placement among every fighter (bots count): outlasting them is worth something.
 			local report = reports[player]
@@ -177,6 +239,8 @@ function ProgressService.matchEnded(places: { [Player]: number }, fighters: numb
 			end
 			if player == winner then
 				reward(player, "Win", "Victory")
+				passXP(player, EconomyConfig.Pass.Win, "Victory")
+				winExtras(player, true)
 				trialEvent(player, "Win")
 			end
 			if report then
@@ -201,24 +265,33 @@ export type DuelResult = { won: boolean, rounds: number, score: string, opponent
 
 -- Called by DuelService with each human duellist's result. A duel pays for the fight and
 -- for every round taken, and a win pays about half a royale win; it counts toward the
--- "fight" trial but not the royale-only ones (top 3, win a royale).
+-- "fight" trial but not the royale-only ones (top 3, win a royale). The third and later duel
+-- against the same human in a day pays less (StatsService.recordDuel counts them).
 function ProgressService.duelEnded(results: { [Player]: DuelResult })
 	for player, result in results do
 		if player.Parent then
+			local factor = StatsService.lastDuelFactor(player)
 			funnel(player, 5)
-			reward(player, "Played", "Duel fought")
+			reward(player, "Played", "Duel fought", factor)
 			trialEvent(player, "Played")
+			if factor > 0 then
+				passXP(player, EconomyConfig.Pass.Played * factor, "Duel fought")
+			end
 			local perRound = Progression.Rewards.DuelRound.XP or 0
-			if result.rounds > 0 then
+			if result.rounds > 0 and factor > 0 then
 				grant(
 					player,
-					perRound * result.rounds,
+					perRound * result.rounds * factor,
 					0,
 					if result.rounds == 1 then "Round taken" else `{result.rounds} rounds taken`
 				)
 			end
-			if result.won then
-				reward(player, "DuelWin", "Duel won")
+			if result.won and factor > 0 then
+				reward(player, "DuelWin", "Duel won", factor)
+				passXP(player, EconomyConfig.Pass.Win * factor, "Duel won")
+				if factor >= 1 then
+					winExtras(player, false)
+				end
 			end
 			local report = reports[player]
 			if report then
@@ -255,19 +328,22 @@ function ProgressService.bossEnded(player: Player, result: BossResult): boolean
 		reports[player] = nil
 		return false
 	end
-	local rewards = Config.Bosses.Rewards
-	local function pay(r: { XP: number?, Coins: number? }, times: number, reason: string)
+	local rewards = EconomyConfig.Boss
+	local function pay(r: any, times: number, reason: string)
 		grant(player, math.floor((r.XP or 0) * times), math.floor((r.Coins or 0) * times), reason)
 	end
 	funnel(player, 5)
 	pay(rewards.Fought, 1, "Boss fought")
+	passXP(player, EconomyConfig.Pass.Played, "Boss fought")
 	trialEvent(player, "Played")
 	if result.lives > 0 then
 		pay(rewards.Phase, result.lives, if result.lives == 1 then "Life taken" else `{result.lives} lives taken`)
 	end
 	local first = false
 	if result.won then
-		pay(rewards.Clear, math.max(result.stars, 1), `{result.name} defeated`)
+		local stars = math.max(result.stars, 1)
+		pay(rewards.Clear, stars, `{result.name} defeated`)
+		extra(player, "Whetstones", rewards.Clear.Whetstones * stars, "Boss clear")
 		local d = StatsService.get(player)
 		if d then
 			first = (d.BossClears[result.boss] or 0) == 0
@@ -275,7 +351,16 @@ function ProgressService.bossEnded(player: Player, result: BossResult): boolean
 			StatsService.commit(player)
 		end
 		if first then
-			pay(rewards.FirstClear, 1, "First clear")
+			local firstClear = rewards.FirstClear
+			pay(firstClear, 1, "First clear")
+			extra(player, "Whetstones", firstClear.Whetstones, "First clear")
+			local gems = firstClear.Gems + firstClear.GemsPerStar * result.stars
+			Economy.grant(player, "Gems", gems, `First clear {result.boss}`, "Gameplay")
+			remote:FireClient(
+				player,
+				"Reward",
+				{ xp = 0, coins = 0, gems = gems, reason = `First clear  ·  +{gems} gems` }
+			)
 		end
 	end
 	local report = reports[player]
@@ -330,6 +415,9 @@ local function onOutcome(kind: string, outcome: string, attacker: Combatant, tar
 			end
 		elseif outcome == "Mikiri" or outcome == "Jumped" then
 			if outcome == "Mikiri" then
+				if d then
+					d.Mikiris += 1
+				end
 				reward(defender, "Mikiri", "Mikiri Counter")
 			end
 			trialEvent(defender, outcome)
@@ -341,10 +429,31 @@ local function onOutcome(kind: string, outcome: string, attacker: Combatant, tar
 	end
 end
 
-local function onKill(_victim: Combatant, killer: Combatant?, deathblow: boolean)
+-- Kills and deathblows count in fights that matter only. A fighter pays out once per life
+-- cycle: the cut-down pays, and finishing the same fighter after they rise pays XP only.
+local function onKill(victim: Combatant, killer: Combatant?, deathblow: boolean)
 	local player = killer and killer.player
 	if not player or not scoring(killer) then
 		return
+	end
+	local d = StatsService.get(player)
+	if paidVictims[victim] then
+		local xp = Progression.Rewards.Kill.XP or 0
+		grant(player, xp, 0, "Finished")
+		return
+	end
+	paidVictims[victim] = true
+	-- A duel against a human you've fought often today pays less (anti-farm).
+	local factor = 1
+	local other = victim.player
+	if other and (killer :: Combatant).model:GetAttribute("InDuel") == true then
+		factor = EconomyConfig.repeatFactor(StatsService.duelsToday(player, other))
+	end
+	if d then
+		d.Kills += 1
+		if deathblow then
+			d.Deathblows += 1
+		end
 	end
 	local report = reports[player]
 	if report then
@@ -353,49 +462,14 @@ local function onKill(_victim: Combatant, killer: Combatant?, deathblow: boolean
 			report.deathblows += 1
 		end
 	end
-	reward(player, "Kill", "Cut down")
+	reward(player, "Kill", "Cut down", factor)
 	funnel(player, 4)
 	trialEvent(player, "Kill")
 	if deathblow then
-		reward(player, "Deathblow", "Deathblow")
+		reward(player, "Deathblow", "Deathblow", factor)
 		trialEvent(player, "Deathblow")
 	end
-end
-
--- Skins: buy once the unlock condition is met, then equip.
-function ProgressService.skinUnlocked(player: Player, id: string): boolean
-	local skin = Progression.skin(id)
-	local d = StatsService.get(player)
-	if not d or skin.id ~= id then
-		return false
-	end
-	local rule = skin.unlock
-	return rule == nil or ((d :: any)[rule.stat] or 0) >= rule.amount
-end
-
-function ProgressService.buySkin(player: Player, id: string): boolean
-	local skin = Progression.skin(id)
-	local d = StatsService.get(player)
-	if not d or skin.id ~= id or d.OwnedSkins[id] or not ProgressService.skinUnlocked(player, id) then
-		return false
-	end
-	if not StatsService.spend(player, "Coins", skin.price) then
-		return false
-	end
-	d.OwnedSkins[id] = true
-	d.Skin = id
 	StatsService.commit(player)
-	return true
-end
-
-function ProgressService.equipSkin(player: Player, id: string): boolean
-	local d = StatsService.get(player)
-	if not d or not d.OwnedSkins[id] then
-		return false
-	end
-	d.Skin = id
-	StatsService.commit(player)
-	return true
 end
 
 function ProgressService.start()

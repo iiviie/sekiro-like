@@ -457,13 +457,19 @@ function Toasts.start()
 		if kind == "Reward" then
 			toast(data.xp or 0, data.coins or 0, data.reason or "")
 		elseif kind == "LevelUp" then
-			banner(ICONS.Level, `Mastery {data.level}`, `Level up  ·  +{data.coins} coins`, UI.Gold, 0.16)
+			local gems = if data.gems then `  ·  +{data.gems} gems` else ""
+			banner(ICONS.Level, `Mastery {data.level}`, `Level up  ·  +{data.coins} coins{gems}`, UI.Gold, 0.16)
 			sound(Assets.Sounds.PerfectDeflect, 0.6, 0.7)
 		elseif kind == "Trial" then
 			banner(ICONS.Trials, "Trial complete", `{data.text}  ·  +{data.coins} coins`, UI.Jade, 0.16)
 			sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
 		elseif kind == "Report" then
 			task.delay(2.4, report, data)
+		elseif kind == "Unlock" then
+			banner(ICONS.Trophy, "Unlocked", data.name or "", UI.Gold, 0.16)
+			sound(Assets.Sounds.PerfectDeflect, 0.5, 1.1)
+		elseif kind == "Notice" then
+			Toasts.notice(data.text or "", UI.Parchment)
 		end
 	end)
 end

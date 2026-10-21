@@ -1,5 +1,7 @@
 --!strict
 -- The lobby's two boards (Total Wins, Ranked Rating) and the titles over players' heads.
+-- Wins on the board and the title count royales won against other players (HumanWins):
+-- a win in a match of bots only doesn't count there (anti-farm).
 --
 -- Boards read OrderedDataStores, refreshed every couple of minutes; each player's values
 -- are written at most once a minute. Where DataStores are unavailable (an unpublished
@@ -19,7 +21,7 @@ local WRITE_INTERVAL = 60
 local ROWS = 10
 
 local BOARDS = {
-	{ title = "TOTAL WINS", store = "LB_Wins_v1", field = "Wins" },
+	{ title = "TOTAL WINS", store = "LB_HumanWins_v1", field = "HumanWins" },
 	{ title = "RANKED RATING", store = "LB_Rating_v1", field = "Rating" },
 }
 
@@ -206,7 +208,7 @@ local function title(player: Player)
 		gui = created
 	end
 	local billboard = gui :: BillboardGui
-	local wins = player:GetAttribute("Wins") or 0
+	local wins = player:GetAttribute("HumanWins") or 0
 	local rank = Ranks.of(player:GetAttribute("Rating") or 0)
 	local winsLabel = billboard:FindFirstChild("Wins") :: TextLabel
 	local rankLabel = billboard:FindFirstChild("Rank") :: TextLabel
