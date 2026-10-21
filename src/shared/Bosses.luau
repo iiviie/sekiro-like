@@ -43,6 +43,7 @@ export type BossDef = {
 	weapon: "Katana" | "Naginata" | "Odachi" | "Dual",
 	weaponLook: string, -- the Weapons id whose mesh the boss holds
 	tutorial: boolean?,
+	proper: boolean?, -- a personal name: no "the" before it (Bosses.the)
 	look: Look,
 	blurb: string,
 }
@@ -97,7 +98,7 @@ Bosses.Defs = {
 	Enemy03 = {
 		id = "Enemy03",
 		num = "03",
-		name = "Shikigami of Rabbit",
+		name = "Rabbit Shikigami",
 		nameJP = "大兎の式神",
 		stars = 0,
 		weapon = "Katana",
@@ -213,6 +214,7 @@ Bosses.Defs = {
 		id = "Enemy09",
 		num = "09",
 		name = "Niten Usagi",
+		proper = true,
 		nameJP = "二天兎",
 		stars = 3,
 		weapon = "Dual",
@@ -258,6 +260,17 @@ function Bosses.lesson(id: string, stage: string): string?
 end
 Bosses.Order = { "Enemy01", "Enemy07", "Enemy05", "Enemy04", "Enemy06", "Enemy08", "Enemy02", "Enemy09" }
 Bosses.List = { "Enemy03", "Enemy01", "Enemy07", "Enemy05", "Enemy04", "Enemy06", "Enemy08", "Enemy02", "Enemy09" }
+
+-- A boss's name as it reads in a sentence: "the Night Fox" ("The Night Fox" to start one),
+-- but "Niten Usagi".
+function Bosses.the(name: string, capital: boolean?): string
+	for _, def in Bosses.Defs do
+		if def.name == name and def.proper then
+			return name
+		end
+	end
+	return `{if capital then "The" else "the"} {name}`
+end
 
 function Bosses.def(id: string): BossDef?
 	return Bosses.Defs[id]

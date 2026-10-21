@@ -160,7 +160,7 @@ local function build()
 		BossHUD.closePicker()
 	end)
 	UI.label("body", {
-		Text = "Kannagi's nine. Two lives each: a deathblow starts phase 2, the second ends it.",
+		Text = "The Nine. Two lives each: a deathblow starts phase 2, the second wins the trial.",
 		TextSize = 16,
 		TextColor3 = THEME.Dim,
 		TextXAlignment = Enum.TextXAlignment.Left,
@@ -217,7 +217,7 @@ local function build()
 		-- Stays open until the server answers with a Start (closes it) or a Notice (says why
 		-- not), so a pick can never just vanish.
 		pendingAt = os.clock()
-		setStatus(`Opening the gate to the {entry.name}...`, UI.Parchment)
+		setStatus(`Opening the gate to {Bosses.the(entry.name)}...`, UI.Parchment)
 		BossVisuals.prepare(id)
 		remote:FireServer("Choose", id)
 	end)
@@ -592,12 +592,12 @@ local function openPicker(bosses: { { [string]: any } }, busy: { [string]: any }
 	setLine(line)
 	if line then
 		setStatus(
-			`{if busy then `{busy.player} is facing the {busy.boss}. ` else ""}You're {if line == 1
+			`{if busy then `{busy.player} is facing {Bosses.the(busy.boss)}. ` else ""}You're {if line == 1
 				then "next"
 				else `#{line}`} in line: your trial starts by itself.`
 		)
 	elseif busy then
-		setStatus(`The arena is taken: {busy.player} is facing the {busy.boss}. Pick a boss to wait your turn.`)
+		setStatus(`The arena is taken: {busy.player} is facing {Bosses.the(busy.boss)}. Pick a boss to wait your turn.`)
 	else
 		setStatus(nil)
 	end

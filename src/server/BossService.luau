@@ -500,7 +500,7 @@ local function fightBody(f: Fight)
 		lives = boss.model:GetAttribute("BossLives"),
 		tutorial = def.tutorial == true,
 	})
-	setStatus(`{player.DisplayName} faces the {def.name}`)
+	setStatus(`{player.DisplayName} faces {Bosses.the(def.name)}`)
 	task.delay(math.max(f.fightAt - now(), 0), function()
 		if fight == f and not f.result then
 			BossAI.start(brain)
@@ -598,7 +598,9 @@ local function fightBody(f: Fight)
 		-- Ended without a result (BossTest "stop", or the player left): still take the boss HUD down.
 		send(player, "End", { left = true, boss = id, name = def.name, time = time })
 	end
-	setStatus(if won then `{player.DisplayName} defeated the {def.name}` else `The {def.name} stands`)
+	setStatus(
+		if won then `{player.DisplayName} defeated {Bosses.the(def.name)}` else `{Bosses.the(def.name, true)} stands`
+	)
 	task.wait(RULES.Results)
 end
 
@@ -637,7 +639,7 @@ local function runFight(player: Player, id: string)
 		return
 	end
 	if fight then
-		notice(player, "Refused", "A trial is already underway")
+		notice(player, "Refused", "A trial is already under way")
 		return
 	end
 	local reason = whyNot(player)
@@ -699,12 +701,12 @@ local function joinLine(player: Player, id: string)
 		i = #line
 	end
 	local f = fight
-	local holder = if f then `{f.player.DisplayName} is facing the {f.def.name}` else "A trial is underway"
+	local holder = if f then `{f.player.DisplayName} is facing {Bosses.the(f.def.name)}` else "A trial is under way"
 	local def = Bosses.def(id) :: Bosses.BossDef
 	notice(
 		player,
 		"Line",
-		`{holder}. You're {if i == 1 then "next" else `#{i} in line`} for the {def.name}: it starts by itself when the arena frees up.`,
+		`{holder}. You're {if i == 1 then "next" else `#{i} in line`} for {Bosses.the(def.name)}: it starts by itself.`,
 		i
 	)
 end
@@ -718,7 +720,7 @@ function serveLine()
 		if player.Parent then
 			local reason = whyNot(player)
 			if reason then
-				notice(player, "Line", `Your turn at the shrine passed: {string.lower(reason)}`)
+				notice(player, "Line", `Your turn at the shrine passed. {reason}.`)
 			else
 				notice(player, "Turn", "Your trial begins")
 				task.spawn(runFight, player, entry.id)
