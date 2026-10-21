@@ -58,6 +58,7 @@ type Fighter = {
 	rank: string?,
 	rankColor: Color3?,
 	crest: string?,
+	userId: number?, -- a player's avatar stands on a plain banner
 }
 
 local function loadoutOf(who: Player): { [string]: string }
@@ -94,6 +95,7 @@ local function fighterOf(who: Player?, model: Model?, fallbackName: string): Fig
 			rank = rank.name,
 			rankColor = rank.color,
 			crest = (Assets.RankCrests :: any)[rank.tier],
+			userId = if who.UserId > 0 then who.UserId else nil,
 		}
 	end
 	local skinRef = model and model:GetAttribute("Skin")
@@ -108,6 +110,7 @@ local function fighterOf(who: Player?, model: Model?, fallbackName: string): Fig
 		rank = "Wandering swordsman",
 		rankColor = UI.Parchment,
 		crest = nil,
+		userId = nil,
 	}
 end
 
@@ -175,6 +178,21 @@ local function half(parent: Instance, f: Fighter, left: boolean): Frame
 	}, cloth)
 	if Flair.decorateBanner(cloth, f.banner or "Plain") then
 		motif.Visible = false -- part C's painted pattern and kanji replace the text motif
+	end
+	-- The plain banner is a bare cloth: the fighter stands on it instead (their avatar, or a
+	-- bot's blade), so the card never shows an empty panel.
+	if not f.banner or f.banner == "Plain" then
+		UI.new("ImageLabel", {
+			Name = "Figure",
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.fromScale(0.5, if f.userId then 1.08 else 0.9),
+			Size = if f.userId then UDim2.fromScale(1.1, 1.1) else UDim2.fromScale(0.62, 0.62),
+			SizeConstraint = Enum.SizeConstraint.RelativeYY,
+			BackgroundTransparency = 1,
+			Image = if f.userId then `rbxthumb://type=Avatar&id={f.userId}&w=420&h=420` else Assets.Icons.Katana,
+			ImageColor3 = if f.userId then Color3.new(1, 1, 1) else f.bladeTint,
+			ZIndex = 2,
+		}, cloth)
 	end
 	if f.crest then
 		UI.new("ImageLabel", {
