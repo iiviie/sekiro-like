@@ -22,6 +22,9 @@
 --
 -- Published per player: Passes (owned pass keys, comma separated), VIP, LoadoutSlots,
 -- TitleSlots, VictoryCry, PaidRandomRestricted, SeasonPremium (this season bought).
+-- Each purchase also tells the buyer what it granted: Progress "Purchased" { key, items,
+-- equipped, gems?, coins? } (client/StoreUI plays the thank-you reveal). Items whose Catalog
+-- status is "soon" (or whose category isn't Ready) are refused before any prompt.
 
 local AnalyticsService = game:GetService("AnalyticsService")
 local HttpService = game:GetService("HttpService")
@@ -49,12 +52,30 @@ local restricted: { [Player]: boolean } = {}
 local grants: { [string]: GrantHandler } = {}
 local IS_STUDIO = RunService:IsStudio()
 
-local function notice(player: Player, text: string)
+local function tell(player: Player, kind: string, payload: { [string]: any })
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	local progress = remotes and remotes:FindFirstChild("Progress")
 	if progress and progress:IsA("RemoteEvent") then
-		progress:FireClient(player, "Notice", { text = text })
+		progress:FireClient(player, kind, payload)
 	end
+end
+
+local function notice(player: Player, text: string)
+	tell(player, "Notice", { text = text })
+end
+
+-- What a purchase granted, for the client's thank-you reveal: Progress "Purchased" { key,
+-- items, gems, coins, equipped } (items newly owned, equipped = the ones put on over a default).
+-- Deferred so the grant's attributes have replicated first.
+local function announce(
+	player: Player,
+	key: string,
+	items: { string },
+	equipped: { string },
+	gems: number?,
+	coins: number?
+)
+	task.defer(tell, player, "Purchased", { key = key, items = items, equipped = equipped, gems = gems, coins = coins })
 end
 
 local function contents(player: Player, d: Data, key: string)
@@ -74,12 +95,22 @@ local function contents(player: Player, d: Data, key: string)
 	if c.coins then
 		Economy.grant(player, "Coins", c.coins, key, "IAP", true)
 	end
+	local owned, equipped = {}, {}
 	for _, id in c.items or {} do
-		Economy.own(player, id, "robux", true)
+		if Economy.own(player, id, "robux", true) then
+			table.insert(owned, id)
+		end
 		if c.lineLevel and Catalog.get(id) and (Catalog.get(id) :: Catalog.Item).category == "bladeLine" then
 			d.LineLevels[id] = math.max(d.LineLevels[id] or 1, c.lineLevel)
 		end
 	end
+	-- The bundle's blade and title go straight on over the defaults (the reveal offers the rest).
+	for _, id in owned do
+		if Economy.equipIfDefault(player, id) then
+			table.insert(equipped, id)
+		end
+	end
+	announce(player, key, owned, equipped, c.gems, c.coins)
 end
 
 -- Default grants: gem packs and bundles pay their contents; the season products record
@@ -97,6 +128,18 @@ grants["pass.TierSkip"] = function(_player, d, _key)
 end
 grants["pass.Tiers10"] = function(_player, d, _key)
 	d.PassTierSkips += 10
+end
+
+-- A grant that isn't a bundle or gem pack (contents() announces those): say what was bought.
+local function withAnnounce(key: string, handler: GrantHandler): GrantHandler
+	local item = Catalog.get(key)
+	if item and item.contents then
+		return handler
+	end
+	return function(player, d, k)
+		handler(player, d, k)
+		announce(player, key, {}, {}, nil, nil)
+	end
 end
 
 function Monetization.setGrant(key: string, handler: GrantHandler)
@@ -179,13 +222,19 @@ local function passItems(player: Player)
 	StatsService.commit(player)
 end
 
--- A game pass is owned: cache it and hand out what it carries.
-local function applyPass(player: Player, key: string)
+-- A game pass is owned: cache it and hand out what it carries (`bought`: just now, so the
+-- client gets its thank-you).
+local function applyPass(player: Player, key: string, bought: boolean?)
 	local owned = passes[player] or {}
 	passes[player] = owned
+	local had = owned[key] == true
 	owned[key] = true
 	passItems(player)
 	publish(player)
+	if bought and not had then
+		local item = Catalog.get(key)
+		announce(player, key, table.clone((item and item.contents and item.contents.items) or {}), {}, nil, nil)
+	end
 end
 
 function Monetization.ownsPass(player: Player, key: string): boolean
@@ -236,7 +285,7 @@ local function processReceipt(receipt: { [string]: any }, mockKey: string?): Enu
 		d.Purchases[purchaseId] = { k = key, t = os.time() }
 		local handler = grants[key]
 		if handler then
-			handler(player, d, key)
+			withAnnounce(key, handler)(player, d, key)
 		else
 			warn(`[Monetization] no grant for {key}`)
 		end
@@ -310,7 +359,7 @@ function Monetization.mockPass(player: Player, key: string): boolean
 		return false
 	end
 	StatsService.markTest(player)
-	applyPass(player, key)
+	applyPass(player, key, true)
 	return true
 end
 
@@ -354,7 +403,7 @@ function Monetization.start()
 			return
 		end
 		if purchased then
-			applyPass(player, key)
+			applyPass(player, key, true)
 		else
 			task.spawn(refreshPasses, player) -- re-check in case the cache is stale
 		end
