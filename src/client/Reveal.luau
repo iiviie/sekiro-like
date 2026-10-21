@@ -8,6 +8,11 @@
 --
 -- Reveal.play(results, opts) with ShopService outcomes ({ kind, id, amount, rarity, dup,
 -- shards, pity }); opts = { title?, again = { label, variant?, run }?, onDone? }.
+--
+-- A purchase uses the same stage without the box (`gift = true`): nothing random happened,
+-- so there's no stick and no flip, just the title ("Thank you"), what you got popping in
+-- (a slip for one thing, cards for several), a `note` line and an optional `primary` action
+-- ("Equip it", "Open the Pass") beside Done.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -28,6 +33,9 @@ export type Options = {
 	title: string?,
 	again: { label: string, variant: string?, run: () -> () }?,
 	onDone: (() -> ())?,
+	gift: boolean?, -- a purchase: no box, no stick, no card backs
+	note: string?, -- a line under the result
+	primary: { label: string, variant: string?, run: () -> () }?, -- beside Done (gift)
 }
 
 local RANK = { common = 1, uncommon = 2, rare = 3, epic = 4, legendary = 5, mythic = 6 }
@@ -85,6 +93,12 @@ end
 
 local current: ScreenGui? = nil
 
+-- Whether a reveal is on screen (the Store holds its balance pills until it closes, so the
+-- coin count doesn't spoil the slip).
+function Reveal.isOpen(): boolean
+	return current ~= nil and (current :: ScreenGui).Parent ~= nil
+end
+
 function Reveal.close()
 	if current then
 		current:Destroy()
@@ -105,6 +119,9 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 	local best = sorted[#sorted]
 	local bestStyle = UI.rarity(best.rarity)
 	local single = #results == 1
+	local gift = o.gift == true
+	-- The right-hand button: draw again, or (a purchase) the one thing worth doing next.
+	local second = o.again or o.primary
 
 	local screen = UI.new("ScreenGui", {
 		Name = "Reveal",
@@ -167,6 +184,7 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 	if not UI.art(box, "RevealBox") then
 		box.Image = ICONS.Rewards
 	end
+	box.Visible = not gift
 	local stick = UI.new("ImageLabel", {
 		Name = "Stick",
 		AnchorPoint = Vector2.new(0.5, 1),
@@ -195,6 +213,33 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 		UI.new("UICorner", { CornerRadius = UDim.new(0.4, 0) }, tip)
 	end
 	stick.Visible = false
+
+	if o.title then
+		UI.text({
+			Name = "Title",
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.fromOffset(410, 0),
+			Size = UDim2.new(1, -40, 0, 44),
+			FontFace = UI.Fonts.Display,
+			TextSize = 34,
+			TextColor3 = T.GoldHi,
+			Text = o.title,
+			ZIndex = 9,
+		}, stage)
+	end
+	if o.note then
+		UI.text({
+			Name = "Note",
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.new(0.5, 0, 1, -UI.Touch - 14),
+			Size = UDim2.new(1, -60, 0, 44),
+			TextWrapped = true,
+			TextSize = 18,
+			TextColor3 = T.Bone,
+			Text = o.note,
+			ZIndex = 9,
+		}, stage)
+	end
 
 	local skipHint = UI.label("caption", {
 		Name = "SkipHint",
@@ -240,9 +285,9 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 	local doneButton = UI.button({
 		Name = "Done",
 		variant = "secondary",
-		AnchorPoint = Vector2.new(if o.again then 0 else 0.5, 0),
-		Position = UDim2.fromScale(if o.again then 0 else 0.5, 0),
-		Size = UDim2.new(if o.again then 0.5 else 0.6, -8, 1, 0),
+		AnchorPoint = Vector2.new(if second then 0 else 0.5, 0),
+		Position = UDim2.fromScale(if second then 0 else 0.5, 0),
+		Size = UDim2.new(if second then 0.5 else 0.6, -8, 1, 0),
 		Text = "Done",
 		sound = "Cancel",
 		ZIndex = 9,
@@ -253,10 +298,10 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 			o.onDone()
 		end
 	end)
-	if o.again then
-		local again = o.again
+	if second then
+		local again = second
 		local againButton = UI.button({
-			Name = "Again",
+			Name = if o.again then "Again" else "Primary",
 			variant = again.variant or "primary",
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.fromScale(1, 0),
@@ -355,7 +400,8 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 			FontFace = UI.Fonts.Number,
 			TextSize = 16,
 			TextColor3 = style.dark,
-			Text = string.upper(outcome.rarity or "common") .. (if outcome.pity then "  ·  PITY" else ""),
+			Text = outcome.caption
+				or (string.upper(outcome.rarity or "common") .. (if outcome.pity then "  ·  PITY" else "")),
 			ZIndex = 6,
 		}, inner)
 		if outcome.dup then
@@ -419,6 +465,7 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 				status = if outcome.dup
 					then `+{outcome.shards or 0} shards`
 					elseif outcome.pity then "Pity"
+					elseif outcome.status then outcome.status
 					elseif item then "New"
 					else nil,
 				statusColor = if outcome.dup then T.JadeText else T.GoldHi,
@@ -438,10 +485,27 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 			if not UI.art(back, "CardBack") then
 				UI.paint(back, "lacquer")
 			end
-			face.Visible = skipped
-			back.Visible = not skipped
+			face.Visible = skipped or gift
+			back.Visible = not skipped and not gift
 			final(face, { Visible = true, Size = UDim2.fromScale(1, 1) })
 			final(back, { Visible = false })
+		end
+		if gift then
+			-- A purchase: the cards pop in one after another, no flipping.
+			for i = 1, n do
+				local cell = g:FindFirstChild(`Cell{i}`) :: Frame
+				local pop = UI.new("UIScale", { Scale = if skipped then 1 else 0.6 }, cell)
+				if not skipped then
+					task.delay(0.07 * (i - 1), function()
+						UI.play(pop, UI.Motion.Pop, { Scale = 1 })
+					end)
+				end
+				final(pop, { Scale = 1 })
+			end
+			if not skipped then
+				stinger(rankOf(sorted[n]))
+			end
+			return
 		end
 		-- Flip each (lowest first, the best last), 0.08 s apart.
 		task.spawn(function()
@@ -474,6 +538,26 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 
 	-- The sequence.
 	task.spawn(function()
+		if gift then
+			-- A purchase: straight to what you got.
+			UI.sound("Purchase")
+			if single then
+				buildSlip()
+				if not skipped then
+					stinger(rankOf(best))
+				end
+			else
+				buildGrid()
+			end
+			wait(if single then 0.5 else 0.08 * #sorted + 0.3)
+			for _, entry in finals do
+				for k, v in entry[2] do
+					(entry[1] :: any)[k] = v
+				end
+			end
+			showButtons()
+			return
+		end
 		local hum = if skipped then nil else UI.sound("Hum")
 		-- Box drops in and shakes.
 		tween(box, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
