@@ -1,7 +1,8 @@
 --!strict
--- Teaches the fight inside the fight. For a player's first matches, every swing coming at
--- you flashes a small "[F] DEFLECT" prompt in time with the glint, in the lower third above
--- the bars (never over the fighters); a deflect is followed by
+-- Teaches the fight inside the fight. For a player's first matches (and at the lobby's
+-- Deflect Trainer), every swing coming at you flashes a small "[F] DEFLECT" prompt in time
+-- with the glint, low on the screen just over the posture bar (never over the fighters); a
+-- deflect is followed by
 -- "CLICK  RIPOSTE" when it recoiled the attacker; a broken opponent by "CLICK  DEATHBLOW"; perilous attacks name their
 -- answer. Nobody reads a rules screen before their first fight, so the rules come to them,
 -- at the moment they matter. It retires itself once the player has the hang of it.
@@ -11,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local Bosses = require(ReplicatedStorage.Shared.Bosses)
+local CombatHUD = require(script.Parent.CombatHUD)
 local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
@@ -19,6 +21,9 @@ local MATCHES = 3 -- coach for this many matches...
 local DEFLECTS = 12 -- ...or until this many lifetime deflects, whichever comes first
 local GLINT_LEAD = 0.3 -- matches CombatVisuals' glint
 local RANGE = 12 -- studs: swings from further away aren't aimed at you (a thrust reaches ~11)
+local TIP_TIME = 6 -- seconds a death tip stays up
+local PROMPT_BOTTOM = CombatHUD.PostureTop + 4 -- just over the posture bar
+local TIP_BOTTOM = 100 -- over the spectate bar; in the lobby, low in the middle
 
 -- What beat you, and the answer to it: shown when you're cut down or killed, for everyone.
 -- Losing is only useful if you learn something from it.
@@ -51,9 +56,16 @@ local keyLabel: TextLabel
 local wordLabel: TextLabel
 local token = 0
 
-local function active(): boolean
+-- Coaching is on in a fight, or in the lobby for the Deflect Trainer's swings only
+-- (`attacker`); never for anything else in the lobby.
+local function active(attacker: Model?): boolean
 	local character = player.Character
-	if not character or (character:GetAttribute("InMatch") ~= true and character:GetAttribute("InDuel") ~= true) then
+	if not character then
+		return false
+	end
+	local fighting = character:GetAttribute("InMatch") == true or character:GetAttribute("InDuel") == true
+	local training = attacker ~= nil and attacker:GetAttribute("Trainer") ~= nil
+	if not fighting and not training then
 		return false
 	end
 	return (player:GetAttribute("Played") or 0) < MATCHES and (player:GetAttribute("Deflects") or 0) < DEFLECTS
@@ -73,12 +85,6 @@ local function show(key: string, word: string, color: Color3, hold: number)
 	keyLabel.Text = key
 	wordLabel.Text = word
 	wordLabel.TextColor3 = color
-	-- Above the boss's bars in a boss fight, else just above your own posture bar.
-	local gui = player:FindFirstChild("PlayerGui")
-	local hud = gui and gui:FindFirstChild("BossHUD")
-	local bossBar = hud and hud:FindFirstChild("BossBar")
-	local overBoss = bossBar ~= nil and bossBar:IsA("GuiObject") and bossBar.Visible
-	prompt.Position = UDim2.new(0.5, 0, 1, if overBoss then -264 else -192)
 	prompt.Visible = true
 	promptScale.Scale = 1.2
 	UI.tween(promptScale, 0.12, { Scale = 1 })
@@ -108,18 +114,43 @@ local function aimedAtMe(attacker: Model): boolean
 	return flat.Magnitude < 0.5 or theirs.CFrame.LookVector:Dot(flat.Unit) > 0.4
 end
 
+-- The death tip: up for TIP_TIME, then faded and hidden for real. (A CanvasGroup that ran
+-- out of texture budget draws plainly and ignores GroupTransparency, so the fade alone left
+-- the tip on screen for good, over the lobby's panels.)
+local tipToken = 0
+local function hideTip()
+	tipToken += 1
+	tipGroup.Visible = false
+	tipGroup.GroupTransparency = 1
+end
+
 local function showTip()
 	local kind = if os.clock() - lastHitAt < 4 then lastHitKind else "Mist"
 	local tip = kind and DEATH_TIPS[kind]
 	if not tip then
 		return
 	end
+	tipToken += 1
+	local mine = tipToken
 	tipLabel.Text = tip
+	-- Over the spectate bar while the match goes on; at the very bottom once you're back in
+	-- the lobby (nothing else lives in its bottom-centre).
+	local character = player.Character
+	local inFight = character ~= nil
+		and (character:GetAttribute("InMatch") == true or character:GetAttribute("InDuel") == true)
+	tipGroup.Position = UDim2.new(0.5, 0, 1, -(if inFight then TIP_BOTTOM else 20))
 	tipGroup.Visible = true
 	tipGroup.GroupTransparency = 1
 	UI.tween(tipGroup, 0.4, { GroupTransparency = 0 })
-	task.delay(5, function()
-		UI.tween(tipGroup, 0.6, { GroupTransparency = 1 })
+	task.delay(TIP_TIME, function()
+		if tipToken ~= mine then
+			return
+		end
+		UI.tween(tipGroup, 0.5, { GroupTransparency = 1 })
+		task.wait(0.55)
+		if tipToken == mine then
+			hideTip()
+		end
 	end)
 end
 
@@ -156,14 +187,14 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			kind = if spec and spec.low then "Sweep" elseif spec and spec.thrust then "Perilous" else "Light1"
 		end
 		task.delay(math.max(data.hitAt - GLINT_LEAD - now(), 0), function()
-			if attacker:GetAttribute("CombatState") ~= "Windup" or not active() then
+			if attacker:GetAttribute("CombatState") ~= "Windup" or not active(attacker) then
 				return
 			end
 			if kind == "Sweep" then
 				show(if touch() then "JUMP" else "SPACE", "JUMP IT", UI.Theme.CrimsonText, 0.5)
 				-- Then a second press over their head stomps them.
 				task.delay(0.42, function()
-					if active() then
+					if active(attacker) then
 						show(if touch() then "JUMP" else "SPACE", "STOMP", UI.Gold, 0.4)
 					end
 				end)
@@ -175,7 +206,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		end)
 	end,
 	Deflect = function(data)
-		if data.defender == player.Character and active() then
+		if data.defender == player.Character and active(data.attacker) then
 			-- Only a recoiled (or broken) attacker can be riposted; an opener's string goes on,
 			-- and the next glint prompts the next deflect.
 			if data.recoil or data.broke then
@@ -184,7 +215,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		end
 	end,
 	Mikiri = function(data)
-		if data.defender == player.Character and active() then
+		if data.defender == player.Character and active(data.attacker) then
 			show(if touch() then "SLASH" else "CLICK", "CUT", UI.Gold, 0.5)
 		end
 	end,
@@ -206,15 +237,23 @@ function Coach.start()
 		Name = "Coach",
 		ResetOnSpawn = false,
 		IgnoreGuiInset = true,
-		DisplayOrder = 8,
+		-- Under the lobby HUD (5) and its panels (6): a tip never covers a window.
+		DisplayOrder = 4,
 	}, player:WaitForChild("PlayerGui"))
-	-- A key cap and the word beside it, centred in the lower third: above your posture bar
-	-- and a boss's bars, below the fighters, so the exchange itself stays in view.
+	local fit = UI.new("UIScale", { Name = "Fit" }, screen)
+	local function refit()
+		fit.Scale = UI.hudScale()
+	end
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	player:GetAttributeChangedSignal("UIViewport"):Connect(refit)
+	refit()
+	-- A small key cap and the word beside it, low in the middle: just over your posture bar,
+	-- under the fighters' feet, so the exchange itself stays in view.
 	prompt = UI.new("Frame", {
 		Name = "Prompt",
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -192),
-		Size = UDim2.fromOffset(0, 40),
+		Position = UDim2.new(0.5, 0, 1, -PROMPT_BOTTOM),
+		Size = UDim2.fromOffset(0, 32),
 		AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundTransparency = 1,
 		Visible = false,
@@ -230,7 +269,7 @@ function Coach.start()
 	local cap = UI.new("Frame", {
 		Name = "Key",
 		LayoutOrder = 1,
-		Size = UDim2.fromOffset(0, 36),
+		Size = UDim2.fromOffset(0, 28),
 		AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundColor3 = UI.Ink,
 		BackgroundTransparency = 0.15,
@@ -238,33 +277,33 @@ function Coach.start()
 	}, prompt)
 	UI.corner(cap, UDim.new(0, 7))
 	UI.stroke(cap, UI.Parchment, 2, 0)
-	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, cap)
+	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, cap)
 	keyLabel = UI.text({
 		Size = UDim2.fromScale(0, 1),
 		AutomaticSize = Enum.AutomaticSize.X,
 		Font = UI.Number,
-		TextSize = 22,
+		TextSize = 18,
 		Text = "F",
 	}, cap)
 	wordLabel = UI.text({
 		Name = "Word",
 		LayoutOrder = 2,
-		Size = UDim2.fromOffset(0, 36),
+		Size = UDim2.fromOffset(0, 30),
 		AutomaticSize = Enum.AutomaticSize.X,
 		Font = UI.Display,
-		TextSize = 30,
+		TextSize = 24,
 		TextStrokeColor3 = UI.Theme.Ink,
 		TextStrokeTransparency = 0.2,
 		Text = "DEFLECT",
 	}, prompt)
 
-	-- The death tip sits just above where the prompt flashes, clear of the screen's centre,
-	-- on a lacquer plate so it reads over any ground.
+	-- The death tip: a small lacquer plate low in the middle (over the spectate bar), clear of
+	-- the screen's centre, so it reads over any ground.
 	tipGroup = UI.new("CanvasGroup", {
 		Name = "Tip",
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -312),
-		Size = UDim2.fromOffset(760, 0),
+		Position = UDim2.new(0.5, 0, 1, -TIP_BOTTOM),
+		Size = UDim2.fromOffset(540, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		Visible = false,
@@ -277,20 +316,34 @@ function Coach.start()
 		AutomaticSize = Enum.AutomaticSize.Y,
 	}, tipGroup)
 	UI.new("UIPadding", {
-		PaddingLeft = UDim.new(0, 20),
-		PaddingRight = UDim.new(0, 20),
-		PaddingTop = UDim.new(0, 12),
-		PaddingBottom = UDim.new(0, 14),
+		PaddingLeft = UDim.new(0, 16),
+		PaddingRight = UDim.new(0, 16),
+		PaddingTop = UDim.new(0, 8),
+		PaddingBottom = UDim.new(0, 10),
 	}, plate)
 	tipLabel = UI.text({
 		Size = UDim2.fromScale(1, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		TextWrapped = true,
 		Font = UI.Display,
-		TextSize = 22,
+		TextSize = 17,
 		TextColor3 = UI.Gold,
 		Text = "",
 	}, plate)
+
+	-- A new fight (or a new life) starts clean.
+	player.CharacterAdded:Connect(function(character)
+		character:GetAttributeChangedSignal("InMatch"):Connect(function()
+			if character:GetAttribute("InMatch") == true then
+				hideTip()
+			end
+		end)
+		character:GetAttributeChangedSignal("InDuel"):Connect(function()
+			if character:GetAttribute("InDuel") == true then
+				hideTip()
+			end
+		end)
+	end)
 
 	local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent
 	remote.OnClientEvent:Connect(function(kind: string, data: { [string]: any })
