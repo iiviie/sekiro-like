@@ -529,7 +529,8 @@ end
 
 -- Studio only: ServerStorage.PassTest (BindableFunction) for playtests.
 --   "state" -> JSON     "xp" n     "event" name n     "clock" offsetSeconds     "reset"
---   "buy" productKey (mock receipt)     "claimAll"
+--   "buy" productKey (mock receipt)     "claimAll"     "rollover" (archive + reset this season,
+--   paying what's unclaimed, as a calendar rollover does)
 local function testHook()
 	if not RunService:IsStudio() then
 		return
@@ -566,6 +567,21 @@ local function testHook()
 			return "reset"
 		elseif cmd == "buy" then
 			return tostring(Monetization.mockReceipt(player, tostring(a)))
+		elseif cmd == "rollover" then
+			StatsService.markTest(player)
+			local before = { Coins = d.Coins, Gems = d.Gems, Whetstones = d.Whetstones, Draws = d.Draws }
+			rollover(player, d, st, st.season)
+			StatsService.commit(player)
+			return HttpService:JSONEncode({
+				paid = {
+					coins = d.Coins - before.Coins,
+					gems = d.Gems - before.Gems,
+					whetstones = d.Whetstones - before.Whetstones,
+					draws = d.Draws - before.Draws,
+				},
+				archive = st.archive,
+				xp = d.PassXP,
+			})
 		elseif cmd == "claimAll" then
 			local texts = claimAll(player, d, st)
 			StatsService.commit(player)
