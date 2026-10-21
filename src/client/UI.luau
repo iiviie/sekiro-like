@@ -1324,6 +1324,35 @@ function UI.viewport(): Vector2
 	return if typeof(v) == "Vector2" then v else workspace.CurrentCamera.ViewportSize
 end
 
+-- HUD layout tokens (scale 1). The middle of the screen belongs to the fighters: the HUD
+-- keeps to the edges and corners and is no bigger than it has to be. `Clear` is the central
+-- region (fraction of the screen) that no resting HUD element should sit in.
+UI.Hud = {
+	Edge = 16, -- gap to the screen edge
+	Pill = 34, -- currency pill height
+	Plate = 52, -- the Mastery plate's height
+	NavCell = Vector2.new(64, 62), -- a nav item: a 40 px icon over a 14 px caption
+	NavIcon = 40,
+	Play = Vector2.new(236, 60),
+	Small = 44, -- secondary buttons beside PLAY on desktop (UI.Touch on a touch screen)
+	Toast = Vector2.new(320, 54),
+	StageTop = 86, -- the top of the announcement line, under the round banner
+	Clear = Vector2.new(0.5, 0.6),
+}
+
+-- The HUD's scale on this screen: 1 on desktop and tablets, about 0.72 on a phone in
+-- landscape (GUI offsets are points; a 390 pt tall screen has no room for desktop plates).
+function UI.hudScale(viewport: Vector2?): number
+	local v = viewport or UI.viewport()
+	return math.clamp(math.min(v.X / 1100, v.Y / 560), 0.72, 1)
+end
+
+-- Touch-sized hit areas: a touch screen, or a Studio phone test (UICompact).
+function UI.touchSized(): boolean
+	local player = Players.LocalPlayer
+	return UI.isTouch() or (player ~= nil and player:GetAttribute("UICompact") == true)
+end
+
 -- Keeps a lobby window (`height` px tall at scale 1) above the PLAY button and nav bar on
 -- any screen: its bottom sits just over them and it shrinks to the height that's left.
 function UI.fitAboveNav(window: GuiObject, height: number)
