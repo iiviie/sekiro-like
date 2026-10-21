@@ -535,13 +535,15 @@ end
 
 -- A few weathered boulders in the courtyard: cover to break line-of-sight in the ring.
 -- Sandstone rather than rock: terrain rock reads lilac and mossy on the pale sand at midday.
+-- Narrow (radius 3-3.5) and raised so they still stand about chest high (the 4-stud voxels
+-- shave a small ball's top): cover the camera sees over instead of a wall it pulls in behind.
 local function boulders()
 	local t = workspace.Terrain
 	local spots = {
-		{ Vector3.new(-34, -2.2, 22), 5 },
-		{ Vector3.new(38, -2.6, -18), 6 },
-		{ Vector3.new(12, -2.4, 40), 4.5 },
-		{ Vector3.new(-26, -2.4, -38), 4.8 },
+		{ Vector3.new(-34, 1.6, 22), 3.4 },
+		{ Vector3.new(38, 1.5, -18), 3.5 },
+		{ Vector3.new(12, 1.9, 40), 3 },
+		{ Vector3.new(-26, 1.7, -38), 3.2 },
 	}
 	for _, spot in spots do
 		t:FillBall(spot[1], spot[2], Enum.Material.Sandstone)

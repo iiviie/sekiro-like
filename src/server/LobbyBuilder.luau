@@ -22,6 +22,7 @@
 -- Terrain note: a fill whose top is at height Y gives a walkable surface at Y + 2, and a
 -- thin fill can't repaint existing voxels, so materials are painted with ReplaceMaterial.
 
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
@@ -703,7 +704,7 @@ end
 -- The glowing Royale pad: step on it (or press PLAY) to queue.
 local function queuePad(parent: Instance, center: Vector3)
 	local radius = LOBBY.QueuePadRadius
-	local pad = disc(radius + 0.8, 0.6, center + Vector3.new(0, 0.2, 0), {
+	disc(radius + 0.8, 0.6, center + Vector3.new(0, 0.2, 0), {
 		Name = "QueuePad",
 		Material = Enum.Material.Slate,
 		Color = Palette.Ink,
@@ -748,8 +749,9 @@ local function queuePad(parent: Instance, center: Vector3)
 		beam.Width0 = 2 * math.pi * radius / 28 + 0.3
 		beam.Width1 = beam.Width0
 		beam.Color = ColorSequence.new(Palette.Crimson)
-		beam.Transparency = NumberSequence.new(0.5, 1)
-		beam.LightEmission = 0.6
+		-- Faint enough that standing queued inside the ring doesn't flood the screen pink.
+		beam.Transparency = NumberSequence.new(0.75, 1)
+		beam.LightEmission = 0.3
 		beam.Segments = 1
 		beam.Parent = beamRoot
 	end
@@ -758,7 +760,10 @@ local function queuePad(parent: Instance, center: Vector3)
 	light.Range = 20
 	light.Brightness = 1.6
 	light.Parent = beamRoot
-	billboard(pad, "ROYALE", 11)
+	-- On the upright beam root, not the pad: the pad is a cylinder turned on its side, and a
+	-- billboard's StudsOffsetWorldSpace on it came out sideways (the sign stood at floor level,
+	-- 11 studs to the left, behind the stair-top lantern: "R..YALE").
+	billboard(beamRoot, "ROYALE", 11)
 end
 
 -- Duel grounds: a pair of gold pads facing each other on the lower tier, and the fenced
@@ -782,7 +787,9 @@ local function duelPad(parent: Instance, name: string, center: Vector3)
 		radius,
 		0.14,
 		center + Vector3.new(0, 0.52, 0),
-		decor({ Name = name .. "Glow", Material = Enum.Material.Neon, Color = Palette.Ember }),
+		-- Bronze, a step darker since Neon brightens it: a plain Bronze or Ember ring rendered as
+		-- the lobby's one "gamey" saturated yellow.
+		decor({ Name = name .. "Glow", Material = Enum.Material.Neon, Color = Palette.Bronze:Lerp(Color3.new(), 0.3) }),
 		parent
 	)
 	disc(
@@ -1191,7 +1198,7 @@ local function pedestal(parent: Instance, base: Vector3, faceToward: Vector3)
 	plaque.Name = "Plaque"
 	plaque.Size = UDim2.fromScale(9, 2.2) -- in studs: it shrinks with distance like the board
 	plaque.StudsOffsetWorldSpace = Vector3.new(0, 6.5, 0)
-	plaque.MaxDistance = 60
+	plaque.MaxDistance = 28 -- close up only: from the plaza its micro-text read as a broken HUD line
 	plaque.LightInfluence = 0
 	plaque.Parent = top
 	local heading = Instance.new("TextLabel")
@@ -1227,10 +1234,12 @@ local function pavilion(parent: Instance, center: Vector3, facing: Vector3)
 	}, parent)
 	for _, x in { -w / 2 + 0.6, w / 2 - 0.6 } do
 		for _, z in { -d / 2 + 0.6, d / 2 - 0.6 } do
-			EnvironmentProfile.post("DojoPost", look * CFrame.new(x, 0, z), h, 0.9, parent, {
+			local post = EnvironmentProfile.post("DojoPost", look * CFrame.new(x, 0, z), h, 0.9, parent, {
 				castShadow = false,
 				band = 1,
 			})
+			-- The lock-on camera passes through the posts instead of pulling in on a strafe.
+			CollectionService:AddTag(post, "CameraIgnore")
 		end
 	end
 	for _, side in { -1, 1 } do
@@ -1360,8 +1369,9 @@ function LobbyBuilder.build(): Folder
 		lantern(at(x, LOWER, 12), lobby)
 		lantern(at(x * 1.7, LOWER, 36), lobby)
 	end
-	tree(at(-30, LOWER, 46), lobby, 1.2)
-	tree(at(34, LOWER, 44), lobby, 1.1)
+	-- The two maples stand back from the duel pads, out of the camera's arc on a pad.
+	tree(at(-24, LOWER, 60), lobby, 1.2)
+	tree(at(26, LOWER, 58), lobby, 1.1)
 	tree(at(-58, LOWER, 18), lobby)
 	tree(at(62, LOWER, 16), lobby)
 	tree(at(-8, LOWER, 60), lobby, 0.9)
@@ -1377,9 +1387,10 @@ function LobbyBuilder.build(): Folder
 	if torii then
 		Torii.openGate(torii) -- the path runs through it to the terrace's far edge
 	end
-	for _, x in { -9, 9 } do
-		lantern(at(x, UPPER, -12), lobby)
-		lantern(at(x * 1.3, UPPER, -62), lobby)
+	for _, side in { -1, 1 } do
+		-- The stair-top pair stands clear of the stair's edges, off the camera's path up it.
+		lantern(at(side * 12, UPPER, -12), lobby)
+		lantern(at(side * 11.7, UPPER, -62), lobby)
 	end
 	-- Two towering stone lanterns flank the torii.
 	for _, x in { -18, 18 } do
