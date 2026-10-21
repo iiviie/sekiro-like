@@ -609,20 +609,24 @@ local function inkTrail(h: Handle, color: Color3, life: number): Trail?
 	if not s or not a0 or not a1 or not a0:IsA("Attachment") or not a1:IsA("Attachment") then
 		return nil
 	end
-	-- a band near the tip: from two thirds up the blade to the tip
+	-- a thin band at the tip (the brush), not a sheet: a wide band swept past a close camera
+	-- filled the frame with ink
 	local mid = Instance.new("Attachment")
-	mid.Position = a0.Position:Lerp(a1.Position, 0.62)
+	mid.Position = a0.Position:Lerp(a1.Position, 0.86)
 	mid.Parent = s
 	local trail = Instance.new("Trail")
+	trail.Name = "IntroInk"
 	trail.Attachment0 = mid
 	trail.Attachment1 = a1
 	trail.Color = ColorSequence.new(color)
-	trail.Transparency = seq(0.05, 0.25, 1)
+	trail.Transparency = seq(0.2, 0.45, 1)
+	trail.WidthScale = seq(1, 0)
 	trail.Lifetime = life
 	trail.LightEmission = 0
 	trail.LightInfluence = 0.6
 	trail.MinLength = 0.05
-	trail.FaceCamera = true
+	trail.FaceCamera = false -- in the plane of the cut, like a brush; facing the camera it read as dark sheets
+	trail.MaxLength = 6
 	trail.Texture = (Assets.UI :: any).Chrome and (Assets.UI :: any).Chrome.BrushSwipe or ""
 	trail.TextureMode = Enum.TextureMode.Stretch
 	trail.Parent = s
@@ -907,7 +911,7 @@ local BEATS: { [string]: { Beat } } = {
 		{
 			at = 0.3,
 			run = function(h)
-				inkTrail(h, INK, 1.6)
+				inkTrail(h, INK, 0.5)
 				local r = root(h)
 				if r then
 					sound(C.Sounds.InkSwish, r, 0.6, 1, 1)
@@ -927,10 +931,9 @@ local BEATS: { [string]: { Beat } } = {
 			at = 1.15,
 			run = function(h)
 				local s = sword(h)
-				local trail = s and s:FindFirstChildOfClass("Trail")
 				for _, d in (if s then s:GetChildren() else {}) do
-					if d:IsA("Trail") and d ~= trail and d.Lifetime > 1 then
-						d.Enabled = false
+					if d:IsA("Trail") and d.Name == "IntroInk" then
+						d.Enabled = false -- the stroke is written
 					end
 				end
 				local r = root(h)
@@ -938,8 +941,11 @@ local BEATS: { [string]: { Beat } } = {
 					return
 				end
 				sound(C.Sounds.InkSplash, r, 0.55, 0.9, 1.5)
-				local at = r.Position + r.CFrame.LookVector * 4 * scaleOf(h) + Vector3.new(0, 1.8 * scaleOf(h), 0)
-				kanjiBoard(h, at, C.Kanji.Ink, INK, 6 * scaleOf(h), 1.0)
+				-- behind the shoulder, like a scroll hung behind the fighter (in front, it sat
+				-- between the hero shot's camera and the face)
+				local sc = scaleOf(h)
+				local at = r.Position + r.CFrame:VectorToWorldSpace(Vector3.new(2.6, 2.4, 2.2) * sc)
+				kanjiBoard(h, at, C.Kanji.Ink, INK, 5 * sc, 1.0)
 			end,
 		},
 	},

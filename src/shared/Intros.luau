@@ -119,7 +119,7 @@ Intros.List = {
 		name = "Ink Stroke",
 		blurb = "The tip writes one brush stroke in the air, and it stays.",
 		kanji = "Ink",
-		accent = rgb(60, 56, 64),
+		accent = rgb(176, 170, 190), -- a pale ink wash: dark ink vanished on the dark cards (the effects use real ink)
 		climax = 1.12,
 		flourish = { 0.36, 1.12 },
 	},
