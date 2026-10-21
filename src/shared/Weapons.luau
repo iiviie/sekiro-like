@@ -137,12 +137,20 @@ local defs: { [string]: WeaponDef } = {
 			-- Strings scale with the 1.4x windup (Light2 0.64, chained 0.59: a smaller speed-up
 			-- than the katana's, so an odachi string is two heavy swings, not a flurry).
 			-- Its overhead has late-windup armour: trade into it and lose.
-			Overhead = { armorFrom = 0.25 },
+			-- Its own deflected swings cost it about 1.15x the katana's (not the full 1.5x
+			-- posture multiplier): a fully deflected string (86 vs 77) no longer breaks it by
+			-- itself; perfect deflects still do.
+			Light1 = { deflectPosture = 0.75 },
+			Light2 = { deflectPosture = 0.75 },
+			Light3 = { deflectPosture = 0.9 },
+			Overhead = { armorFrom = 0.25, deflectPosture = 1.15 },
+			DodgeSlash = { deflectPosture = 0.75 },
 			-- The riposte is the one fast move it gets (it must land inside the 0.5 s recoil), so
 			-- the parry still pays. Its recovery still scales.
-			Riposte = { windup = 0.2 },
+			Riposte = { windup = 0.2, deflectPosture = 0.75 },
+			Riposte2 = { deflectPosture = 0.9 },
 			-- Likewise the Mikiri follow-up, which must land inside the 0.9 s Mikiri stagger.
-			MikiriSlash = { windup = 0.32 },
+			MikiriSlash = { windup = 0.32, deflectPosture = 0.75 },
 		},
 	},
 }
@@ -298,12 +306,12 @@ function Weapons.turnRate(spec: AttackSpec, elapsed: number, untilImpact: number
 end
 
 function Weapons.staminaCost(id: string?, action: string): number?
-	local base = Config.Stamina.Costs[action]
+	local base = if action == "Feint" then Config.Feint.StaminaCost else Config.Stamina.Costs[action]
 	if not base then
 		return nil
 	end
-	-- Dodges are a universal defensive verb; only attacks (if any cost stamina) scale with
-	-- the weapon.
+	-- Dodges are a universal defensive verb; feints (and attacks, if any cost stamina) scale
+	-- with the weapon: a heavy blade's cancelled windup costs more.
 	return if action == "Dodge" then base else base * Weapons.get(id).stamina
 end
 

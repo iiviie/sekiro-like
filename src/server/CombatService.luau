@@ -1193,7 +1193,7 @@ local function pressBlock(c: Combatant, stamp: number, retry: boolean): boolean
 			or t > c.windupHitAt - Config.Feint.Cutoff
 			or c.stringTrickUsed
 			or (kind and specOf(c, kind).riposte)
-			or not spendStamina(c, Config.Feint.StaminaCost)
+			or not spendStamina(c, Weapons.staminaCost(c.weapon, "Feint"))
 		then
 			return false
 		end

@@ -417,7 +417,7 @@ look (mesh, scale, grip). A load-time validator rejects unknown moves and fields
 | Weapon | Archetype | Strengths | Weaknesses / counter |
 |---|---|---|---|
 | Katana | All-rounder | Baseline speed and reach | None special |
-| Odachi | Bruiser | 1.7× posture damage, 1.25× reach, armoured overhead | 1.4× windup, 1.3× recovery, 1.35× stamina; deflect it and punish, or interrupt early |
+| Odachi | Bruiser | 1.5× posture damage, 1.25× reach, armoured overhead | 1.4× windup, 1.3× recovery, 1.35× stamina on feints; its deflected swings cost it ~1.15× the katana's posture (a fully deflected string doesn't break it, perfect deflects do); deflect it and punish, or interrupt early |
 
 Rules for new weapons: every weapon spends the same budget (sidegrades, never upgrades); defensive verbs (deflect,
 guard, dodge, jump, Mikiri) and perilous timing are universal; reach follows the blade's length. Bots alternate the
