@@ -5,7 +5,9 @@
 -- step clear. Their blade stays visible enough to read a swing.
 -- Locked on at contact range the camera swings round the pair (LockOn) so your own body rarely
 -- hides the target; as a last resort, when it hides both their head and their chest, your body
--- (not your blade) fades to SELF_FADE until one of them is in clear view.
+-- (not your blade) fades to SELF_FADE until one of them is in clear view. And when a wall or rock
+-- pulls the locked-on camera in close behind you, your body fades out as the lens nears your
+-- head (as Roblox's own camera does), so the screen never fills with your hair.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -23,6 +25,11 @@ local NEAR_CAMERA = 4.5 -- studs: anyone this close to the lens fades
 local LINE_RADIUS = 2.4 -- studs from the camera-to-you line that counts as "in the way"
 local RATE = 14 -- fade speed
 local SELF_FADE = 0.55 -- how see-through your own body gets while it hides your lock-on target
+-- Locked on, your body fades from NEAR_FAR studs between the lens and your head to NEAR_FADE at
+-- NEAR_CLOSE (at once: the camera is pulled in at once too).
+local NEAR_FAR = 3.2
+local NEAR_CLOSE = 1.6
+local NEAR_FADE = 0.92
 
 local Occlusion = {}
 
@@ -128,11 +135,20 @@ local function hidesTarget(character: Model, target: Model, from: Vector3): bool
 	return hidden > 0
 end
 
-local function fadeSelf(character: Model, from: Vector3, dt: number)
+local function fadeSelf(character: Model, from: Vector3, head: Vector3, dt: number)
 	local target = LockOn.target()
-	local goal = if target and target.Parent and hidesTarget(character, target, from) then SELF_FADE else 0
+	local locked = target ~= nil and target.Parent ~= nil
+	local goal = if locked and hidesTarget(character, target :: Model, from) then SELF_FADE else 0
+	local near = 0
+	if locked then
+		near = math.clamp((NEAR_FAR - (from - head).Magnitude) / (NEAR_FAR - NEAR_CLOSE), 0, 1) * NEAR_FADE
+		goal = math.max(goal, near)
+	end
 	if goal == 0 and selfFade == 0 then
 		return -- nothing to undo: leave the parts to Roblox's own camera
+	end
+	if near > selfFade then
+		selfFade = near -- the lens is in your hair now: fade now
 	end
 	selfFade += (goal - selfFade) * math.min(1, dt * RATE)
 	if math.abs(selfFade - goal) < 0.02 then
@@ -146,7 +162,8 @@ local function fadeSelf(character: Model, from: Vector3, dt: number)
 end
 
 function Occlusion.start()
-	RunService.RenderStepped:Connect(function(dt)
+	-- (After the lock-on camera has moved this frame, so the fade matches the frame drawn.)
+	RunService:BindToRenderStep("Occlusion", Enum.RenderPriority.Camera.Value + 2, function(dt)
 		local camera = workspace.CurrentCamera
 		local character = player.Character
 		local head = character and character:FindFirstChild("Head")
@@ -154,7 +171,7 @@ function Occlusion.start()
 			return
 		end
 		local from, to = camera.CFrame.Position, head.Position
-		fadeSelf(character :: Model, from, dt)
+		fadeSelf(character :: Model, from, to, dt)
 		local alpha = math.min(1, dt * RATE)
 		for _, instance in Tagged.list(Types.Tag) do
 			if instance:IsA("Model") and instance ~= character then

@@ -49,6 +49,10 @@ probeParams.FilterType = Enum.RaycastFilterType.Exclude
 probeParams.RespectCanCollide = true
 local eye: Vector3? = nil -- the lagged camera position and look direction (Kannagi's spring arm)
 local lookDir: Vector3? = nil
+-- How far along the arm the lens may sit: a wall, rock or post pulls it in at once, and it eases
+-- back out at ARM_OUT_RATE (a post edging in and out of the probe doesn't pop the view each frame).
+local armLength: number? = nil
+local ARM_OUT_RATE = 4
 local side = 1 -- which shoulder the camera sits over (1 right, -1 left)
 local sideBlend = 1
 local fadedProps: { [BasePart]: number } = {}
@@ -279,7 +283,7 @@ end
 
 local function updateCamera(dt: number)
 	if not target then
-		eye, lookDir = nil, nil
+		eye, lookDir, armLength = nil, nil, nil
 		if next(fadedProps) then
 			fadeProps({}, 1)
 		end
@@ -347,9 +351,11 @@ local function updateCamera(dt: number)
 	if lag.Magnitude > settings.MaxLag then
 		current = desiredEye + lag.Unit * settings.MaxLag
 	end
+	eye = current -- (the spring arm's end; the probe below only shortens what's shown)
 	-- Kannagi's arm probes the world (ProbeChannel): a wall, rock or post between you and the
-	-- eye pulls the camera in front of it at once (fighters never do).
+	-- eye pulls the camera in front of it at once (fighters never do), and it eases back out.
 	local reach = current - pivot
+	local allowed = reach.Magnitude
 	local inShot: { [BasePart]: boolean } = {}
 	-- Fighters are always ignored; what the probes see through is added as they meet it (one
 	-- filter for both probes, set once a frame).
@@ -367,10 +373,20 @@ local function updateCamera(dt: number)
 				probeParams:AddToFilter(part) -- a post or rail: see through it instead of pulling in
 				inShot[part] = true
 			else
-				current = pivot + reach.Unit * math.max(hit.Distance - 0.1, 1.5)
+				allowed = math.max(hit.Distance - 0.1, 1.5)
 				break
 			end
 		end
+	end
+	local length = armLength
+	if not length or allowed < length then
+		length = allowed
+	else
+		length += (allowed - length) * (1 - math.exp(-dt * ARM_OUT_RATE))
+	end
+	armLength = length
+	if reach.Magnitude > 0.5 and length < reach.Magnitude then
+		current = pivot + reach.Unit * length
 	end
 	-- Thin props between the eye and the target fade too (a post right in front of the lens).
 	do
@@ -388,7 +404,6 @@ local function updateCamera(dt: number)
 		end
 	end
 	fadeProps(inShot, dt)
-	eye = current
 	local wantLook = (focus - current).Unit
 	local look = lookDir or wantLook
 	look = look:Lerp(wantLook, 1 - math.exp(-dt * settings.RotationLag))
@@ -401,11 +416,83 @@ local function updateCamera(dt: number)
 	workspace.CurrentCamera.CFrame = CFrame.lookAt(current + shake, current + shake + look)
 end
 
+-- The free follow camera keeps its world angle through a teleport or a respawn, so a royale could
+-- start with you facing sideways and no one in view, and a body respawned at the boss shrine
+-- (BossService's BossReturn) started with the camera still at the lock-on angle from the side.
+-- When your character spawns, and when it is put in a match, the camera swings behind it
+-- (keeping its pitch; Roblox's camera keeps its own zoom) as soon as the body has arrived.
+local function snapBehind(root: BasePart)
+	local camera = workspace.CurrentCamera
+	if target or not camera or camera.CameraType ~= Enum.CameraType.Custom then
+		return
+	end
+	local look = root.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	if flat.Magnitude < 1e-3 then
+		return
+	end
+	flat = flat.Unit
+	local offset = camera.CFrame.Position - camera.Focus.Position
+	local distance = math.clamp(offset.Magnitude, 8, 24)
+	local pitch = if offset.Magnitude > 1e-3
+		then math.clamp(math.asin(math.clamp(offset.Unit.Y, -1, 1)), math.rad(8), math.rad(35))
+		else math.rad(18)
+	local focus = root.Position + Vector3.new(0, 1.5, 0)
+	local at = focus - flat * distance * math.cos(pitch) + Vector3.yAxis * distance * math.sin(pitch)
+	camera.CFrame = CFrame.lookAt(at, focus)
+end
+
+-- Snaps behind `character` once it has arrived: when its root jumps more than 6 studs from
+-- `from` (a teleport replicating), or at `deadline` (it was already there).
+local function snapWhenArrived(character: Model, from: Vector3?, timeout: number)
+	local deadline = os.clock() + timeout
+	local connection: RBXScriptConnection
+	connection = RunService.RenderStepped:Connect(function()
+		local root = rootOf(character)
+		local now = root and root.Position
+		if root and now and (not from or (now - from).Magnitude > 6 or os.clock() > deadline) then
+			connection:Disconnect()
+			snapBehind(root)
+		elseif not character.Parent then
+			connection:Disconnect()
+		end
+	end)
+end
+
+local function watchCharacter(character: Model, spawned: boolean)
+	local before: Vector3? = nil
+	local seen = RunService.Heartbeat:Connect(function()
+		local root = rootOf(character)
+		before = root and root.Position
+	end)
+	if spawned then
+		-- (A frame on, after Roblox's camera has taken the new body as its subject.)
+		task.defer(snapWhenArrived, character, nil, 0)
+	end
+	character:GetAttributeChangedSignal("InMatch"):Connect(function()
+		if character:GetAttribute("InMatch") == true then
+			snapWhenArrived(character, before, 0.6)
+		end
+	end)
+	character.AncestryChanged:Connect(function()
+		if not character.Parent then
+			seen:Disconnect()
+		end
+	end)
+	character.Destroying:Once(function()
+		seen:Disconnect()
+	end)
+end
+
 function LockOn.start()
 	RunService:BindToRenderStep("SekiroLockOn", Enum.RenderPriority.Camera.Value + 1, updateCamera)
-	player.CharacterAdded:Connect(function()
+	player.CharacterAdded:Connect(function(character)
 		LockOn.set(nil)
+		watchCharacter(character, true)
 	end)
+	if player.Character then
+		watchCharacter(player.Character, false)
+	end
 end
 
 return LockOn
