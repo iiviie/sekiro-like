@@ -909,6 +909,9 @@ local Config = {
 				Opening = 0.45,
 				Punish = 0.3,
 				Stomp = 0,
+				-- A full string's third hit (BotService.rollTrick): a delayed Overhead, a perilous
+				-- morph or a feint at these odds, else on rhythm. Ronin bots stay on rhythm.
+				Mix = { Overhead = 0, Morph = 0, Feint = 0 },
 			},
 			Adept = {
 				Title = "Samurai",
@@ -921,6 +924,7 @@ local Config = {
 				Opening = 0.8,
 				Punish = 0.8,
 				Stomp = 0.3,
+				Mix = { Overhead = 0.22, Morph = 0.1, Feint = 0.06 },
 			},
 			Master = {
 				Title = "Kensei",
@@ -933,6 +937,7 @@ local Config = {
 				Opening = 1,
 				Punish = 1.1,
 				Stomp = 0.8,
+				Mix = { Overhead = 0.32, Morph = 0.16, Feint = 0.12 },
 			},
 		} :: { [string]: { [string]: any } },
 	},

@@ -42,8 +42,9 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   Top left: your **Mastery** level and XP bar; top right: coins, gems and Whetstones. See
   [Progression and monetisation](#progression-and-monetisation).
 - **Match:** queued players plus bots filling up to six fighters start on a circle around the courtyard. Bots match the
-  least experienced human: **Ronin** (Novice) for a player's first 3 matches, **Samurai** (Adept), **Kensei** (Master,
-  with rare blades) for proven players; only one bot fights a given human at a time. About one match in three has an
+  least experienced human: **Ronin** (Novice) for a player's first 3 matches (up to 8 until their first win),
+  **Samurai** (Adept), **Kensei** (Master, with rare blades) for proven players (15+ matches and a ranked rating of 800,
+  or winning 45% of their royales); only one bot fights a given human at a time. About one match in three has an
   **Omen**: Blood Moon (every deathblow kills, the sky turns red), Iron Will (posture breaks 40% faster) or Rushing Mist
   (the ring closes twice as fast). After 20 s a ring of red mist starts closing and hurts anyone outside it (except
   a cut-down fighter kneeling to rise). Every player
@@ -328,7 +329,9 @@ stomp window) are per-move fields in `Config.Attacks` with defaults in `Config.M
 - **Bots** defend with Kannagi's ladder, per attacker: an idle bot that sees a swing coming raises guard; once hit it
   holds guard for the next one and steps back; once it has guarded it deflects; after a deflect that stops you it
   counters. Their tier sets how often they climb each rung and how fast they react (Ronin 40% / 0.4 s, Samurai 72% /
-  0.27 s, Kensei 93% / 0.18 s), so a Ronin still eats an honest string. Perilous answers (jump, Mikiri, sidestep,
+  0.27 s, Kensei 93% / 0.18 s), so a Ronin still eats an honest string. A Samurai or Kensei mixes up a full string's
+  third hit (`Bots.Tiers.*.Mix`: a delayed Overhead, a perilous morph or a feint; Ronin stays on rhythm), and misreads
+  your delayed Overhead as the on-rhythm third hit at its tier's miss rate (1 − Follow), so mix-ups work both ways. Perilous answers (jump, Mikiri, sidestep,
   stomp) are still rolls. They exploit recovery and sips, always go for the deathblow on a broken posture, and turn at
   a capped rate inside their own swing's tracking window, so side-stepping a committed bot swing works.
 - **Netcode.** Clients send intents stamped with `workspace:GetServerTimeNow()`. The server clamps stamps to 0.25 s in the

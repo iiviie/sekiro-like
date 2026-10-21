@@ -48,6 +48,10 @@ type Brain = {
 	backstepUntil: number, -- after a flinch: back off with guard up
 	strafeSign: number,
 	strafeSwitchAt: number,
+	-- This string's third hit (Kannagi's ender read, by the tier's Mix odds): nil on rhythm,
+	-- or "Overhead" (held a beat), "Morph" (into `morph`) or "Feint".
+	trick: string?,
+	morph: "Perilous" | "Sweep",
 }
 
 local TARGET_SHARE_PENALTY = 30 -- studs added per other bot already on a target
@@ -166,16 +170,45 @@ local function chooseTarget(brain: Brain): Combatant?
 	return best
 end
 
+-- How a full string's third hit comes out, by the tier's Mix odds: on rhythm (nil), a
+-- delayed Overhead, a perilous morph (only while the perilous cooldown is ready) or a feint.
+local function rollTrick(brain: Brain): string?
+	local mix = brain.tier.Mix
+	if not mix then
+		return nil
+	end
+	local c = brain.c
+	local roll = math.random()
+	if roll < mix.Overhead then
+		return "Overhead"
+	end
+	roll -= mix.Overhead
+	if roll < mix.Morph then
+		brain.morph = if math.random() < 0.5 then "Perilous" else "Sweep"
+		local group = Weapons.spec(c.weapon, brain.morph).cooldownGroup
+		return if group and now() < (c.groupReadyAt[group] or 0) then nil else "Morph"
+	end
+	roll -= mix.Morph
+	return if roll < mix.Feint then "Feint" else nil
+end
+
 local function startCombo(brain: Brain, t: number)
 	local c = brain.c
 	local skillTier = brain.tier
+	if brain.comboLeft > 0 and brain.trick == "Overhead" and c.comboIndex == 2 then
+		return -- holding the third press for the delayed Overhead
+	end
 	local perilous = math.random() < Config.Bots.PerilousChance * skillTier.Perilous
 	local action = if not perilous then "Attack" elseif math.random() < 0.5 then "Perilous" else "Sweep"
 	if CombatService.perform(c, action, t) then
 		brain.comboLeft = 0
+		brain.trick = nil
 		if not perilous then
 			while brain.comboLeft < 2 and math.random() < Config.Bots.ComboContinueChance do
 				brain.comboLeft += 1
+			end
+			if brain.comboLeft == 2 then
+				brain.trick = rollTrick(brain)
 			end
 		end
 		brain.nextAttackAt = t + randomRange(Config.Bots.AttackInterval) * skillTier.AttackInterval
@@ -210,12 +243,50 @@ local function think(brain: Brain)
 	-- Facing is applied every frame by updateFacing (capped by the move's tracking).
 	humanoid.AutoRotate = false
 
-	-- Chain the next slash by buffering it in the last moments of recovery.
-	if c.state == "Staggered" or c.state == "Broken" then
+	-- Chain the next slash by buffering it in the last moments of recovery. The third hit
+	-- follows the string's trick: the Overhead holds the press past Combo.DelayAfter, a morph
+	-- presses E/C in Light2's recovery (buffered until it may morph), a feint is set up below.
+	local third = brain.comboLeft > 0 and c.comboIndex == 2
+	if
+		c.state == "Staggered"
+		or c.state == "Broken"
+		or (brain.comboLeft > 0 and c.state == "Idle" and t > c.comboUntil) -- the string's window closed
+	then
+		brain.comboLeft = 0
+	elseif third and brain.trick == "Overhead" then
+		if c.state == "Idle" and t - c.idleSince >= Config.Combo.DelayAfter + 0.05 then
+			CombatService.perform(c, "Attack", t)
+			brain.comboLeft = 0
+		end
+	elseif third and brain.trick == "Morph" and c.state == "Recovery" then
+		CombatService.perform(c, brain.morph, t)
 		brain.comboLeft = 0
 	elseif brain.comboLeft > 0 and c.state == "Recovery" and c.stateEndsAt - t <= Config.Combo.Buffer then
 		CombatService.perform(c, "Attack", t)
 		brain.comboLeft -= 1
+	end
+	-- A feinted ender: cancel the third hit's windup just before the glint would be answered,
+	-- then slash straight out of it once the defender has pressed.
+	if brain.trick == "Feint" and c.state == "Windup" and (c.windupKind == "Light3" or c.windupKind == "Overhead") then
+		brain.trick = nil
+		local hitAt = c.windupHitAt
+		at(hitAt - randomRange({ Config.Feint.Cutoff + 0.04, 0.26 }), function()
+			if
+				not alive(c)
+				or c.state ~= "Windup"
+				or c.windupHitAt ~= hitAt
+				or c.stamina < (Weapons.staminaCost(c.weapon, "Feint") or 0)
+			then
+				return
+			end
+			CombatService.perform(c, "BlockDown", now())
+			CombatService.perform(c, "BlockUp", now())
+			at(now() + randomRange({ 0.15, 0.3 }), function()
+				if alive(c) and c.state == "Idle" then
+					CombatService.perform(c, "Attack", now())
+				end
+			end)
+		end)
 	end
 
 	if t >= brain.strafeSwitchAt then
@@ -457,6 +528,14 @@ local function react(bot: Combatant, attacker: Combatant, spec: AttackSpec, hitA
 	if brain and level > 0 then
 		brain.comboLeft = 0 -- don't swing into it
 	end
+	if spec.kind == "Overhead" and level > 0 and math.random() > skillTier.Follow then
+		-- Misjudged the delayed ender as the on-rhythm Light3: a tap on Light3's beat, which
+		-- the held-back Overhead mostly catches (the player's mix-up works on bots too).
+		local early = spec.windup - Weapons.spec(attacker.weapon, "Light3").windup
+		local pressAt = math.max(hitAt - early - randomRange(ladder.DeflectLead), reactAt)
+		holdBlock(bot, pressAt, pressAt + 0.05, true)
+		return
+	end
 	if level >= DEFLECT then
 		if brain then
 			brain.readUntil = math.max(brain.readUntil, hitAt + 0.4)
@@ -621,6 +700,8 @@ local function animate(model: Model, rigTier: string): Brain?
 		backstepUntil = 0,
 		strafeSign = 1,
 		strafeSwitchAt = 0,
+		trick = nil,
+		morph = "Perilous",
 	}
 	brains[c] = brain
 	task.spawn(function()
@@ -737,16 +818,19 @@ function BotService.setTier(name: string)
 	end
 end
 
--- A match's tier follows its least experienced human: easy wins for the first matches,
--- then fair fights, and masters only for proven players.
+-- A match's tier follows its least experienced human: easy wins for the first matches (and
+-- until a first win, up to 8), then fair fights, and masters for proven players: a ranked
+-- rating of 800, or a solo player winning 45% of their royales (the baseline is ~17%).
 function BotService.tierFor(players: { Player }): string
 	local name = "Master"
 	for _, player in players do
 		local played = player:GetAttribute("Played") or 0
+		local wins = player:GetAttribute("Wins") or 0
 		local rating = player:GetAttribute("Rating") or Config.Rating.Start
-		if played < 3 then
+		local winRate = if played > 0 then wins / played else 0
+		if played < 3 or (wins == 0 and played < 8) then
 			return "Novice"
-		elseif played < 20 or rating < 800 then
+		elseif played < 15 or (rating < 800 and winRate < 0.45) then
 			name = "Adept"
 		end
 	end
