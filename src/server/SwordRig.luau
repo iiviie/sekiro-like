@@ -22,24 +22,17 @@ local function trail(sword: BasePart, look: Weapons.WeaponLook)
 	to.Position = Vector3.new(0, 0, look.TipZ)
 	to.Parent = sword
 
+	-- The cut itself is drawn by client/CombatVisuals as a crescent smear swept between these two
+	-- attachments. This Trail stays invisible: client/Animator switches it on during strikes and
+	-- tints it (steel, perilous red, the equipped skin), and the smear reads both from it.
 	local swing = Instance.new("Trail")
 	swing.Attachment0 = from
 	swing.Attachment1 = to
-	-- A soft white smear that fans out behind the cut (Dueling Grounds' look): it lingers a
-	-- little and fades, so the eye reads the whole arc of a 70 ms strike.
-	swing.Lifetime = 0.22
-	swing.MinLength = 0.02
-	swing.LightEmission = 0.6
-	swing.LightInfluence = 0.15
+	swing.Lifetime = 0.05
 	swing.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(205, 220, 255))
-	swing.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.3),
-		NumberSequenceKeypoint.new(0.4, 0.55),
-		NumberSequenceKeypoint.new(1, 1),
-	})
-	swing.WidthScale = NumberSequence.new(1, 0.3)
+	swing.Transparency = NumberSequence.new(1)
 	swing.FaceCamera = false
-	swing.Enabled = false -- client/Animator switches it on during strikes
+	swing.Enabled = false
 	swing.Parent = sword
 end
 

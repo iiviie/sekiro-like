@@ -61,6 +61,17 @@ local function rootOf(model: Model?): BasePart?
 	return if root and root:IsA("BasePart") then root else nil
 end
 
+-- The flat direction from one fighter to another.
+local function flatBetween(from: Model, to: Model): Vector3?
+	local a, b = rootOf(from), rootOf(to)
+	if not a or not b then
+		return nil
+	end
+	local offset = b.Position - a.Position
+	local flat = Vector3.new(offset.X, 0, offset.Z)
+	return if flat.Magnitude > 0.1 then flat.Unit else nil
+end
+
 local function isLocal(model: Model?): boolean
 	return model ~= nil and model == player.Character
 end
@@ -124,6 +135,17 @@ local function kanjiMark(model: Model, imageId: string, color: Color3, duration:
 	Debris:AddItem(gui, duration + 0.4)
 end
 
+-- Studio test aid: the workspace attribute VfxSlowMo (0.02-1) slows the slash smears, sparks
+-- and impact flashes (not the fight) so a screen capture can land mid-strike.
+local IS_STUDIO = RunService:IsStudio()
+local function vfxSlow(): number
+	if not IS_STUDIO then
+		return 1
+	end
+	local slow = workspace:GetAttribute("VfxSlowMo")
+	return if typeof(slow) == "number" and slow > 0 and slow < 1 then math.max(slow, 0.02) else 1
+end
+
 local function anchorAt(position: Vector3): Part
 	local anchor = Instance.new("Part")
 	anchor.Anchored = true
@@ -134,17 +156,31 @@ local function anchorAt(position: Vector3): Part
 	anchor.Size = Vector3.one * 0.2
 	anchor.CFrame = CFrame.new(position)
 	anchor.Parent = workspace
-	Debris:AddItem(anchor, 1.5)
+	Debris:AddItem(anchor, 1.5 / vfxSlow())
 	return anchor
 end
 
--- A bright bloom at a point in the world, for perfect deflects and Mikiri.
-local function flare(position: Vector3, color: Color3, size: number)
+-- Settings > reduced effects (a local player attribute like the other settings): fewer
+-- particles, no lights, shorter smears.
+local function reducedEffects(): boolean
+	return player:GetAttribute("SettingReducedEffects") == true
+end
+
+local function scaled(count: number): number
+	return if reducedEffects() then math.ceil(count * 0.4) else count
+end
+
+local WHITE = Color3.new(1, 1, 1)
+
+-- A bright bloom at a point in the world (deflects, impacts, Mikiri). `star` adds a lens
+-- star: two thin crossed streaks that pinch shut as the bloom fades.
+local function flare(position: Vector3, color: Color3, size: number, star: boolean?)
 	local anchor = anchorAt(position)
 	local gui = Instance.new("BillboardGui")
 	gui.Adornee = anchor
 	gui.AlwaysOnTop = true
 	gui.LightInfluence = 0
+	gui.Brightness = 2
 	gui.Size = UDim2.fromScale(size, size)
 	local glow = Instance.new("ImageLabel")
 	glow.BackgroundTransparency = 1
@@ -154,60 +190,149 @@ local function flare(position: Vector3, color: Color3, size: number)
 	glow.AnchorPoint = Vector2.new(0.5, 0.5)
 	glow.Position = UDim2.fromScale(0.5, 0.5)
 	glow.Parent = gui
-	gui.Parent = anchor
-	TweenService:Create(glow, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = UDim2.fromScale(1, 1),
+	-- A small white-hot core inside the coloured bloom.
+	local core = glow:Clone()
+	core.ImageColor3 = WHITE
+	core.Size = UDim2.fromScale(0.25, 0.25)
+	core.Parent = gui
+	local slow = vfxSlow()
+	local out = TweenInfo.new(0.22 / slow, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(glow, out, { Size = UDim2.fromScale(1, 1), ImageTransparency = 1 }):Play()
+	TweenService:Create(core, TweenInfo.new(0.12 / slow, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = UDim2.fromScale(0.45, 0.45),
 		ImageTransparency = 1,
 	}):Play()
+	if star then
+		local tilt = math.random(-25, 25)
+		for i = 0, 1 do
+			local ray = glow:Clone()
+			ray.ImageColor3 = color:Lerp(WHITE, 0.6)
+			ray.ImageTransparency = 0
+			ray.Rotation = tilt + i * 90
+			ray.Size = UDim2.fromScale(if i == 0 then 1.5 else 0.9, 0.05)
+			ray.Parent = gui
+			TweenService:Create(ray, TweenInfo.new(0.26 / slow, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = UDim2.fromScale(if i == 0 then 1.9 else 1.1, 0),
+				ImageTransparency = 1,
+			}):Play()
+		end
+	end
+	gui.Parent = anchor
 end
 
--- Sparks plus a light flash and an expanding glow ball.
-local function burst(position: Vector3, color: Color3, count: number, speed: number, flashSize: number)
+-- Hot streaking sparks, a light flash and a bloom. With a `direction` most of the sparks spray
+-- along it (the way the blow carried them) and the rest scatter.
+local function burst(
+	position: Vector3,
+	color: Color3,
+	count: number,
+	speed: number,
+	flashSize: number,
+	direction: Vector3?
+)
 	local anchor = anchorAt(position)
+	if direction and direction.Magnitude > 0.01 then
+		anchor.CFrame = CFrame.lookAt(position, position + direction)
+	end
+	count = scaled(count)
 
 	local sparks = Instance.new("ParticleEmitter")
-	sparks.Color = ColorSequence.new(Color3.new(1, 1, 1), color)
+	sparks.Texture = Assets.UI.Glow
+	sparks.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, WHITE),
+		ColorSequenceKeypoint.new(0.35, WHITE:Lerp(color, 0.6)),
+		ColorSequenceKeypoint.new(1, color),
+	})
 	sparks.LightEmission = 1
-	sparks.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.18), NumberSequenceKeypoint.new(1, 0) })
-	sparks.Speed = NumberRange.new(speed * 0.5, speed)
-	sparks.SpreadAngle = Vector2.new(180, 180)
-	sparks.Lifetime = NumberRange.new(0.12, 0.3)
-	sparks.Acceleration = Vector3.new(0, -40, 0)
-	sparks.Drag = 4
+	sparks.LightInfluence = 0
+	sparks.Brightness = 3
+	sparks.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 0.02) })
+	sparks.Speed = NumberRange.new(speed * 0.45, speed)
+	sparks.EmissionDirection = Enum.NormalId.Front
+	sparks.Lifetime = NumberRange.new(0.12, 0.34)
+	sparks.Acceleration = Vector3.new(0, -50, 0)
+	sparks.Drag = 5
 	sparks.Rate = 0
 	sparks.Orientation = Enum.ParticleOrientation.VelocityParallel
-	sparks.Squash = NumberSequence.new(2)
+	sparks.Squash = NumberSequence.new(2.6) -- long thin streaks along the velocity
+	sparks.TimeScale = vfxSlow()
 	sparks.Parent = anchor
-	sparks:Emit(count)
+	if direction then
+		sparks.SpreadAngle = Vector2.new(55, 55)
+		sparks:Emit(math.ceil(count * 0.7))
+		sparks.SpreadAngle = Vector2.new(180, 180)
+		sparks:Emit(math.ceil(count * 0.3))
+	else
+		sparks.SpreadAngle = Vector2.new(180, 180)
+		sparks:Emit(count)
+	end
 
-	local light = Instance.new("PointLight")
-	light.Color = color
-	light.Brightness = 6
-	light.Range = 12
-	light.Parent = anchor
-	TweenService:Create(light, TweenInfo.new(0.25), { Brightness = 0 }):Play()
+	if not reducedEffects() then
+		local light = Instance.new("PointLight")
+		light.Color = color
+		light.Brightness = 3
+		light.Range = 10
+		light.Shadows = false
+		light.Parent = anchor
+		TweenService:Create(light, TweenInfo.new(0.25 / vfxSlow()), { Brightness = 0 }):Play()
+	end
 
-	local flash = Instance.new("Part")
-	flash.Shape = Enum.PartType.Ball
-	flash.Anchored = true
-	flash.CanCollide = false
-	flash.CanQuery = false
-	flash.CanTouch = false
-	flash.Material = Enum.Material.Neon
-	flash.Color = color
-	flash.Size = Vector3.one * 0.3
-	flash.CFrame = CFrame.new(position)
-	flash.Transparency = 0.1
-	flash.Parent = workspace
-	TweenService:Create(flash, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = Vector3.one * flashSize,
-		Transparency = 1,
-	}):Play()
-	Debris:AddItem(flash, 0.2)
+	flare(position, color:Lerp(WHITE, 0.35), flashSize * 1.6)
 end
 
--- Where two blades meet: along the defender's sword if they have one.
+-- A sword's edge in the world, guard to tip (its trail attachments), if it has one.
+local function bladeLine(model: Model): (Vector3?, Vector3?)
+	local sword = model:FindFirstChild("Sword")
+	local from = sword and sword:FindFirstChild("TrailStart")
+	local to = sword and sword:FindFirstChild("TrailEnd")
+	if from and to and from:IsA("Attachment") and to:IsA("Attachment") then
+		return from.WorldPosition, to.WorldPosition
+	end
+	return nil, nil
+end
+
+-- The closest points of segments p1-q1 and p2-q2 (Ericson, Real-Time Collision Detection 5.1.9).
+local function closestBetween(p1: Vector3, q1: Vector3, p2: Vector3, q2: Vector3): (Vector3, Vector3)
+	local d1, d2, r = q1 - p1, q2 - p2, p1 - p2
+	local a, e, f = d1:Dot(d1), d2:Dot(d2), d2:Dot(r)
+	local s, t
+	if a < 1e-6 and e < 1e-6 then
+		return p1, p2
+	elseif a < 1e-6 then
+		s, t = 0, math.clamp(f / e, 0, 1)
+	else
+		local c = d1:Dot(r)
+		if e < 1e-6 then
+			s, t = math.clamp(-c / a, 0, 1), 0
+		else
+			local b = d1:Dot(d2)
+			local denom = a * e - b * b
+			s = if denom > 1e-6 then math.clamp((b * f - c * e) / denom, 0, 1) else 0
+			t = (b * s + f) / e
+			if t < 0 then
+				s, t = math.clamp(-c / a, 0, 1), 0
+			elseif t > 1 then
+				s, t = math.clamp((b - c) / a, 0, 1), 1
+			end
+		end
+	end
+	return p1 + d1 * s, p2 + d2 * t
+end
+
+-- Where two blades meet: the nearest points of the two edges when they really cross on this
+-- screen, else partway up the defender's blade.
 local function contactPoint(attacker: Model, defender: Model): Vector3?
+	local guard, tip = bladeLine(defender)
+	if guard and tip then
+		local theirGuard, theirTip = bladeLine(attacker)
+		if theirGuard and theirTip then
+			local mine, theirs = closestBetween(guard, tip, theirGuard, theirTip)
+			if (mine - theirs).Magnitude < 2.5 then
+				return (mine + theirs) / 2
+			end
+		end
+		return guard:Lerp(tip, 0.55)
+	end
 	local sword = defender:FindFirstChild("Sword")
 	if sword and sword:IsA("BasePart") then
 		return (sword.CFrame * CFrame.new(0, 0, 0.6)).Position
@@ -217,6 +342,499 @@ local function contactPoint(attacker: Model, defender: Model): Vector3?
 		return nil
 	end
 	return (a.Position + b.Position) / 2 + Vector3.new(0, 1, 0)
+end
+
+---------------------------------------------------------------------------------------
+-- Slash smears
+--
+-- The blade's sweep drawn as a crescent of light in the swing plane. While Animator has the
+-- sword's Trail switched on (the strike phase of every clip; the Trail itself is hidden here
+-- and only serves as that signal and its colour), the blade's CFrame is sampled every frame
+-- and the motion between two samples is subdivided by interpolating the CFrame, so a 70 ms
+-- cut spanning four frames still draws a smooth arc. Each piece of the arc is one flat Beam
+-- running from the inner edge out to the blade's edge (TrailStart to TrailEnd: the radius and
+-- width come from the sword's own attachments), whose gradient along its length is clear near
+-- the hilt with a hot core just inside the edge. As a piece ages it fades and its inner end
+-- creeps out toward the edge, so the trailing end of the arc thins into a crescent. Beams are
+-- pooled; a frame allocates no instances.
+
+local SMEAR_LIFE = 0.24 -- seconds a piece of the arc lingers
+local SMEAR_LIFE_HEAVY = 0.3
+local SMEAR_STEP = 0.7 -- studs of tip travel per piece
+local SMEAR_MAX_SPLIT = 8 -- pieces per blade per frame at most
+local SMEAR_MAX_PIECES = 72 -- per blade
+local SMEAR_RANGE = 220 -- studs from the camera
+local SMEAR_OVERLAP = 1.03 -- pieces overlap a little so no seam shows between them
+local SMEAR_INNER = 0.06 -- a fresh piece's inner end, as a fraction of TrailStart..TrailEnd
+local SMEAR_INNER_AGED = 0.7 -- ...and where it has crept to as the piece dies
+local FADE_LEVELS = 12
+local POOL_CAP = 260
+
+-- Transparency along a piece, inner end (0) to the edge (1), at full strength.
+local PROFILE = { { 0, 1 }, { 0.3, 0.93 }, { 0.6, 0.66 }, { 0.84, 0.25 }, { 0.95, 0 }, { 1, 0.35 } }
+local FADE: { NumberSequence } = {}
+for level = 1, FADE_LEVELS do
+	local opacity = level / FADE_LEVELS
+	local points = {}
+	for i, point in PROFILE do
+		points[i] = NumberSequenceKeypoint.new(point[1], 1 - (1 - point[2]) * opacity)
+	end
+	FADE[level] = NumberSequence.new(points)
+end
+
+local HIDDEN = NumberSequence.new(1)
+local PERIL_CORE = Color3.fromRGB(255, 150, 125)
+local PERIL_BODY = Color3.fromRGB(215, 25, 22)
+
+local gradients: { [string]: ColorSequence } = {}
+local function smearGradient(core: Color3, body: Color3): ColorSequence
+	local key = core:ToHex() .. body:ToHex()
+	local cached = gradients[key]
+	if cached then
+		return cached
+	end
+	local sequence = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, body),
+		ColorSequenceKeypoint.new(0.6, body:Lerp(core, 0.45)),
+		ColorSequenceKeypoint.new(0.93, core:Lerp(WHITE, 0.6)),
+		ColorSequenceKeypoint.new(1, core),
+	})
+	gradients[key] = sequence
+	return sequence
+end
+
+type Quad = { a0: Attachment, a1: Attachment, beam: Beam }
+type Piece = {
+	quad: Quad,
+	hilt: Vector3,
+	tip: Vector3,
+	hiltChord: Vector3,
+	tipChord: Vector3,
+	born: number,
+	level: number,
+}
+type Track = { blade: BasePart, from: Vector3, to: Vector3, last: CFrame?, pieces: { Piece } }
+type Smear = {
+	model: Model,
+	tracks: { Track },
+	t: number,
+	life: number,
+	live: boolean,
+	gradient: ColorSequence,
+	emission: number,
+	brightness: number,
+}
+type Fighter = { sword: BasePart?, trail: Trail?, blades: { BasePart }, prev: { CFrame }, retryAt: number }
+
+local smearPool: { Quad } = {}
+local smears: { Smear } = {}
+local liveSmear: { [Model]: Smear } = {}
+local fighters: { [Model]: Fighter } = {}
+local frozenUntil: { [Model]: number } = {} -- hitstop holds a smear where it is
+local perilUntil: { [Model]: number } = {} -- a 危 attack is coming: its arc burns red
+local heavyKind: { [Model]: boolean } = {}
+local sweepDir: { [Model]: Vector3 } = {} -- the blade's latest direction of travel
+local sweepAt: { [Model]: number } = {}
+
+local function acquireQuad(): Quad
+	local quad = table.remove(smearPool)
+	if quad then
+		quad.beam.Enabled = true
+		return quad
+	end
+	local terrain = workspace.Terrain
+	local a0 = Instance.new("Attachment")
+	a0.Name = "SmearInner"
+	a0.Parent = terrain
+	local a1 = Instance.new("Attachment")
+	a1.Name = "SmearEdge"
+	a1.Parent = terrain
+	local beam = Instance.new("Beam")
+	beam.Name = "Smear"
+	beam.Attachment0 = a0
+	beam.Attachment1 = a1
+	beam.FaceCamera = false
+	beam.Segments = 1
+	beam.LightInfluence = 0
+	beam.Parent = terrain
+	return { a0 = a0, a1 = a1, beam = beam }
+end
+
+local function releaseQuad(quad: Quad)
+	quad.beam.Enabled = false
+	if #smearPool < POOL_CAP then
+		table.insert(smearPool, quad)
+	else
+		quad.beam:Destroy()
+		quad.a0:Destroy()
+		quad.a1:Destroy()
+	end
+end
+
+-- Puts one end of a smear piece at `position` spanning `chord`: a Beam that doesn't face the
+-- camera lays each end's width along that attachment's own Y axis, so with Y on the chord and
+-- the width its length, the piece's corners land exactly on the sampled hilt and tip points and
+-- neighbouring pieces tile without gaps, however the blade twists.
+local function place(attachment: Attachment, position: Vector3, along: Vector3, chord: Vector3)
+	local y = chord.Unit
+	local x = along - y * along:Dot(y)
+	if x.Magnitude < 1e-4 then
+		return
+	end
+	x = x.Unit
+	attachment.CFrame = CFrame.fromMatrix(position, x, y, x:Cross(y))
+end
+
+local function addPiece(smear: Smear, track: Track, a: CFrame, b: CFrame, born: number)
+	if #track.pieces >= SMEAR_MAX_PIECES then
+		return
+	end
+	local ha, hb = a * track.from, b * track.from
+	local ta, tb = a * track.to, b * track.to
+	local tipSweep = tb - ta
+	if tipSweep.Magnitude < 1e-3 then
+		return
+	end
+	local hilt, tip = (ha + hb) / 2, (ta + tb) / 2
+	local quad = acquireQuad()
+	local beam = quad.beam
+	beam.Color = smear.gradient
+	beam.LightEmission = smear.emission
+	beam.Brightness = smear.brightness
+	beam.Width1 = tipSweep.Magnitude * SMEAR_OVERLAP
+	place(quad.a1, tip, tip - hilt, tipSweep)
+	table.insert(track.pieces, {
+		quad = quad,
+		hilt = hilt,
+		tip = tip,
+		hiltChord = hb - ha,
+		tipChord = tipSweep,
+		born = born,
+		level = -1,
+	})
+	if track.blade.Name == "Sword" then
+		sweepDir[smear.model] = tipSweep.Unit
+		sweepAt[smear.model] = os.clock()
+	end
+end
+
+local function sampleTrack(smear: Smear, track: Track, dt: number)
+	local blade = track.blade
+	if not blade.Parent then
+		return
+	end
+	local cf = blade.CFrame
+	local last = track.last
+	track.last = cf
+	if not last then
+		return
+	end
+	local travel = ((cf * track.to) - (last * track.to)).Magnitude
+	if travel < 0.04 then
+		return
+	end
+	local splits = math.clamp(math.ceil(travel / SMEAR_STEP), 1, SMEAR_MAX_SPLIT)
+	local previous = last
+	for k = 1, splits do
+		local nextCf = last:Lerp(cf, k / splits)
+		addPiece(smear, track, previous, nextCf, smear.t - dt * (1 - k / splits))
+		previous = nextCf
+	end
+end
+
+-- Ages a blade's pieces; returns whether any are left.
+local function updatePieces(smear: Smear, track: Track): boolean
+	local pieces = track.pieces
+	local kept = 0
+	for i = 1, #pieces do
+		local piece = pieces[i]
+		local u = (smear.t - piece.born) / smear.life
+		if u >= 1 then
+			releaseQuad(piece.quad)
+		else
+			kept += 1
+			pieces[kept] = piece
+			u = math.max(u, 0)
+			local strength = 1 - u
+			local level = math.max(math.ceil(strength * math.sqrt(strength) * FADE_LEVELS), 1)
+			local beam = piece.quad.beam
+			if level ~= piece.level then
+				piece.level = level
+				beam.Transparency = FADE[level]
+			end
+			local f = SMEAR_INNER + (SMEAR_INNER_AGED - SMEAR_INNER) * u
+			local inner = piece.hilt:Lerp(piece.tip, f)
+			local chord = piece.hiltChord:Lerp(piece.tipChord, f)
+			if chord.Magnitude < 1e-3 then
+				chord = piece.tipChord * 1e-3 -- the blade pivots here: the piece pinches to a point
+			end
+			beam.Width0 = chord.Magnitude * SMEAR_OVERLAP
+			place(piece.quad.a0, inner, piece.tip - inner, chord)
+		end
+	end
+	for i = kept + 1, #pieces do
+		pieces[i] = nil
+	end
+	return kept > 0
+end
+
+local function startSmear(model: Model, fighter: Fighter, trail: Trail, clock: number): Smear?
+	local sword = fighter.sword
+	local camera = workspace.CurrentCamera
+	if not sword or not camera or (camera.CFrame.Position - sword.Position).Magnitude > SMEAR_RANGE then
+		return nil
+	end
+	local perilous = clock < (perilUntil[model] or 0)
+	-- The colour Animator gave the Trail (steel, perilous red or the equipped skin), unless a
+	-- 危 tell says this cut is perilous whatever the clip.
+	local keypoints = trail.Color.Keypoints
+	local core = if perilous then PERIL_CORE else keypoints[1].Value
+	local body = if perilous then PERIL_BODY else keypoints[#keypoints].Value
+	local reds = core.R > core.B + 0.25
+	local smear: Smear = {
+		model = model,
+		tracks = {},
+		t = 0,
+		life = if reducedEffects()
+			then SMEAR_LIFE * 0.6
+			elseif perilous or heavyKind[model] then SMEAR_LIFE_HEAVY
+			else SMEAR_LIFE,
+		live = true,
+		gradient = smearGradient(core, body),
+		-- Additive glow washes a red arc out to pink in daylight, so red stays mostly solid.
+		emission = if reds then 0.2 else 0.4,
+		brightness = if reds then 1.2 else 1.1,
+	}
+	for i, blade in fighter.blades do
+		local from = blade:FindFirstChild("TrailStart")
+		local to = blade:FindFirstChild("TrailEnd")
+		if from and to and from:IsA("Attachment") and to:IsA("Attachment") then
+			table.insert(smear.tracks, {
+				blade = blade,
+				from = from.Position,
+				to = to.Position,
+				last = fighter.prev[i], -- last frame's pose, so the strike's first frame counts
+				pieces = {},
+			})
+		end
+	end
+	table.insert(smears, smear)
+	return smear
+end
+
+-- Finds a fighter's sword and Trail again after a respawn or re-rig, and hides the Trail.
+local function refreshFighter(model: Model, fighter: Fighter)
+	fighter.sword, fighter.trail = nil, nil
+	table.clear(fighter.blades)
+	table.clear(fighter.prev)
+	local sword = model:FindFirstChild("Sword")
+	local trail = sword and sword:FindFirstChildOfClass("Trail")
+	if not sword or not sword:IsA("BasePart") or not trail then
+		return
+	end
+	fighter.sword, fighter.trail = sword, trail
+	table.insert(fighter.blades, sword)
+	local second = model:FindFirstChild("Sword2") -- Niten's off-hand katana
+	if second and second:IsA("BasePart") then
+		table.insert(fighter.blades, second)
+	end
+	for _, blade in fighter.blades do
+		local legacy = blade:FindFirstChildOfClass("Trail")
+		if legacy then
+			legacy.Transparency = HIDDEN -- the smear replaces it; Animator still switches it
+		end
+	end
+end
+
+local function stepSmears(dt: number)
+	local clock = os.clock()
+	for model, fighter in fighters do
+		if not model.Parent then
+			fighters[model] = nil
+			liveSmear[model] = nil
+			frozenUntil[model], perilUntil[model], heavyKind[model] = nil, nil, nil
+			sweepDir[model], sweepAt[model] = nil, nil
+			continue
+		end
+		local trail = fighter.trail
+		if not trail or trail.Parent ~= fighter.sword or (fighter.sword :: BasePart).Parent ~= model then
+			if clock < fighter.retryAt then
+				continue
+			end
+			fighter.retryAt = clock + 0.5
+			refreshFighter(model, fighter)
+			trail = fighter.trail
+			if not trail then
+				continue
+			end
+		end
+		local smear = liveSmear[model]
+		if trail.Enabled and not smear then
+			liveSmear[model] = startSmear(model, fighter, trail, clock)
+		elseif not trail.Enabled and smear then
+			smear.live = false
+			liveSmear[model] = nil
+		end
+		for i, blade in fighter.blades do
+			fighter.prev[i] = blade.CFrame
+		end
+	end
+
+	for i = #smears, 1, -1 do
+		local smear = smears[i]
+		if clock >= (frozenUntil[smear.model] or 0) then
+			smear.t += dt * vfxSlow()
+		end
+		local left = false
+		for _, track in smear.tracks do
+			if smear.live then
+				sampleTrack(smear, track, dt)
+			end
+			if updatePieces(smear, track) then
+				left = true
+			end
+		end
+		if smear.live and not smear.model.Parent then
+			smear.live = false
+		end
+		if not left and not smear.live then
+			smears[i] = smears[#smears]
+			smears[#smears] = nil
+		end
+	end
+end
+
+-- The direction the attacker's blade was travelling as it struck, if it was just swinging.
+local function recentSweep(attacker: Model): Vector3?
+	if os.clock() - (sweepAt[attacker] or -math.huge) < 0.5 then
+		return sweepDir[attacker]
+	end
+	return nil
+end
+
+-- A cut streak: a needle of light across the point of impact along the blade's path, thrown
+-- open from the centre and pinched shut.
+local function cutStreak(position: Vector3, direction: Vector3, length: number, width: number, color: Color3)
+	if direction.Magnitude < 1e-3 then
+		return
+	end
+	local dir = direction.Unit
+	local anchor = anchorAt(position)
+	local slow = vfxSlow()
+	local centre = Instance.new("Attachment")
+	centre.Parent = anchor
+	for _, sign in { 1, -1 } do
+		local tip = Instance.new("Attachment")
+		tip.Position = dir * sign * length * 0.12
+		tip.Parent = anchor
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = centre
+		beam.Attachment1 = tip
+		beam.FaceCamera = true
+		beam.Segments = 1
+		beam.Width0 = width
+		beam.Width1 = 0
+		beam.LightEmission = 1
+		beam.LightInfluence = 0
+		beam.Brightness = 4
+		beam.Color = ColorSequence.new(WHITE, color)
+		beam.Transparency = NumberSequence.new(0, 0.25)
+		beam.Parent = anchor
+		TweenService:Create(tip, TweenInfo.new(0.07 / slow, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Position = dir * sign * length * 0.5,
+		}):Play()
+		TweenService:Create(beam, TweenInfo.new(0.24 / slow, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Width0 = 0,
+		}):Play()
+	end
+end
+
+-- Stylised shards off a struck body: short white-gold streaks and a few dark chips that fall.
+local function shards(position: Vector3, direction: Vector3?, count: number, speed: number)
+	local anchor = anchorAt(position)
+	if direction and direction.Magnitude > 0.01 then
+		anchor.CFrame = CFrame.lookAt(position, position + direction)
+	end
+	count = scaled(count)
+
+	local streaks = Instance.new("ParticleEmitter")
+	streaks.Texture = Assets.UI.Glow
+	streaks.Color = ColorSequence.new(WHITE, Color3.fromRGB(255, 226, 170))
+	streaks.LightEmission = 0.8
+	streaks.LightInfluence = 0
+	streaks.Brightness = 2
+	streaks.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.32), NumberSequenceKeypoint.new(1, 0) })
+	streaks.Speed = NumberRange.new(speed * 0.4, speed)
+	streaks.EmissionDirection = Enum.NormalId.Front
+	streaks.SpreadAngle = if direction then Vector2.new(50, 50) else Vector2.new(180, 180)
+	streaks.Lifetime = NumberRange.new(0.1, 0.24)
+	streaks.Drag = 7
+	streaks.Rate = 0
+	streaks.Orientation = Enum.ParticleOrientation.VelocityParallel
+	streaks.Squash = NumberSequence.new(2.2)
+	streaks.TimeScale = vfxSlow()
+	streaks.Parent = anchor
+	streaks:Emit(count)
+
+	local chips = Instance.new("ParticleEmitter")
+	chips.Color = ColorSequence.new(Color3.fromRGB(70, 66, 72), Color3.fromRGB(30, 28, 32))
+	chips.LightInfluence = 0.5
+	chips.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.16), NumberSequenceKeypoint.new(1, 0.08) })
+	chips.Speed = NumberRange.new(speed * 0.25, speed * 0.6)
+	chips.EmissionDirection = Enum.NormalId.Front
+	chips.SpreadAngle = if direction then Vector2.new(60, 60) else Vector2.new(180, 180)
+	chips.Lifetime = NumberRange.new(0.3, 0.55)
+	chips.Acceleration = Vector3.new(0, -60, 0)
+	chips.Drag = 2
+	chips.Rate = 0
+	chips.Rotation = NumberRange.new(0, 360)
+	chips.RotSpeed = NumberRange.new(-400, 400)
+	chips.TimeScale = vfxSlow()
+	chips.Parent = anchor
+	chips:Emit(math.ceil(count / 3))
+end
+
+-- The struck point on a body: its chest, a little toward whoever struck it.
+local function impactPoint(attacker: Model, defender: Model): Vector3?
+	local root = rootOf(defender)
+	if not root then
+		return nil
+	end
+	local chest = defender:FindFirstChild("UpperTorso")
+	local point = if chest and chest:IsA("BasePart") then chest.Position else root.Position + Vector3.new(0, 0.8, 0)
+	local toward = flatBetween(defender, attacker)
+	return if toward then point + toward * 0.7 else point
+end
+
+-- A struck body's flash: the cut streak along the blade's path, a white bloom with a lens
+-- star, shards. `heavy` for enders and perilous blows, `deathblow` for the finisher's X cut.
+local function impactEffects(attacker: Model, defender: Model, heavy: boolean, deathblow: boolean)
+	local point = impactPoint(attacker, defender)
+	if not point then
+		return
+	end
+	local blow = flatBetween(attacker, defender)
+	local sweep = recentSweep(attacker)
+	if not sweep then
+		-- No swing seen (out of range, or a boss hit without a trail): a diagonal cut.
+		local across = if blow then blow:Cross(Vector3.yAxis) else Vector3.xAxis
+		sweep = across + Vector3.yAxis * (if math.random() < 0.5 then 0.7 else -0.7)
+	end
+	local sweepVector = sweep :: Vector3
+	local perilous = os.clock() < (perilUntil[attacker] or 0)
+	local tint = if perilous or deathblow then Color3.fromRGB(255, 70, 55) else Color3.fromRGB(255, 236, 200)
+	if deathblow then
+		cutStreak(point, sweepVector, 13, 1.3, tint)
+		-- The second stroke of the X, crossing the first.
+		local axis = blow or Vector3.zAxis
+		cutStreak(point, CFrame.fromAxisAngle(axis, math.rad(75)):VectorToWorldSpace(sweepVector), 10, 1, tint)
+		flare(point, Color3.fromRGB(255, 225, 215), 20, true)
+		shards(point, blow, 70, 38)
+	else
+		cutStreak(point, sweepVector, if heavy then 10 else 8, if heavy then 1.3 else 0.95, tint)
+		flare(point, Color3.fromRGB(255, 246, 228), if heavy then 8 else 5.5, true)
+		shards(point, blow, if heavy then 34 else 20, if heavy then 32 else 24)
+	end
 end
 
 -- A directional camera kick: the view snaps along the line of the blow and settles,
@@ -403,17 +1021,6 @@ local function knockLocal(direction: Vector3?, distance: number)
 	Motion.surge(direction, 3 * distance / duration, 0, duration)
 end
 
--- The flat direction from one fighter to another.
-local function flatBetween(from: Model, to: Model): Vector3?
-	local a, b = rootOf(from), rootOf(to)
-	if not a or not b then
-		return nil
-	end
-	local offset = b.Position - a.Position
-	local flat = Vector3.new(offset.X, 0, offset.Z)
-	return if flat.Magnitude > 0.1 then flat.Unit else nil
-end
-
 local function hitstop(duration: number, ...: Model?)
 	if player:GetAttribute("SettingHitstop") == false then
 		return
@@ -422,6 +1029,7 @@ local function hitstop(duration: number, ...: Model?)
 		local model = select(i, ...)
 		if model then
 			Animator.hitstop(model, duration)
+			frozenUntil[model] = os.clock() + duration -- the slash smear holds still too
 		end
 	end
 end
@@ -517,6 +1125,7 @@ local function telegraphPerilous(model: Model, duration: number)
 		-- A boss's 危 can come well before its hit: keep the warning up to the impact.
 		duration = math.max(duration, 0.35)
 	end
+	perilUntil[model] = os.clock() + duration + 0.35 -- its cut's smear burns red
 	local highlight = Instance.new("Highlight")
 	highlight.FillColor = Config.Visual.PerilousColor
 	highlight.FillTransparency = 0.9 -- a hint of red; the kanji and outline do the warning
@@ -647,20 +1256,29 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 
 	local point = contactPoint(attacker, defender)
 	local soundAt = rootOf(defender)
+	-- Sparks fly on along the attacker's cut, kicked up and away from the defender.
+	local carry = recentSweep(attacker)
+	local away = flatBetween(defender, attacker)
+	local sprayDir = if carry and away
+		then carry + away * 0.8 + Vector3.yAxis * 0.5
+		elseif away then away + Vector3.yAxis * 0.6
+		else nil
 	playSound(if math.random() < 0.5 then SOUNDS.Deflect else SOUNDS.DeflectAlt, soundAt, 0.85, pitch)
 	if perfect then
 		-- A perfect deflect has to feel unmistakable: white-gold bloom, a ringing
 		-- second layer of steel, and a heavier freeze and camera kick.
 		if point then
-			burst(point, GOLD, 70, 44, 7)
-			flare(point, Color3.fromRGB(255, 244, 214), 16)
+			burst(point, GOLD, 90, 52, 7, sprayDir)
+			burst(point, Color3.fromRGB(255, 150, 60), 30, 30, 3)
+			flare(point, Color3.fromRGB(255, 244, 214), 22, true)
 		end
 		playSound(SOUNDS.PerfectDeflect, soundAt, 0.9, 1.1 * pitch)
 		if isLocal(defender) then
 			CombatHUD.flashPerfect()
 		end
 	elseif point then
-		burst(point, SPARK, 30, 28, 3.5)
+		burst(point, SPARK, 40, 36, 3.5, sprayDir)
+		flare(point, Color3.fromRGB(255, 226, 170), 9, true)
 	end
 	if isLocal(attacker) or isLocal(defender) then
 		shake(if perfect then 0.7 else 0.3, if perfect then 0.2 else 0.15)
@@ -687,7 +1305,7 @@ local function guardEffects(attacker: Model, defender: Model, kind: string?)
 	end
 	local point = contactPoint(attacker, defender)
 	if point then
-		burst(point, STEEL, 8, 10, 1.2)
+		burst(point, STEEL, 12, 14, 1.4, flatBetween(defender, attacker))
 	end
 	playSound(SOUNDS.Guard, rootOf(defender), 0.5, 0.82 + math.random() * 0.06)
 end
@@ -804,6 +1422,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 		local perilous = kind == "Perilous" or kind == "Sweep"
 		local heavy = kind == "Light3" or kind == "Overhead" or kind == "MikiriSlash" or kind == "Riposte2" or perilous
+		heavyKind[model] = heavy
 		if perilous then
 			telegraphPerilous(model, remaining)
 		end
@@ -899,6 +1518,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		-- kick on enders and perilous attacks.
 		local ender = reaction ~= "Small"
 		hitstop(Config.Visual.HitHitstop[kind] or Config.Visual.Hitstop, attacker, defender)
+		impactEffects(attacker, defender, ender, false)
 		local root = rootOf(defender)
 		if root then
 			bloodSpray(
@@ -940,6 +1560,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			-- The cut lands a beat into the deathblow clip: a long arc of blood, then pools.
 			bloodSpray(root.Position + Vector3.new(0, 0.6, 0), direction, 90, 34)
 			flare(root.Position + Vector3.new(0, 0.6, 0), BLOOD, 10)
+			impactEffects(attacker, defender, true, true)
 			task.delay(0.12, function()
 				if root.Parent then
 					bloodSpray(root.Position + Vector3.new(0, 0.2, 0), direction, 40, 20)
@@ -1151,6 +1772,13 @@ local function watch(instance: Instance)
 	local model = instance
 	Animator.attach(model)
 	refreshBase(model)
+	fighters[model] = { blades = {}, prev = {}, retryAt = 0 }
+	model.ChildAdded:Connect(function(child)
+		local fighter = fighters[model]
+		if fighter and (child.Name == "Sword" or child.Name == "Sword2") then
+			fighter.trail, fighter.retryAt = nil, 0 -- re-rigged: find the blades again
+		end
+	end)
 	model:GetAttributeChangedSignal("Blocking"):Connect(function()
 		refreshBase(model)
 	end)
@@ -1240,6 +1868,8 @@ function CombatVisuals.start()
 			end
 		end
 	end)
+
+	RunService.Heartbeat:Connect(stepSmears) -- after Animator's PreSimulation pose lands
 
 	CollectionService:GetInstanceAddedSignal(Types.Tag):Connect(watch)
 	for _, instance in CollectionService:GetTagged(Types.Tag) do
