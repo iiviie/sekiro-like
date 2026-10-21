@@ -1308,7 +1308,20 @@ end
 
 -- A phone-sized landscape screen (the lobby switches to the left nav rail).
 function UI.compact(viewport: Vector2): boolean
+	local player = Players.LocalPlayer
+	local forced = player and player:GetAttribute("UICompact") -- Studio phone tests
+	if forced ~= nil then
+		return forced == true
+	end
 	return UI.isTouch() or viewport.Y < 500
+end
+
+-- The viewport the lobby lays out for (a Studio phone test can hand in 844x390 through the
+-- player's UIViewport attribute).
+function UI.viewport(): Vector2
+	local player = Players.LocalPlayer
+	local v = player and player:GetAttribute("UIViewport")
+	return if typeof(v) == "Vector2" then v else workspace.CurrentCamera.ViewportSize
 end
 
 -- Keeps a lobby window (`height` px tall at scale 1) above the PLAY button and nav bar on

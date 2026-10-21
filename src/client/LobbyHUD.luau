@@ -117,7 +117,7 @@ local refresh: () -> ()
 -- Lays the HUD out for the screen: the bottom bar on desktop and console, the left rail
 -- and right-hand PLAY on phones (clear of the thumbstick and the jump button).
 local function applyLayout()
-	local viewport = workspace.CurrentCamera.ViewportSize
+	local viewport = UI.viewport()
 	compact = UI.compact(viewport)
 	local scale = UI.lobbyScale(viewport)
 	local height = viewport.Y / scale -- the HUD's height in scale-1 units
@@ -218,13 +218,13 @@ local function build()
 		FillDirection = Enum.FillDirection.Horizontal,
 		HorizontalAlignment = Enum.HorizontalAlignment.Right,
 		VerticalAlignment = Enum.VerticalAlignment.Center,
-		Padding = UDim.new(0, 22),
+		Padding = UDim.new(0, 18),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, top)
 	stonesPill =
-		UI.currencyPill({ Name = "Whetstones", currency = "stones", width = 110, height = 40, LayoutOrder = 0 }, top)
-	coinsPill = UI.currencyPill({ Name = "Coins", currency = "coins", width = 156, height = 40, LayoutOrder = 1 }, top)
-	gemsPill = UI.currencyPill({ Name = "Gems", currency = "gems", width = 140, height = 40, LayoutOrder = 2 }, top)
+		UI.currencyPill({ Name = "Whetstones", currency = "stones", width = 96, height = 40, LayoutOrder = 0 }, top)
+	coinsPill = UI.currencyPill({ Name = "Coins", currency = "coins", width = 134, height = 40, LayoutOrder = 1 }, top)
+	gemsPill = UI.currencyPill({ Name = "Gems", currency = "gems", width = 122, height = 40, LayoutOrder = 2 }, top)
 	local plus = UI.iconButton({
 		Name = "AddGems",
 		kind = "plus",
@@ -935,6 +935,8 @@ function LobbyHUD.start()
 		applyLayout()
 	end
 	camera:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
+	player:GetAttributeChangedSignal("UIViewport"):Connect(fit)
+	player:GetAttributeChangedSignal("UICompact"):Connect(fit)
 	fit()
 end
 
