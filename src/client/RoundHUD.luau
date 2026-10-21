@@ -34,11 +34,9 @@ local FEED_MAX = 3
 local MIST_COLUMNS = if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then 40 else 72
 local MIST_HEIGHT = 28
 local MIST_BASE_Y = 1 -- just under the courtyard floor, so the mist rises out of the ground
--- Soft puffs (the round glow, repeated up each column and drifting slowly upwards) instead
--- of flat quads; neighbouring columns overlap so the wall has no seams.
-local MIST_PUFF = 9 -- studs per puff up a column
-local MIST_DRIFT = 0.06 -- puffs per second
-local MIST_OVERLAP = 1.6 -- column width over the gap between columns
+-- Soft columns (the posture bar's glow stretched up each one: feathered sides, no hard
+-- edges) instead of flat quads; neighbours overlap so the wall reads as one low bank of mist.
+local MIST_OVERLAP = 2.2 -- column width over the gap between columns
 
 local RoundHUD = {}
 
@@ -324,12 +322,12 @@ local MIST_NEAR = {
 	NumberSequence.new(1),
 	NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 0.85),
-		NumberSequenceKeypoint.new(0.3, 0.93),
+		NumberSequenceKeypoint.new(0.5, 0.93),
 		NumberSequenceKeypoint.new(1, 1),
 	}),
 	NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.6),
-		NumberSequenceKeypoint.new(0.3, 0.8),
+		NumberSequenceKeypoint.new(0, 0.5),
+		NumberSequenceKeypoint.new(0.5, 0.78),
 		NumberSequenceKeypoint.new(1, 1),
 	}),
 }
@@ -361,11 +359,9 @@ local function buildRing()
 		-- Ink-red, darkening upwards; barely self-lit, so it tints the arena only where it stands.
 		beam.Color = ColorSequence.new(Color3.fromRGB(170, 30, 26), Color3.fromRGB(120, 20, 20))
 		beam.Transparency = MIST_NEAR[3]
-		beam.Texture = Assets.UI.Glow
-		beam.TextureMode = Enum.TextureMode.Wrap
-		-- Puff sizes and drift vary a little per column, so the rows never line up.
-		beam.TextureLength = MIST_PUFF * (0.8 + 0.4 * ((i * 7) % 11) / 10)
-		beam.TextureSpeed = MIST_DRIFT * (0.7 + 0.6 * ((i * 5) % 7) / 6)
+		beam.Texture = Assets.UI.BarGlow
+		beam.TextureMode = Enum.TextureMode.Stretch
+		beam.TextureLength = 1
 		beam.LightEmission = 0.15
 		beam.LightInfluence = 0.3
 		beam.Enabled = false
