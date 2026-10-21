@@ -36,6 +36,7 @@ local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
+local Text = require(ReplicatedStorage.Shared.Text)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Season = require(ReplicatedStorage.Shared.Season)
 local Economy = require(script.Parent.Economy)
@@ -471,7 +472,7 @@ local function buy(player: Player, d: Data, st: PassState, key: string)
 		end
 	elseif key == Season.Products.Tiers10 then
 		if left < 10 then
-			notice(player, `Only {left} tiers left: use single tier skips instead.`)
+			notice(player, `Only {Text.count(left, "tier")} left: use single tier skips instead.`)
 			return
 		end
 	else

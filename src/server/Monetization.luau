@@ -36,6 +36,7 @@ local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
+local Text = require(ReplicatedStorage.Shared.Text)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Economy = require(script.Parent.Economy)
 local StatsService = require(script.Parent.StatsService)
@@ -154,7 +155,7 @@ local function eligible(player: Player, key: string): (boolean, string?)
 		return false, "That isn't for sale."
 	end
 	if not StatsService.canTransact(player) then
-		return false, "Purchases are off this session because your progress couldn't load. Rejoin to try again."
+		return false, Text.ProgressFailed
 	end
 	if not Catalog.isReady(item) then
 		return false, "Coming soon."

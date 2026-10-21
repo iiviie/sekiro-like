@@ -41,7 +41,7 @@ local HEADER_H = 60
 local ROW2_Y = 68 -- tabs, Claim all and the tier skips (60 px tall: >= 45 pt on a phone)
 local CONTENT_Y = 136
 local DETAIL_H = 24
-local DETAIL_HINT = "Tap a reward to see it  ·  premium rewards stay claimable once you upgrade"
+local DETAIL_HINT = "Select a reward to see it  ·  premium rewards stay claimable once you upgrade"
 
 local function attr(name: string, default: any): any
 	local value = player:GetAttribute(name)
@@ -209,7 +209,7 @@ local function restingHint(): string
 			end
 		end
 	end
-	local parts = items
+	local parts = table.clone(items)
 	for _, kind in { "gems", "whetstones", "draws", "coins" } do
 		local n = totals[kind]
 		if n and n > 0 then
@@ -219,7 +219,11 @@ local function restingHint(): string
 	if #parts == 0 then
 		return DETAIL_HINT
 	end
-	return `With premium, tiers 1-{tier} would add: {table.concat(parts, ", ")}  ·  yours at once if you upgrade`
+	-- One line, even on a phone: the first three, then "and more".
+	if #parts > 3 then
+		parts = { parts[1], parts[2], parts[3], "and more" }
+	end
+	return `Premium would add {table.concat(parts, ", ")} now`
 end
 
 -- A soft breathing glow on a stroke (claimable cells, Claim all).
@@ -330,7 +334,7 @@ local function header(body: Frame, width: number)
 		local next = if maxed then "" else `Pass XP to tier {tier + 1}  ·  `
 		if state == "live" then
 			local ends = DateTime.fromUnixTimestamp(endsAt):FormatUniversalTime("MMM D", "en-us")
-			return `{next}ends in {duration(left)} ({ends}){if double then "  ·  DOUBLE PASS XP" else ""}`
+			return `{next}season ends in {duration(left)} ({ends}){if double then "  ·  DOUBLE PASS XP" else ""}`
 		elseif state == "break" and endsAt > 0 then
 			return `Season over  ·  claims stay open  ·  next season in {duration(left)}`
 		end
@@ -923,7 +927,7 @@ local function missionRow(parent: Instance, entry: any, height: number, order: n
 		value = have,
 		max = m.goal,
 		format = function(v: number, goal: number): string
-			return if v >= goal then "DONE" else `{v} / {goal}`
+			return if v >= goal then "Done" else `{v} / {goal}`
 		end,
 	}, row)
 	-- Reward: Pass XP over coins and a Whetstone.
@@ -1001,8 +1005,8 @@ local function missionsView(body: Frame, size: Vector2)
 	local split = math.floor(size.X * 0.5)
 	for col, spec in
 		{
-			{ title = "Today", list = missions.daily or {}, x = 0, w = split - 8 },
-			{ title = "This week", list = missions.weekly or {}, x = split + 4, w = size.X - split - 4 },
+			{ title = "Daily missions", list = missions.daily or {}, x = 0, w = split - 8 },
+			{ title = "Weekly bounties", list = missions.weekly or {}, x = split + 4, w = size.X - split - 4 },
 		}
 	do
 		UI.text({
@@ -1031,7 +1035,7 @@ local function missionsView(body: Frame, size: Vector2)
 			end)
 		else
 			live(clock, function()
-				return `New bounties in {duration((missions.weekEndsAt or 0) - workspace:GetServerTimeNow())}`
+				return `new in {duration((missions.weekEndsAt or 0) - workspace:GetServerTimeNow())}`
 			end)
 		end
 		local list = UI.new("ScrollingFrame", {

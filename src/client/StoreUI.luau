@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
+local Text = require(ReplicatedStorage.Shared.Text)
 local Clothing = require(ReplicatedStorage.Shared.Clothing)
 local Flair = require(ReplicatedStorage.Shared.Flair)
 local Intros = require(ReplicatedStorage.Shared.Intros)
@@ -130,7 +131,7 @@ local SOURCE_TEXT: { [string]: string } = {
 	ranked = "Ranked season reward",
 	pass = "Path of the Blade reward",
 	bundle = "Initiate's Bundle",
-	vip = "Comes with Ronin VIP",
+	vip = "Comes with Hatamoto VIP",
 	line = "Blade line level 4",
 	boss = "Boss trial reward",
 	achievement = "Achievement",
@@ -277,7 +278,7 @@ function StoreUI.thumb(parent: GuiObject, item: Catalog.Item, locked: boolean?)
 			Font = UI.Display,
 			TextScaled = true,
 			TextColor3 = look.text,
-			Text = "Name",
+			Text = player.DisplayName,
 		}, strip)
 	elseif category == "intro" then
 		-- the intro's brush kanji in its colour (no painted icons for intros yet)
@@ -415,7 +416,7 @@ end
 -- granted (Progress "Purchased"), and StorePanel plays the thank-you reveal from that.
 function StoreUI.purchase(key: string)
 	if StoreUI.attr("CanTransact", true) == false or StoreUI.attr("DataFailed", false) == true then
-		Toasts.notice("Purchases are off this session because your progress couldn't load.", UI.Parchment)
+		Toasts.notice(Text.ProgressFailed, UI.Parchment)
 		return
 	end
 	StoreUI.fire("Purchase", key)

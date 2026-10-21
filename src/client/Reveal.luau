@@ -19,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
+local Text = require(ReplicatedStorage.Shared.Text)
 local StoreUI = require(script.Parent.StoreUI)
 local UI = require(script.Parent.UI)
 
@@ -57,11 +58,7 @@ local function nameOf(outcome: Outcome): string
 		return if item then item.name else tostring(outcome.id)
 	end
 	local amount = outcome.amount or 0
-	local word = string.lower(tostring(outcome.kind))
-	if amount == 1 then
-		word = string.gsub(word, "s$", "")
-	end
-	return `{UI.number(amount)} {word}`
+	return Text.currency(amount, tostring(outcome.kind))
 end
 
 -- The art of one outcome inside `holder`.
@@ -247,7 +244,7 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 		Position = UDim2.new(0.5, 0, 1, -8),
 		Size = UDim2.fromOffset(300, 20),
 		TextColor3 = T.Dim,
-		Text = "Tap to skip",
+		Text = if UI.touchSized() then "Tap to skip" else "Click to skip",
 		ZIndex = 9,
 	}, stage)
 
@@ -416,7 +413,7 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 				ZIndex = 6,
 			}, inner)
 			UI.countUp(line, 0, outcome.shards or 0, function(n: number): string
-				return `Already yours  →  +{n} shards`
+				return `Already yours  →  +{Text.currency(n, "Shards")}`
 			end, 0.6)
 		end
 		-- Unroll, pop the art, stamp the frame.
@@ -463,7 +460,7 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 					art(holder, outcome)
 				end,
 				status = if outcome.dup
-					then `+{outcome.shards or 0} shards`
+					then `+{Text.currency(outcome.shards or 0, "Shards")}`
 					elseif outcome.pity then "Pity"
 					elseif outcome.status then outcome.status
 					elseif item then "New"

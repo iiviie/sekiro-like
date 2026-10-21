@@ -18,6 +18,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
+local Text = require(ReplicatedStorage.Shared.Text)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Flair = require(ReplicatedStorage.Shared.Flair)
 local CosmeticPreview = require(script.Parent.CosmeticPreview)
@@ -158,11 +159,17 @@ local function card(parent: Instance, item: Catalog.Item, order: number, state: 
 			Panels.redraw()
 		end,
 	}, parent)
-	-- Long names shrink to fit the card instead of trailing off ("Crimson Lacquer").
+	-- Long names wrap onto two lines and shrink a little, instead of trailing off
+	-- ("Crimson Lacquer"); never under 14 px.
 	local label = made:FindFirstChild("ItemName")
 	if label and label:IsA("TextLabel") then
+		label.TextWrapped = true
+		label.TextTruncate = Enum.TextTruncate.None
 		label.TextScaled = true
-		UI.new("UITextSizeConstraint", { MaxTextSize = label.TextSize, MinTextSize = 11 }, label)
+		label.LineHeight = 0.9
+		label.Position -= UDim2.fromOffset(0, 4)
+		label.Size += UDim2.fromOffset(0, 6)
+		UI.new("UITextSizeConstraint", { MaxTextSize = label.TextSize, MinTextSize = 14 }, label)
 	end
 end
 
@@ -327,7 +334,7 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 			Size = UDim2.new(0.5, -15, 0, touch),
 			TextSize = 18,
 			FontFace = UI.Fonts.Number,
-			Text = `To L{nextLevel.level}`,
+			Text = `To level {nextLevel.level}`,
 			ZIndex = 6,
 		}, box)
 		upgrade:SetAttribute("Quiet", nil)
@@ -347,12 +354,15 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 			Position = UDim2.new(0, 14, 1, -touch - 22),
 			Size = UDim2.new(1, -124, 0, 22),
 			TextXAlignment = Enum.TextXAlignment.Left,
-			TextSize = 14,
+			TextSize = 16,
 			TextColor3 = if canStones then UI.Theme.Dim elseif canMixed then UI.Theme.JadeText else UI.Theme.CrimsonText,
 			Text = if canStones
-				then `You have {whetstones}`
-				elseif canMixed then `{cost - viaGems} + {gemCost} gems`
-				else `You have {whetstones}`,
+				then `You have {Text.currency(whetstones, "Whetstones")}`
+				elseif canMixed then `{Text.currency(cost - viaGems, "Whetstones")} + {Text.currency(
+					gemCost,
+					"gems"
+				)}`
+				else `You have {Text.currency(whetstones, "Whetstones")}`,
 			ZIndex = 6,
 		}, box)
 		upgrade.Activated:Connect(function()
@@ -362,7 +372,7 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 			elseif canMixed then
 				UI.confirm(window, {
 					title = `{item.name} to L{nextLevel.level}`,
-					text = `Use {cost - viaGems} Whetstones and pay the other {viaGems} with gems.`,
+					text = `Use your {Text.currency(cost - viaGems, "Whetstones")}; {Text.currency(gemCost, "gems")} cover the other {viaGems}.`,
 					price = { currency = "gems", amount = gemCost },
 					balance = gems,
 					yes = "Upgrade",
@@ -372,7 +382,7 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 				})
 			else
 				Toasts.notice(
-					`Whetstones come from trials, wins and boss clears · gems can cover up to {maxGemStones} of these {cost}`,
+					`Whetstones come from missions, wins and boss clears. Gems can cover up to {maxGemStones} of the {cost}.`,
 					UI.Parchment
 				)
 			end
@@ -427,7 +437,7 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		action:SetAttribute("Quiet", nil)
 		action.Activated:Connect(function()
 			if not afford then
-				Toasts.notice("Coins come from every match, trials and the daily reward.", UI.Gold)
+				Toasts.notice("Coins come from every fight, missions and the daily reward.", UI.Gold)
 				return
 			end
 			confirmUnlock("coins", price.coins :: number)
@@ -486,7 +496,7 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 			Position = UDim2.new(1, -12, 1, -12),
 			Size = UDim2.new(0.5, -15, 0, touch),
 			TextSize = 17,
-			Text = if isSecond then "Off 2nd" else "As 2nd",
+			Text = if isSecond then "Remove 2nd" else "Wear as 2nd",
 			ZIndex = 6,
 		}, box)
 		second.Activated:Connect(function()

@@ -22,6 +22,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
+local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
+local Text = require(ReplicatedStorage.Shared.Text)
 local Flair = require(ReplicatedStorage.Shared.Flair)
 local Season = require(ReplicatedStorage.Shared.Season)
 local CosmeticPreview = require(script.Parent.CosmeticPreview)
@@ -251,7 +253,9 @@ local function featuredTab(list: ScrollingFrame)
 	local line = UI.note(list, "", 1)
 	if typeof(rotation.endsAt) == "number" then
 		StoreUI.countdown(line, rotation.endsAt, function(left)
-			return `Today's shop  ·  new items in {left}  ·  items come back within a few weeks`
+			return `Today's shop  ·  new items in {left}  ·  every item returns within {Text.days(
+				EconomyConfig.Shop.ReturnWithinDays
+			)}`
 		end)
 	end
 	local row = UI.new("Frame", {
@@ -689,7 +693,7 @@ local function outcomeName(outcome: { [string]: any }): string
 		local item = Catalog.get(outcome.id)
 		return if item then item.name else tostring(outcome.id)
 	end
-	return outcome.label or `{UI.number(outcome.amount or 0)} {string.lower(tostring(outcome.kind))}`
+	return outcome.label or Text.currency(outcome.amount or 0, tostring(outcome.kind))
 end
 
 -- The odds in one line, in words: "Coins 52% · Whetstones 18% · ... · a cosmetic 10% (epic
@@ -790,7 +794,7 @@ local function showOdds(
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextSize = 15,
 				TextColor3 = UI.Theme.JadeDeep,
-				Text = if owns then `owned → {dup[outcome.rarity] or 0} shards` else "",
+				Text = if owns then `owned → {Text.currency(dup[outcome.rarity] or 0, "Shards")}` else "",
 			}, row)
 			UI.text({
 				AnchorPoint = Vector2.new(1, 0),
@@ -870,8 +874,8 @@ local function history()
 				local when = os.date("!%d %b %H:%M", math.floor(entry.t or 0))
 				local what = if entry.kind == "item"
 					then ((Catalog.get(entry.id) or {} :: any).name or entry.id)
-					else `{UI.number(entry.amount or 0)} {string.lower(tostring(entry.kind))}`
-				local tail = if entry.dup then `  (owned → {entry.shards or 0} shards)` else ""
+					else Text.currency(entry.amount or 0, tostring(entry.kind))
+				local tail = if entry.dup then `  (owned → {Text.currency(entry.shards or 0, "Shards")})` else ""
 				UI.note(list, `{when}   {if entry.pool == "capsule" then "Capsule" else "Draw"}   {what}{tail}`, i, 24)
 			end
 		end, Vector2.new(560, 320))
@@ -1042,7 +1046,10 @@ local function shrineTab(list: ScrollingFrame)
 		local legLeft = math.max(1, (cap.legendaryAt or 40) - (cap.legendarySince or 0))
 		-- The guarantees in plain words; the banner's end lives in the odds sheet, not here (no
 		-- countdown on a paid random item).
-		info.Text = `An epic or better within {epicLeft} draws, {featuredName} within {legLeft} draws.`
+		info.Text = `An epic or better within {Text.count(epicLeft, "draw")}, {featuredName} within {Text.count(
+			legLeft,
+			"draw"
+		)}.`
 		local row = UI.new("Frame", {
 			Name = "Buttons",
 			AnchorPoint = Vector2.new(0, 1),
@@ -1109,7 +1116,7 @@ local function shrineTab(list: ScrollingFrame)
 		end
 		return ia.order < ib.order
 	end)
-	UI.heading(list, `Shard shop  ·  you have {UI.number(StoreUI.attr("Shards", 0))} shards`, 2)
+	UI.heading(list, `Shard shop  ·  you have {Text.currency(StoreUI.attr("Shards", 0), "Shards")}`, 2)
 	UI.note(
 		list,
 		"Duplicates from draws turn into Shards. Every item a draw can give is also here to buy outright.",
@@ -1161,11 +1168,11 @@ local function shrineTab(list: ScrollingFrame)
 			Position = UDim2.new(1, -184, 0.5, 0),
 			Size = UDim2.fromOffset(160, 58),
 			TextSize = 16,
-			Text = `{UI.number(shardCost)} shards`,
+			Text = Text.currency(shardCost, "Shards"),
 		}, shards >= shardCost)
 		shardButton.Activated:Connect(function()
 			if shards < shardCost then
-				Toasts.notice(`{UI.number(shardCost - shards)} more shards for {item.name}`, UI.Parchment)
+				Toasts.notice(`{Text.currency(shardCost - shards, "Shards")} more for {item.name}`, UI.Parchment)
 				return
 			end
 			confirmBuy(item, "shards", shardCost, "ShardBuy", id, `Unlocked  ·  {item.name}`)
@@ -1181,7 +1188,7 @@ local function shrineTab(list: ScrollingFrame)
 				Position = UDim2.new(1, -14, 0.5, 0),
 				Size = UDim2.fromOffset(160, 58),
 				TextSize = 16,
-				Text = `{UI.number(cost)} {string.lower(currency)}`,
+				Text = Text.currency(cost, currency),
 				variant = if afford then "secondary" else "disabled",
 			}, afford)
 			buy.Activated:Connect(function()
@@ -1241,7 +1248,7 @@ function StorePanel.build(body: Frame)
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextSize = 15,
 			TextColor3 = UI.Danger,
-			Text = "Your progress couldn't load, so purchases are off this session. Rejoin to try again.",
+			Text = Text.ProgressFailed,
 		}, body)
 	end
 	local list = UI.scroll(area, 8)
@@ -1348,7 +1355,7 @@ local function purchaseReveal(data: { [string]: any })
 		note = ({
 			["pass.Loadouts"] = "Six loadout slots: Locker, then Loadouts at the top.",
 			["pass.TitleSlot"] = "Pick a second title in the Locker's Title tab.",
-			["pass.VIP"] = "The Ronin sheath and chat tag are on. The nameplate frame is in the Locker.",
+			["pass.VIP"] = "The Hatamoto sheath and chat tag are on. The nameplate frame is in the Locker.",
 		} :: { [string]: string })[key] or item.blurb
 		primary = openLocker(if key == "pass.VIP" then "nameplate" elseif key == "pass.TitleSlot" then "title" else nil)
 	elseif item.category == "bundle" then
