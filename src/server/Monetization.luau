@@ -9,6 +9,7 @@
 --   Monetization.setGrant(key, handler)       replace what a product grants (part S: the pass)
 --   Monetization.mockReceipt(player, key, purchaseId?) -> Enum.ProductPurchaseDecision (Studio)
 --   Monetization.mockPass(player, key)        -> boolean             Studio
+--   Monetization.mockPolicy(player, restricted)  stub ArePaidRandomItemsRestricted (Studio)
 --
 -- Keys and ids: Shared/Catalog.Products (ids 0 until the products exist). The client asks
 -- with LobbyAction ("Purchase", key); every rule is checked here.
@@ -195,6 +196,13 @@ end
 -- True when this player must not get paid random items (and while unknown).
 function Monetization.paidRandomRestricted(player: Player): boolean
 	return restricted[player] ~= false
+end
+
+-- Studio: stub PolicyService's ArePaidRandomItemsRestricted for `player` (tests both branches).
+function Monetization.mockPolicy(player: Player, isRestricted: boolean)
+	assert(IS_STUDIO, "policy stubs are Studio-only")
+	restricted[player] = isRestricted
+	publish(player)
 end
 
 -- Commits the profile: true once a save including the grant has landed. A Studio test
