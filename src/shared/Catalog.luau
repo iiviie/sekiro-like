@@ -114,9 +114,9 @@ Catalog.Defaults = {
 Catalog.Ready = {
 	weapon = true,
 	bladeSkin = true,
-	bladeLine = false,
-	finisher = false,
-	outfit = false,
+	bladeLine = true, -- part C: line looks, L2 smears, L3 deflects, L4 finishers
+	finisher = true, -- part C: client/CosmeticFX
+	outfit = true, -- part C: server/CosmeticService + Shared/Cosmetics/Wear
 	title = false,
 	banner = false,
 	nameplate = false,
@@ -393,26 +393,20 @@ add("outfit", "oxblood", {
 	sources = { "coins" },
 })
 add("outfit", "dove", { name = "Dove Gi", rarity = "rare", price = { coins = 7500 }, sources = { "coins" } })
--- Three more coin colourways need art (part A/C): ids reserved now.
+-- Three more coin colourways (art/clothing/build.py, part C).
 add("outfit", "rust", {
 	name = "Rust Gi",
 	rarity = "rare",
 	price = { coins = 9000 },
 	sources = { "coins" },
-	status = "soon",
 })
 add("outfit", "pine", {
 	name = "Pine Gi",
 	rarity = "rare",
 	price = { coins = 11000 },
 	sources = { "coins" },
-	status = "soon",
 })
-add(
-	"outfit",
-	"ink",
-	{ name = "Ink Gi", rarity = "epic", price = { coins = 13000 }, sources = { "coins" }, status = "soon" }
-)
+add("outfit", "ink", { name = "Ink Gi", rarity = "epic", price = { coins = 13000 }, sources = { "coins" } })
 -- Boss sets: earned by a first clear of that boss.
 for _, boss in
 	{
@@ -554,7 +548,6 @@ for _, line in { "Yozakura", "Raijin", "Karasu" } do
 		contents = { items = { `line.{line}`, `finisher.{line}` }, lineLevel = 4 },
 		once = true,
 		sources = { "robux" },
-		status = "soon",
 	})
 end
 
