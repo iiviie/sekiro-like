@@ -82,8 +82,8 @@ local function compile(spec: PoseSpec): Pose
 end
 
 local specs: { [string]: PoseSpec } = {
-	-- Stances sit on the footwork (client/Animator + Shared/Gait), which turns the hips ~20
-	-- (relaxed) to ~38 (fight) degrees left of the facing, right hip forward, and squares the
+	-- Stances sit on the footwork (client/Animator + Shared/Gait), which turns the hips ~16
+	-- (relaxed) to ~36 (fight) degrees left of the facing, right hip forward, and squares the
 	-- chest back up; a stance's Waist turns the chest from square, its Neck brings the eyes back.
 
 	-- Out of combat: the sword carried low in the right hand, blade angled forward and down

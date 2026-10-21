@@ -17,6 +17,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local Audio = require(script.Parent.Audio)
 local Gait = require(ReplicatedStorage.Shared.Gait)
 local Poses = require(ReplicatedStorage.Shared.Poses)
 local Progression = require(ReplicatedStorage.Shared.Progression)
@@ -70,6 +71,13 @@ type State = {
 	loco: number, -- 0..1, how much the stance layer drives the body (0 in the air)
 	ground: { [string]: number }, -- smoothed ground height under each foot (root space)
 	squareRoot: CFrame, -- the Root a pose without one is relative to: square to the facing
+	targets: Gait.Targets?, -- this frame's footwork targets (arm swing for held stances)
+	lastPos: Vector3?, -- root position last frame: the footwork steps along the motion shown
+	velocity: Vector3, -- smoothed world velocity from that motion
+	-- Reused every frame (no per-frame tables for the joint results and layers).
+	buffers: { { [string]: CFrame } },
+	lodDt: number, -- time banked since the last full step (far rigs step at LOD_RATE)
+	orphanedAt: number?, -- when the model lost its parent (dropped after ORPHAN_TIME)
 }
 
 local BASE_BLEND_RATE = 14
@@ -82,6 +90,16 @@ local LOCO_RATE = 10 -- the stance layer hands over to Roblox's air animations (
 local GROUND_RATE = 18 -- smoothing of each foot's ground height
 local REST_LEG = 1.8 -- hip-to-ankle length (studs) Shared/Gait's distances are authored for
 local PROBE_RANGE = 150 -- beyond this distance from the camera, feet skip the ground probe
+local VELOCITY_RATE = 14 -- smoothing of the velocity measured from the root's motion
+-- Rigs further than LOD_RANGE from the camera are posed LOD_RATE times a second (the last pose is
+-- held in between); dead bodies with nothing left to pose are left to Roblox's own animations
+-- without any work. A model parented to nil for ORPHAN_TIME seconds is forgotten.
+local LOD_RANGE = 90
+local LOD_RATE = 15
+local ORPHAN_TIME = 3
+-- How much a held stance's arm swings with the stride (share of a free arm's swing): a one-handed
+-- carry swings the sword hand a little with the blade kept steady, a two-handed guard barely.
+local HELD_SWING = { one = 0.45, two = 0.08 }
 -- Stances that hold the sword up for a fight: the footwork takes its low, wide shape under them.
 local COMBAT_STANCES = { Ready = true, Guard = true, GuardImpact = true }
 -- Humanoid states where Roblox's own animations (fall, climb, swim, sit, death) take the body.
@@ -421,7 +439,8 @@ local function locomotion(
 	state: State,
 	dt: number,
 	root: BasePart?,
-	humanoid: Humanoid?
+	humanoid: Humanoid?,
+	owned: boolean
 ): ({ [string]: CFrame }?, number)
 	local j = state.joints
 	for _, name in LEG_JOINTS do
@@ -437,6 +456,15 @@ local function locomotion(
 	local ankles: { [string]: Vector3 } = { Right = restAnkle("Right", j), Left = restAnkle("Left", j) }
 	local hipPivot = (link(j.Root, CFrame.identity) * offsets(j.RightHip)).Position
 	local k = math.max((hipPivot - ankles.Right).Magnitude / REST_LEG, 0.2)
+	-- The real foot (avatars' feet differ a lot): where the ankle pivot sits over sole, toe and heel.
+	local ankleJoint = j.RightAnkle
+	local footPart = if ankleJoint:IsA("Motor6D") then ankleJoint.Part1 else ankleJoint.Attachment1.Parent
+	if footPart and footPart:IsA("BasePart") then
+		local _, inFoot = offsets(ankleJoint)
+		local size = footPart.Size
+		local p = inFoot.Position
+		Gait.setFoot(state.gait, (p.Y + size.Y / 2) / k, (p.Z + size.Z / 2) / k, (size.Z / 2 - p.Z) / k)
+	end
 
 	local alive = humanoid.Health > 0 and state.model:GetAttribute("CombatState") ~= "Dead"
 	local grounded = alive
@@ -446,9 +474,23 @@ local function locomotion(
 
 	local base = state.baseName
 	local combat = if (base and COMBAT_STANCES[base]) or state.action then 1 else 0
-	local velocity = hrp:VectorToObjectSpace(root.AssemblyLinearVelocity) / k
+	-- Step along the motion actually shown (a remote body's interpolated position, Spacing's
+	-- pushes), not the physics velocity alone; teleports are ignored.
+	local measured = root.AssemblyLinearVelocity
+	local last = state.lastPos
+	if last and dt > 0 then
+		local moved = (root.Position - last) / dt
+		if moved.Magnitude < 120 then
+			measured = moved
+		end
+	end
+	state.lastPos = root.Position
+	state.velocity += (measured - state.velocity) * (1 - math.exp(-dt * VELOCITY_RATE))
+	local velocity = hrp:VectorToObjectSpace(state.velocity) / k
 	local look = hrp.LookVector
-	local t = Gait.step(state.gait, dt, velocity, combat, math.deg(math.atan2(-look.X, -look.Z)))
+	local facing = math.deg(math.atan2(-look.X, -look.Z))
+	local t = Gait.step(state.gait, dt, velocity, combat, facing, root.Position / k, owned)
+	state.targets = t
 	if state.loco < 1e-3 then
 		state.ground = {}
 		return nil, 0
@@ -477,31 +519,74 @@ local function locomotion(
 	local pose: { [string]: CFrame } = {}
 	-- Hips: dropped into the stance (and further when a foot stands lower than the body), turned.
 	local drop = t.drop * k + math.min(groundRest - lowest, 0.6 * k)
-	local rootT = CFrame.new(0, -drop, 0) * CFrame.Angles(0, t.hipYaw, 0) * CFrame.Angles(0, 0, t.hipRoll)
+	local rootT = CFrame.new(t.sway * k, -drop, 0)
+		* CFrame.Angles(0, t.hipYaw, 0)
+		* CFrame.Angles(0, 0, t.hipRoll)
+		* CFrame.Angles(t.hipPitch, 0, 0)
 	pose.Root = rootT
 	local lowerTorso = link(j.Root, rootT)
-	-- The chest squares back up to the facing (leaning into a run); stance poses build on that.
-	local square = CFrame.Angles(t.lean, 0, 0)
+	-- The chest squares back up to the facing, leaning into a run or a turn and counter-turning
+	-- against the hips; stance poses build on that. The head steadies itself on top.
+	local square = CFrame.Angles(0, 0, t.bank) * CFrame.Angles(t.lean, 0, 0) * CFrame.Angles(0, t.chestYaw, 0)
 	state.squareRoot = CFrame.new():Lerp(square, state.loco)
 	pose.Waist = rootT.Rotation:Inverse() * square
-	pose.Neck = CFrame.identity
+	pose.Neck = CFrame.Angles(-t.lean * 0.5, -t.chestYaw * 0.8, -t.bank * 0.6)
 
 	for side, f in feet do
 		local rest = ankles[side]
 		local target = Vector3.new(f.pos.X * k, state.ground[side] + (rest.Y - groundRest) + f.pos.Y * k, f.pos.Z * k)
 		local footRot = CFrame.Angles(0, f.yaw, 0) * CFrame.Angles(f.pitch, 0, 0)
 		solveLeg(side, j, lowerTorso, target, footRot, pose)
+		if f.landed and state.loco > 0.5 then
+			local v = state.velocity
+			Audio.footstep(state.model, hrp:PointToWorldSpace(target), Vector3.new(v.X, 0, v.Z).Magnitude)
+		end
 	end
 
-	-- Arms hang loose and swing against the legs where no stance holds them.
-	local swing = t.armSwing
-	pose.LeftShoulder = CFrame.Angles(swing + math.rad(3), 0, math.rad(-7))
-	pose.LeftElbow = CFrame.Angles(math.rad(14) + math.max(swing, 0) * 0.8, 0, 0)
-	pose.LeftWrist = CFrame.identity
-	pose.RightShoulder = CFrame.Angles(-swing + math.rad(3), 0, math.rad(7))
-	pose.RightElbow = CFrame.Angles(math.rad(14) + math.max(-swing, 0) * 0.8, 0, 0)
-	pose.RightWrist = CFrame.identity
+	-- Arms hang loose and swing against the legs where no stance holds them: elbows bend
+	-- further running, more on the forward swing, and the hands come in toward the chest.
+	local swing, bend, run = t.armSwing, t.armBend, t.run * t.moveW
+	local inward = math.rad(12) * run
+	pose.LeftShoulder = CFrame.Angles(swing + math.rad(3 + 6 * run), -inward, math.rad(-7 + 2 * run))
+	pose.LeftElbow = CFrame.Angles(bend + math.max(swing, 0) * 0.6, 0, 0)
+	pose.LeftWrist = CFrame.Angles(math.rad(-6), 0, 0)
+	pose.RightShoulder = CFrame.Angles(-swing + math.rad(3 + 6 * run), inward, math.rad(7 - 2 * run))
+	pose.RightElbow = CFrame.Angles(bend + math.max(-swing, 0) * 0.6, 0, 0)
+	pose.RightWrist = CFrame.Angles(math.rad(-6), 0, 0)
 	return pose, state.loco
+end
+
+-- Swings an arm a stance holds by `angle` (radians, + = forward) at the shoulder, turning the
+-- wrist back so the hand (and the blade in it) keeps its angle: the sword is carried steady.
+-- `raise` (radians) tips the hand's blade up in the chest's frame (against a forward lean), `out`
+-- turns it outward and `abduct` lifts the arm out to the side (running, the blade then passes
+-- beside the driving knee instead of through it).
+local function swingHeld(
+	state: State,
+	results: { [string]: CFrame },
+	side: string,
+	angle: number,
+	raise: number,
+	out: number,
+	abduct: number
+)
+	local j = state.joints
+	local s, e, w = j[side .. "Shoulder"], j[side .. "Elbow"], j[side .. "Wrist"]
+	local tS, tE, tW = results[side .. "Shoulder"], results[side .. "Elbow"], results[side .. "Wrist"]
+	if not (s and e and w and tS and tE and tW) or math.abs(angle) + math.abs(raise) + math.abs(abduct) < 1e-4 then
+		return
+	end
+	local sign = if side == "Right" then 1 else -1
+	local hand = CFrame.Angles(0, -out * sign, 0)
+		* CFrame.Angles(raise, 0, 0)
+		* (link(s, tS) * link(e, tE) * link(w, tW)).Rotation
+	local sA0 = offsets(s).Rotation
+	local swung = sA0:Inverse() * CFrame.Angles(0, 0, abduct * sign) * CFrame.Angles(angle, 0, 0) * sA0 * tS
+	local wA0, wA1 = offsets(w)
+	local arm = (link(s, swung) * link(e, tE)).Rotation
+	local wrist = wA0.Rotation:Inverse() * arm:Inverse() * hand * wA1.Rotation
+	results[side .. "Shoulder"] = swung
+	results[side .. "Wrist"] = wrist + tW.Position
 end
 
 -- Lays a weighted pose over `below` (joint Transforms) and returns the result. Lower-body joints
@@ -512,12 +597,16 @@ local function applyLayer(
 	state: State,
 	below: { [string]: CFrame },
 	pose: { [string]: Weighted }?,
-	legs: number
+	legs: number,
+	out: { [string]: CFrame }
 ): { [string]: CFrame }
 	if not pose then
 		return below
 	end
-	local out = table.clone(below)
+	table.clear(out)
+	for name, cf in below do
+		out[name] = cf
+	end
 	local poseRoot = pose.Root
 	if poseRoot and below.Root then
 		out.Root = below.Root:Lerp(scaled(poseRoot.cf, state.scale), poseRoot.w * legs)
@@ -620,7 +709,8 @@ local function step(state: State, dt: number)
 	state.move += (moving - state.move) * (1 - math.exp(-dt * MOVE_BLEND_RATE))
 	local legsKept = 1 - state.move
 
-	local results: { [string]: CFrame } = {}
+	local results = state.buffers[1]
+	table.clear(results)
 	for name, joint in state.joints do
 		local current = joint.Transform
 		-- If the Animator didn't rewrite this joint since our last write, start from
@@ -632,8 +722,14 @@ local function step(state: State, dt: number)
 		results[name] = current
 	end
 
-	-- Stance and footwork under everything else.
-	local locoPose, locoWeight = locomotion(state, dt, root, state.model:FindFirstChildOfClass("Humanoid"))
+	-- Stance and footwork under everything else. A clip or stance posing the legs while standing
+	-- owns the feet: the footwork's standing places follow the stance instead of stepping.
+	local function legWeight(pose: { [string]: Weighted }?): number
+		local hip = pose and pose.RightHip
+		return if hip then hip.w else 0
+	end
+	local owned = legsKept > 0.5 and math.max(legWeight(actionPose), legWeight(state.base)) > 0.5
+	local locoPose, locoWeight = locomotion(state, dt, root, state.model:FindFirstChildOfClass("Humanoid"), owned)
 	if locoPose then
 		for name, cf in locoPose do
 			local current = results[name]
@@ -645,14 +741,37 @@ local function step(state: State, dt: number)
 		state.squareRoot = CFrame.identity
 	end
 
-	results = applyLayer(state, results, state.base, legsKept)
+	local buffers = state.buffers
+	results = applyLayer(state, results, state.base, legsKept, buffers[2])
 	local based = results
-	results = applyLayer(state, based, actionPose, legsKept)
+	results = applyLayer(state, based, actionPose, legsKept, buffers[3])
 	if previousPose then
-		local fading = applyLayer(state, based, previousPose, legsKept)
+		local fading = applyLayer(state, based, previousPose, legsKept, buffers[4])
 		for name, cf in results do
 			results[name] = fading[name]:Lerp(cf, cross)
 		end
+	end
+
+	-- The arms a stance holds swing a little with the stride (not under a clip).
+	local targets = state.targets
+	if locoPose and targets and targets.moveW > 1e-3 then
+		local clipArm = if actionPose and actionPose.RightShoulder then actionPose.RightShoulder.w else 0
+		local baseArm = if state.base.RightShoulder then state.base.RightShoulder.w else 0
+		local two = state.baseName ~= nil and ClipLibrary.TwoHandedStances[state.baseName] == true
+		local share = (if two then HELD_SWING.two else HELD_SWING.one) * baseArm * (1 - clipArm) * locoWeight
+		-- A one-handed carry also tips the blade up against the run's lean so the tip stays clear
+		-- of the ground.
+		local carry = if two then 0 else baseArm * (1 - clipArm) * locoWeight
+		local running = targets.run * targets.moveW * carry
+		swingHeld(
+			state,
+			results,
+			"Right",
+			-targets.armSwing * share,
+			-targets.lean * 1.4 * carry,
+			math.rad(28) * running,
+			math.rad(12) * running
+		)
 	end
 
 	-- Two-hand grip, as strong as the two-handed layers currently are.
@@ -714,6 +833,12 @@ function Animator.attach(model: Model)
 		loco = 0,
 		ground = {},
 		squareRoot = CFrame.identity,
+		targets = nil,
+		lastPos = nil,
+		velocity = Vector3.zero,
+		buffers = { {}, {}, {}, {} },
+		lodDt = 0,
+		orphanedAt = nil,
 	}
 	states[model] = state
 	refreshGroundFilter()
@@ -938,16 +1063,58 @@ function Animator.unfreeze(model: Model)
 	end
 end
 
+-- Nothing left to pose: no stance, no clip, and the footwork has handed the body to Roblox.
+local function idle(state: State): boolean
+	return state.baseTarget == nil
+		and next(state.base) == nil
+		and state.action == nil
+		and state.previous == nil
+		and state.loco < 1e-3
+		and state.grip < 1e-3
+end
+
 function Animator.start()
 	RunService.PreSimulation:Connect(function(dt)
+		local camera = workspace.CurrentCamera
+		local eye = if camera then camera.CFrame.Position else nil
+		local clock = os.clock()
 		for model, state in states do
-			if model.Parent then
-				if state.jointsDirty then
-					state.joints = findJoints(model)
-					state.jointsDirty = false
+			if not model.Parent then
+				state.orphanedAt = state.orphanedAt or clock
+				if clock - (state.orphanedAt :: number) > ORPHAN_TIME then
+					states[model] = nil -- (old characters parented to nil, never destroyed)
+					refreshGroundFilter()
 				end
-				step(state, dt)
+				continue
 			end
+			state.orphanedAt = nil
+			if state.jointsDirty then
+				state.joints = findJoints(model)
+				state.jointsDirty = false
+			end
+			local humanoid = model:FindFirstChildOfClass("Humanoid")
+			if humanoid and humanoid.Health <= 0 and idle(state) then
+				table.clear(state.written) -- (the next full step starts from Roblox's pose)
+				continue
+			end
+			local root = model.PrimaryPart
+			local stepDt = dt
+			if eye and root and (root.Position - eye).Magnitude > LOD_RANGE then
+				state.lodDt += dt
+				if state.lodDt < 1 / LOD_RATE then
+					-- Far away: hold the last pose (Roblox's Animator may have written its own since).
+					for name, joint in state.joints do
+						local cf = state.written[name]
+						if cf then
+							joint.Transform = cf
+						end
+					end
+					continue
+				end
+				stepDt = state.lodDt
+			end
+			state.lodDt = 0
+			step(state, stepDt)
 		end
 	end)
 end
