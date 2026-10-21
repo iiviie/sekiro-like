@@ -40,7 +40,7 @@ Intros.List = {
 		kanji = "Path",
 		accent = rgb(226, 214, 190),
 		climax = 1.12,
-		flourish = { 1.5, 2.02 },
+		flourish = { 1.0, 2.02 }, -- the bow and the rise (the rise alone barely shows in a crowd)
 	},
 	{
 		ref = "Chiburi",

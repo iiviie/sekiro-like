@@ -912,16 +912,35 @@ local function flourish(model: Model)
 	Animator.play(model, name)
 end
 
+local watched: { [Model]: boolean } = {}
+
 local function watchRoyale(model: Model)
-	model:GetAttributeChangedSignal("InMatch"):Connect(function()
-		if model:GetAttribute("InMatch") == true then
-			task.delay(0.6 + math.random() * 0.4, function()
-				if model.Parent and model:GetAttribute("InMatch") == true then
-					flourish(model)
-				end
-			end)
+	if watched[model] then
+		return
+	end
+	watched[model] = true
+	model.AncestryChanged:Connect(function()
+		if not model:IsDescendantOf(workspace) then
+			watched[model] = nil
 		end
 	end)
+	local function soon()
+		task.delay(0.6 + math.random() * 0.4, function()
+			if model.Parent and model:GetAttribute("InMatch") == true then
+				flourish(model)
+			end
+		end)
+	end
+	model:GetAttributeChangedSignal("InMatch"):Connect(function()
+		if model:GetAttribute("InMatch") == true then
+			soon()
+		end
+	end)
+	-- Filler bots are made and put in the match in the same server step, so they arrive here
+	-- already InMatch: they flourish on arrival.
+	if model:GetAttribute("InMatch") == true and not Players:GetPlayerFromCharacter(model) then
+		soon()
+	end
 end
 
 function IntroCinematic.start()
@@ -933,9 +952,9 @@ function IntroCinematic.start()
 	task.spawn(function()
 		listen(remotes:WaitForChild("Boss") :: RemoteEvent)
 	end)
-	-- every fighter model that appears (players' characters and bots)
+	-- every fighter model that appears (players' characters and the filler bots)
 	local function consider(instance: Instance)
-		if instance:IsA("Model") and instance:FindFirstChildOfClass("Humanoid") then
+		if instance:IsA("Model") then
 			watchRoyale(instance)
 		end
 	end
@@ -947,6 +966,13 @@ function IntroCinematic.start()
 	end
 	Players.PlayerAdded:Connect(function(p)
 		p.CharacterAdded:Connect(consider)
+	end)
+	task.spawn(function()
+		local bots = workspace:WaitForChild("Bots")
+		for _, model in bots:GetChildren() do
+			consider(model)
+		end
+		bots.ChildAdded:Connect(consider)
 	end)
 	-- The Locker's Preview button on an intro: play it here, then reopen the Locker on intros.
 	local lockerModule = script.Parent:FindFirstChild("LockerPanel")
