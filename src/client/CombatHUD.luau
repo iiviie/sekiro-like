@@ -21,6 +21,7 @@ local UserInputService = game:GetService("UserInputService")
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local LockOn = require(script.Parent.LockOn)
 local Types = require(ReplicatedStorage.Shared.Types)
+local Kit = require(script.Parent.UI)
 
 local combatEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent
 local player = Players.LocalPlayer
@@ -41,6 +42,7 @@ local DEATH_RED = Color3.fromRGB(190, 18, 18)
 local FRAME_INSET = 10 -- transparent shadow margin baked into the frame art
 local ENEMY_BAR_LINGER = 4
 local CONTROLS_HINT_TIME = 14
+local CONTROLS_HINT_FIGHTS = 3 -- the keycap reminder shows for your first few fights only
 
 local CombatHUD = {}
 
@@ -65,7 +67,7 @@ local staminaGroup: CanvasGroup
 local gourdIcon: ImageLabel
 local gourdCount: TextLabel
 local perilFlash: ImageLabel
-local controlsHint: TextLabel
+local controlsHint: CanvasGroup
 local enemies: { [Model]: EnemyEntry } = {}
 
 local function tween(instance: Instance, time: number, goal: { [string]: any }, style: Enum.EasingStyle?)
@@ -311,6 +313,15 @@ function CombatHUD.flashPeril()
 	tween(perilFlash, 0.9, { ImageTransparency = 1 }, Enum.EasingStyle.Sine)
 end
 
+-- The key-cap reminder is for keyboard players: not on a phone, not on a gamepad.
+local function keyboardPlayer(): boolean
+	if Kit.isTouch() or not UserInputService.KeyboardEnabled then
+		return false
+	end
+	local last = UserInputService:GetLastInputType()
+	return not (last.Name:find("Gamepad") ~= nil)
+end
+
 -- In the lobby the bottom of the screen belongs to PLAY and the nav bar: hide your own
 -- vitality and stamina (nothing there can hurt you unless you opt into sparring) and lift
 -- the posture bar above PLAY, where it still teaches the trainer's rhythm.
@@ -325,7 +336,7 @@ function CombatHUD.setLobbyMode(on: boolean)
 	staminaGroup.Visible = not on
 	-- The lobby's nav bar owns the bottom of the screen; the keyboard reminder is for fights,
 	-- and a phone has no keyboard.
-	controlsHint.Visible = not on and not (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
+	controlsHint.Visible = not on and keyboardPlayer()
 	postureGroup.Position = if on then UDim2.new(0.5, 0, 1, -260) else UDim2.new(0.5, 0, 1, -100)
 	if entering then
 		CombatHUD.showControls()
@@ -345,16 +356,21 @@ end
 -- Shows the controls reminder for a while, then fades it: at the start of every fight
 -- (royale, duel, boss), unless Settings turned it off. A later call restarts the clock.
 local hintToken = 0
+local hintFights = 0
 function CombatHUD.showControls()
 	if not controlsHint or Players.LocalPlayer:GetAttribute("SettingControlsHint") == false then
 		return
 	end
+	if hintFights >= CONTROLS_HINT_FIGHTS or not keyboardPlayer() then
+		return
+	end
+	hintFights += 1
 	hintToken += 1
 	local mine = hintToken
-	controlsHint.TextTransparency = 0.25
+	controlsHint.GroupTransparency = 0.1
 	task.delay(CONTROLS_HINT_TIME, function()
 		if hintToken == mine then
-			tween(controlsHint, 2, { TextTransparency = 1 })
+			tween(controlsHint, 2, { GroupTransparency = 1 })
 		end
 	end)
 end
@@ -531,17 +547,19 @@ local function buildScreen()
 		Position = UDim2.fromScale(0, 0.5),
 		Size = UDim2.fromOffset(42, 42),
 	})
-	gourdCount = Instance.new("TextLabel")
-	gourdCount.BackgroundTransparency = 1
-	gourdCount.AnchorPoint = Vector2.new(1, 1)
-	gourdCount.Position = UDim2.new(1, 6, 1, 4)
-	gourdCount.Size = UDim2.fromOffset(20, 20)
-	gourdCount.Font = FONT
-	gourdCount.TextSize = 20
-	gourdCount.TextColor3 = PARCHMENT
-	gourdCount.TextStrokeTransparency = 0.4
-	gourdCount.Text = "3"
-	gourdCount.Parent = gourdIcon
+	-- The count sits at the gourd's foot in the number face, stroked so it reads on sand.
+	gourdCount = Kit.label("number", {
+		Name = "GourdCount",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, 8, 1, 6),
+		Size = UDim2.fromOffset(22, 22),
+		TextSize = 18,
+		TextColor3 = Kit.Theme.Bone,
+		TextStrokeColor3 = Kit.Theme.Ink,
+		TextStrokeTransparency = 0.2,
+		Text = "3",
+		ZIndex = 2,
+	}, gourdIcon)
 
 	vitality =
 		makeBar(ownGroup, Vector2.new(380, 8), UDim2.new(0, 48, 0.5, 0), Vector2.new(0, 0.5), false, true, CRIMSON)
@@ -586,24 +604,54 @@ local function buildScreen()
 		ZIndex = 3,
 	})
 
-	-- A quiet controls reminder that fades away.
-	controlsHint = Instance.new("TextLabel")
+	-- A quiet controls reminder: key-cap chips (keyboard only) that fade away.
+	controlsHint = Instance.new("CanvasGroup")
+	controlsHint.Name = "ControlsHint"
 	controlsHint.AnchorPoint = Vector2.new(1, 1)
-	controlsHint.Position = UDim2.new(1, -30, 1, -26)
-	controlsHint.Size = UDim2.fromOffset(470, 110)
+	controlsHint.Position = UDim2.new(1, -24, 1, -24)
+	controlsHint.Size = UDim2.fromOffset(420, 4 * 32)
 	controlsHint.BackgroundTransparency = 1
-	controlsHint.Font = FONT
-	controlsHint.TextSize = 17
-	controlsHint.LineHeight = 1.15
-	controlsHint.TextXAlignment = Enum.TextXAlignment.Right
-	controlsHint.TextYAlignment = Enum.TextYAlignment.Bottom
-	controlsHint.TextColor3 = PARCHMENT
-	controlsHint.TextTransparency = 1
-	controlsHint.Text = "Slash   Left Mouse        Deflect · Guard   F\n"
-		.. "Dodge   Q   — dash into a thrust to Mikiri\n"
-		.. "Perilous Thrust   E        Sweep   C\n"
-		.. "Healing Gourd   G        Lock On   R"
+	controlsHint.GroupTransparency = 1
 	controlsHint.Parent = screen
+	Kit.new("UIListLayout", {
+		Padding = UDim.new(0, 6),
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		VerticalAlignment = Enum.VerticalAlignment.Bottom,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, controlsHint)
+	local rows = {
+		{ { "Mouse", "Slash" }, { "F", "Deflect · hold to guard" } },
+		{ { "Q", "Dodge · into a thrust: Mikiri" } },
+		{ { "E", "Perilous thrust" }, { "C", "Sweep" } },
+		{ { "G", "Gourd" }, { "R", "Lock on" } },
+	}
+	for i, row in rows do
+		local line = Kit.new("Frame", {
+			Name = `Row{i}`,
+			LayoutOrder = i,
+			Size = UDim2.new(1, 0, 0, 26),
+			BackgroundTransparency = 1,
+		}, controlsHint)
+		Kit.new("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			Padding = UDim.new(0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}, line)
+		for j, pair in row do
+			Kit.keycap(line, pair[1], { LayoutOrder = j * 2 - 1 })
+			Kit.label("label", {
+				LayoutOrder = j * 2,
+				Size = UDim2.fromOffset(0, 26),
+				AutomaticSize = Enum.AutomaticSize.X,
+				TextSize = 14,
+				TextStrokeColor3 = Kit.Theme.Ink,
+				TextStrokeTransparency = 0.35,
+				Text = pair[2] .. (if j < #row then "   " else ""),
+			}, line)
+		end
+	end
 
 	screen.Parent = player:WaitForChild("PlayerGui")
 end
@@ -650,7 +698,7 @@ function CombatHUD.start()
 	player:GetAttributeChangedSignal("SettingControlsHint"):Connect(function()
 		if player:GetAttribute("SettingControlsHint") == false then
 			hintToken += 1
-			controlsHint.TextTransparency = 1
+			controlsHint.GroupTransparency = 1
 		end
 	end)
 
