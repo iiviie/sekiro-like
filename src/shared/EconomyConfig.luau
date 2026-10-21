@@ -148,8 +148,10 @@ local N = {
 	-- FeaturedDiscount off (rounded to 50 gems). Every item returns within ReturnWithinDays.
 	Shop = { CoinSlots = 2, GemSlots = 2, FeaturedSize = 3, FeaturedDiscount = 0.2, ReturnWithinDays = 56 },
 
-	-- Ranked season end: rewards need at least MinGames rated games in the season.
-	Ranked = { MinGames = 5 },
+	-- Ranked season end: rewards need at least MinGames rated games in the season. After the
+	-- rewards are paid (on the season's tier), each rating keeps Keep of its distance from
+	-- Toward (Config.Rating.Start): 1,950 -> 1,175, 200 -> 300. Once per player per season.
+	Ranked = { MinGames = 5, SoftReset = { Toward = 400, Keep = 0.5 } },
 }
 -- END NUMBERS
 
