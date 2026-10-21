@@ -368,7 +368,9 @@ order: naginata (reach), then dual blades; kusarigama last.
   `build.py --luau` into Clothing.luau. Bots also wear a woven kasa (made with Studio's mesh generator).
 - **Combat VFX** ([CombatVisuals.luau](src/client/CombatVisuals.luau)). Slash smears are pooled flat Beams swept
   between the sword's `TrailStart`/`TrailEnd` attachments every frame (interpolated, so even a 70 ms cut draws a smooth
-  arc). Deflects spray long sparks from where the blades meet (more, and a bigger bloom, for a perfect deflect); hits
+  arc). Thrusts (the perilous thrust, boss thrusts) barely sweep, so they also draw a straight, tapered streak from the
+  guard to past the tip, red for perilous, that closes up toward the point as it fades. Deflects spray long sparks
+  from where the blades meet (more, and a bigger bloom, for a perfect deflect); hits
   add a cut streak, a white star flash and shards to the dark, gravity-pulled blood; deathblows add an X cut, pools on
   the floor and a brief desaturated freeze. **Settings → Reduced effects** thins particles, drops flash lights and
   shortens smears. In Studio, `workspace:SetAttribute("VfxSlowMo", 0.1)` slows only these effects for screenshots. The camera kicks along the blow and settles

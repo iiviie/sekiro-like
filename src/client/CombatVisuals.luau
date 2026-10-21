@@ -646,6 +646,194 @@ local function refreshFighter(model: Model, fighter: Fighter)
 	end
 end
 
+---------------------------------------------------------------------------------------
+-- Thrust streaks
+--
+-- A thrust drives the blade along its own length, so its smear is only a sliver. Every move
+-- whose spec says `thrust` (the perilous thrust and the bosses' Tsuki, so also the blade a
+-- Mikiri steps on) adds a straight streak: a tapered line of light from where the guard was
+-- as the strike began to past the tip, stretching with the blade while the strike plays, then
+-- fading as its tail closes up toward the point and the point drifts on (the afterimage). A
+-- hot core inside a soft halo; red for perilous. The beams come from the smear pool and face
+-- the camera only while they're in use.
+
+local THRUST_EARLY = 0.3 -- the strike may begin this long before the hit...
+local THRUST_LATE = 0.25 -- ...or this long after it
+local THRUST_TRACK = 0.22 -- seconds the streak follows the blade at most
+local THRUST_LIFE = 0.24 -- seconds it fades over once the strike is done
+local THRUST_LIFE_REDUCED = 0.15
+local THRUST_OVERSHOOT = 2.4 -- studs of point past the tip
+local THRUST_DRIFT = 1.2 -- how much further the point runs on while it fades
+local THRUST_WIDTH = 0.38 -- the core's width at the tip
+local THRUST_HALO = 3.4 -- the halo is this many times wider
+
+-- Transparency along the shaft (tail to tip) and the point (tip to end), at full strength.
+local SHAFT_PROFILE = { { 0, 1 }, { 0.35, 0.7 }, { 0.8, 0.12 }, { 1, 0 } }
+local POINT_PROFILE = { { 0, 0 }, { 0.6, 0.25 }, { 1, 1 } }
+local function fadeLevels(profile: { { number } }, floor: number): { NumberSequence }
+	local levels = {}
+	for level = 1, FADE_LEVELS do
+		local opacity = level / FADE_LEVELS * (1 - floor)
+		local points = {}
+		for i, point in profile do
+			points[i] = NumberSequenceKeypoint.new(point[1], 1 - (1 - point[2]) * opacity)
+		end
+		levels[level] = NumberSequence.new(points)
+	end
+	return levels
+end
+local SHAFT_CORE, POINT_CORE = fadeLevels(SHAFT_PROFILE, 0), fadeLevels(POINT_PROFILE, 0)
+local SHAFT_HALO, POINT_HALO = fadeLevels(SHAFT_PROFILE, 0.5), fadeLevels(POINT_PROFILE, 0.5)
+
+type StreakPart = { quad: Quad, shaft: boolean, halo: boolean }
+type Streak = {
+	model: Model,
+	blade: BasePart,
+	from: Vector3, -- TrailStart / TrailEnd in the blade's space
+	to: Vector3,
+	tail: Vector3, -- world: the guard as the strike began
+	tip: Vector3, -- world: the furthest the tip got
+	dir: Vector3,
+	startedAt: number,
+	tracking: boolean,
+	t: number, -- fade time (slowed by VfxSlowMo, held by hitstop)
+	life: number,
+	level: number,
+	parts: { StreakPart },
+}
+
+local thrustStreaks: { Streak } = {}
+local thrustAt: { [Model]: number } = {} -- os.clock() a thrust's hit lands, until its streak starts
+
+local function startStreak(model: Model, fighter: Fighter, trail: Trail, clock: number)
+	local blade = fighter.sword
+	local camera = workspace.CurrentCamera
+	if not blade or not camera or (camera.CFrame.Position - blade.Position).Magnitude > SMEAR_RANGE then
+		return
+	end
+	local from = blade:FindFirstChild("TrailStart")
+	local to = blade:FindFirstChild("TrailEnd")
+	if not from or not to or not from:IsA("Attachment") or not to:IsA("Attachment") then
+		return
+	end
+	local guard, tip = from.WorldPosition, to.WorldPosition
+	if (tip - guard).Magnitude < 0.5 then
+		return
+	end
+	local perilous = clock < (perilUntil[model] or 0)
+	local keypoints = trail.Color.Keypoints
+	local core = if perilous then PERIL_CORE else keypoints[1].Value
+	local body = if perilous then PERIL_BODY else keypoints[#keypoints].Value
+	local reds = core.R > core.B + 0.25
+	-- The core's colour at the tip: white-hot steel, or a red that stays red under bloom.
+	local hot = if reds then core:Lerp(body, 0.45) else core:Lerp(WHITE, 0.7)
+	local reduced = reducedEffects()
+	local streak: Streak = {
+		model = model,
+		blade = blade,
+		from = from.Position,
+		to = to.Position,
+		tail = guard,
+		tip = tip,
+		dir = (tip - guard).Unit,
+		startedAt = clock,
+		tracking = true,
+		t = 0,
+		life = if reduced then THRUST_LIFE_REDUCED else THRUST_LIFE,
+		level = -1,
+		parts = {},
+	}
+	for _, halo in (if reduced then { false } else { true, false }) do
+		for _, shaft in { true, false } do
+			local quad = acquireQuad()
+			local beam = quad.beam
+			beam.FaceCamera = true
+			beam.Color = if halo
+				then ColorSequence.new(body)
+				elseif shaft then ColorSequence.new(if reds then body else body:Lerp(core, 0.5), hot)
+				else ColorSequence.new(hot, if reds then body else core)
+			-- Additive glow washes red out to orange and pink in daylight, so red stays mostly solid.
+			beam.LightEmission = if reds then (if halo then 0 else 0.15) elseif halo then 0.5 else 0.8
+			beam.Brightness = if halo then 1.4 elseif reds then 1.8 else 3
+			table.insert(streak.parts, { quad = quad, shaft = shaft, halo = halo })
+		end
+	end
+	table.insert(thrustStreaks, streak)
+end
+
+local function releaseStreak(streak: Streak)
+	for _, part in streak.parts do
+		part.quad.beam.FaceCamera = false -- back to the smear's flat pieces
+		releaseQuad(part.quad)
+	end
+	table.clear(streak.parts)
+end
+
+-- Follows the blade while the strike plays, then fades; returns whether it's still showing.
+local function updateStreak(streak: Streak, dt: number, clock: number): boolean
+	local blade = streak.blade
+	if streak.tracking then
+		local fighter = fighters[streak.model]
+		local trail = fighter and fighter.trail
+		if not blade.Parent or not trail or not trail.Enabled or clock - streak.startedAt > THRUST_TRACK then
+			streak.tracking = false
+		else
+			-- Keep the furthest the tip has reached along the thrust, and the blade's line.
+			local tip = blade.CFrame * streak.to
+			if (tip - streak.tail):Dot(streak.dir) > (streak.tip - streak.tail):Dot(streak.dir) then
+				streak.tip = tip
+			end
+			local guard = blade.CFrame * streak.from
+			if (tip - guard).Magnitude > 0.5 then
+				streak.dir = (tip - guard).Unit
+			end
+		end
+	end
+	if not streak.tracking and clock >= (frozenUntil[streak.model] or 0) then
+		streak.t += dt * vfxSlow()
+	end
+	local u = math.clamp(streak.t / streak.life, 0, 1)
+	if u >= 1 then
+		releaseStreak(streak)
+		return false
+	end
+	local strength = 1 - u
+	local level = math.max(math.ceil(strength * math.sqrt(strength) * FADE_LEVELS), 1)
+	local tail = streak.tail:Lerp(streak.tip, 0.8 * u)
+	local front = streak.tip + streak.dir * (THRUST_OVERSHOOT + THRUST_DRIFT * u)
+	local width = THRUST_WIDTH * (1 - 0.5 * u)
+	for _, part in streak.parts do
+		local quad = part.quad
+		local beam = quad.beam
+		local w = if part.halo then width * THRUST_HALO else width
+		if part.shaft then
+			quad.a0.CFrame = CFrame.new(tail)
+			quad.a1.CFrame = CFrame.new(streak.tip)
+			beam.Width0, beam.Width1 = w * 0.08, w
+		else
+			quad.a0.CFrame = CFrame.new(streak.tip)
+			quad.a1.CFrame = CFrame.new(front)
+			beam.Width0, beam.Width1 = w, 0
+		end
+		if level ~= streak.level then
+			beam.Transparency = if part.halo
+				then (if part.shaft then SHAFT_HALO else POINT_HALO)[level]
+				else (if part.shaft then SHAFT_CORE else POINT_CORE)[level]
+		end
+	end
+	streak.level = level
+	return true
+end
+
+local function stepStreaks(dt: number, clock: number)
+	for i = #thrustStreaks, 1, -1 do
+		if not updateStreak(thrustStreaks[i], dt, clock) then
+			thrustStreaks[i] = thrustStreaks[#thrustStreaks]
+			thrustStreaks[#thrustStreaks] = nil
+		end
+	end
+end
+
 local function stepSmears(dt: number)
 	local clock = os.clock()
 	for model, fighter in fighters do
@@ -653,7 +841,7 @@ local function stepSmears(dt: number)
 			fighters[model] = nil
 			liveSmear[model] = nil
 			frozenUntil[model], perilUntil[model], heavyKind[model] = nil, nil, nil
-			sweepDir[model], sweepAt[model] = nil, nil
+			sweepDir[model], sweepAt[model], thrustAt[model] = nil, nil, nil
 			continue
 		end
 		local trail = fighter.trail
@@ -674,6 +862,13 @@ local function stepSmears(dt: number)
 		elseif not trail.Enabled and smear then
 			smear.live = false
 			liveSmear[model] = nil
+		end
+		local hitClock = thrustAt[model]
+		if hitClock and clock > hitClock + THRUST_LATE then
+			thrustAt[model] = nil -- feinted, interrupted, or the strike never lit
+		elseif hitClock and trail.Enabled and clock >= hitClock - THRUST_EARLY then
+			thrustAt[model] = nil
+			startStreak(model, fighter, trail, clock)
 		end
 		for i, blade in fighter.blades do
 			fighter.prev[i] = blade.CFrame
@@ -702,6 +897,7 @@ local function stepSmears(dt: number)
 			smears[#smears] = nil
 		end
 	end
+	stepStreaks(dt, clock)
 end
 
 -- The direction the attacker's blade was travelling as it struck, if it was just swinging.
@@ -1431,6 +1627,9 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			glint(model, data.hitAt)
 		end
 		local swingSpec = specOf(model, kind)
+		if swingSpec and swingSpec.thrust then
+			thrustAt[model] = os.clock() + remaining -- the strike draws a thrust streak (stepSmears)
+		end
 		task.delay(math.max(remaining + (if swingSpec then swingSpec.lungeAt else -0.05), 0), function()
 			if not model.Parent then
 				return
