@@ -246,7 +246,9 @@ local function introPhase(ground: Ground, sides: { Side }, rated: boolean)
 		end
 		task.wait(0.05)
 	end
-	if state.skipped then
+	-- skipped, or cut short because a fighter left or fell: end it on every screen now (the
+	-- one left would otherwise watch the rest of the cinematic)
+	if state.skipped or now() < endsAt - 0.05 then
 		for _, side in sides do
 			send(side, "IntroEnd", {})
 		end

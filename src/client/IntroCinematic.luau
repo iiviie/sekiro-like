@@ -770,6 +770,12 @@ function IntroCinematic.play(spec: Spec)
 			endSession(s)
 			return
 		end
+		for _, f in s.fighters do
+			if not f.model.Parent then
+				endSession(s, true) -- a fighter left: no one to show (the server ends it too)
+				return
+			end
+		end
 		camera.CameraType = Enum.CameraType.Scriptable
 		local cf: CFrame, fov: number
 		if single then
