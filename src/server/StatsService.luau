@@ -151,6 +151,20 @@ for _, field in NUMBER_MAPS do
 	KNOWN[field] = true
 end
 
+-- Player settings (client/Panels' Settings window), saved in Ext.Settings so the schema and
+-- older servers carry them untouched. Name -> kind: an on/off switch or a 0..1 level.
+local SETTINGS: { [string]: "switch" | "level" } = {
+	SettingCameraShake = "switch",
+	SettingHitstop = "switch",
+	SettingControlsHint = "switch",
+	SettingReducedEffects = "switch",
+	SettingReduceMotion = "switch",
+	SettingUIVolume = "level",
+	SettingMasterVolume = "level",
+	SettingMusicVolume = "level",
+	SettingSFXVolume = "level",
+}
+
 local StatsService = {}
 
 -- A DataStore-shaped store: the real one, or an in-memory one in Studio.
@@ -488,6 +502,29 @@ local function publishCore(player: Player, d: Data)
 	end
 end
 
+local function validSetting(name: any, value: any): boolean
+	local kind = typeof(name) == "string" and SETTINGS[name]
+	if kind == "switch" then
+		return typeof(value) == "boolean"
+	end
+	return kind == "level" and typeof(value) == "number" and value >= 0 and value <= 1
+end
+
+-- The saved settings that are valid (Ext is kept as saved, so it's checked on the way out).
+local function savedSettings(d: Data): { [string]: boolean | number }
+	local out = {}
+	local raw = d.Ext.Settings
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for name, value in raw do
+		if validSetting(name, value) then
+			out[name] = value
+		end
+	end
+	return out
+end
+
 -- The owner-only blobs, the publish hooks (unlock progress walks the whole catalogue) and the
 -- change listeners.
 local function publishRest(player: Player, d: Data)
@@ -495,6 +532,7 @@ local function publishRest(player: Player, d: Data)
 	setPrivate(player, "TrialProgress", HttpService:JSONEncode(d.TrialProgress))
 	setPrivate(player, "BossClears", HttpService:JSONEncode(d.BossClears))
 	setPrivate(player, "BossNoHit", HttpService:JSONEncode(d.BossNoHit))
+	setPrivate(player, "Settings", HttpService:JSONEncode(savedSettings(d)))
 	for _, hook in publishHooks do
 		hook(player, d)
 	end
@@ -724,6 +762,23 @@ end
 -- their Player. For per-player data no other client needs (unlock progress, missions).
 function StatsService.setPrivate(player: Player, name: string, value: any)
 	setPrivate(player, name, value)
+end
+
+-- Merges settings the player picked (`changes`: { [name] = value }, from LobbyAction
+-- "Settings") into the profile. Unknown names and bad values are ignored. Nothing is
+-- republished: the client already shows them, and the next save writes them.
+function StatsService.setSettings(player: Player, changes: unknown)
+	local d = data[player]
+	if not d or typeof(changes) ~= "table" then
+		return
+	end
+	local saved = savedSettings(d)
+	for name, value in changes :: { [any]: any } do
+		if validSetting(name, value) then
+			saved[name] = value
+		end
+	end
+	d.Ext.Settings = saved
 end
 
 -- Saves now and returns true once the write has committed (Monetization grants on this).

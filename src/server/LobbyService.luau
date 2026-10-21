@@ -16,6 +16,8 @@
 --                 slot (and the second title); wearing one skips anything no longer owned
 --   "Wish" catalogId       add or remove a shop item on the wishlist (told when it's in the
 --                 daily shop: server/ShopService)
+--   "Settings" { [name] = value }  settings the player picked, saved in the profile
+--                 (StatsService.setSettings)
 -- Everything is validated here; the client only ever asks. Requests are rate-limited per
 -- player (a token bucket), so spamming equips can't flood the rig or the attributes.
 --
@@ -441,6 +443,9 @@ local handlers: { [string]: (Player, unknown) -> () } = {
 	end,
 	Preset = preset,
 	Wish = wish,
+	Settings = function(player, changes)
+		StatsService.setSettings(player, changes)
+	end,
 }
 
 -- The deflect trainer: a training dummy that faces whoever stands in its ring and swings

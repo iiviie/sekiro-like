@@ -524,7 +524,40 @@ local function rewardsPanel()
 	end)
 end
 
--- One settings row: the label left, a segmented control right (ink track, crimson thumb).
+-- Settings the player picked, sent to the server (LobbyAction "Settings") half a second after
+-- the last pick, so a run of taps is one request. The server saves them in the profile and
+-- client/init applies them on the next join.
+local SAVE_DELAY = 0.5
+local unsaved: { [string]: any } = {}
+local saveQueued = false
+
+local function saveSetting(key: string, value: any)
+	player:SetAttribute(key, value) -- read by the effects code at once
+	unsaved[key] = value
+	if saveQueued then
+		return
+	end
+	saveQueued = true
+	task.delay(SAVE_DELAY, function()
+		saveQueued = false
+		local changes = unsaved
+		unsaved = {}
+		if lobbyAction and next(changes) ~= nil then
+			lobbyAction:FireServer("Settings", changes)
+		end
+	end)
+end
+
+-- Settings rows: a 46 px control, 60 (UI.Touch) on a touch screen, one row every ROW_GAP more.
+local SCROLLBAR = 5
+local ROW_GAP = 8
+
+local function rowHeight(): number
+	return if UI.touchSized() then UI.Touch else 46
+end
+
+-- One settings row: the label left, a segmented control right (ink track, crimson thumb),
+-- kept clear of the scrollbar.
 local function segmented(
 	parent: Instance,
 	y: number,
@@ -534,18 +567,20 @@ local function segmented(
 	selected: any,
 	onPick: (any) -> ()
 )
+	local height = rowHeight()
+	local width = 86 * #options
+	local inset = SCROLLBAR + 6
 	UI.label("label", {
 		Position = UDim2.fromOffset(0, y),
-		Size = UDim2.new(1, -280, 0, 48),
+		Size = UDim2.new(1, -(width + inset + 8), 0, height + 4),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Text = label,
 	}, parent)
-	local width = 86 * #options
 	local track = UI.new("Frame", {
 		Name = key,
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, 0, 0, y + 2),
-		Size = UDim2.fromOffset(width, 46),
+		Position = UDim2.new(1, -inset, 0, y + 2),
+		Size = UDim2.fromOffset(width, height),
 		BackgroundColor3 = UI.Ink,
 		BorderSizePixel = 0,
 	}, parent)
@@ -584,21 +619,30 @@ local function settingsPanel()
 		{ key = "SettingControlsHint", label = "Show controls reminder" },
 		{ key = "SettingReducedEffects", label = "Fewer particles", offByDefault = true },
 	}
+	local pitch = rowHeight() + ROW_GAP
+	local function rowY(i: number): number
+		return 30 + i * pitch
+	end
 	local list = UI.new("ScrollingFrame", {
 		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		ScrollBarThickness = 5,
+		ScrollBarThickness = SCROLLBAR,
 		ScrollBarImageColor3 = UI.Theme.Gold,
-		CanvasSize = UDim2.fromOffset(0, 34 + (#options + 5) * 54),
+		CanvasSize = UDim2.fromOffset(0, rowY(#options + 5) + 4),
 	}, body)
-	sectionTitle("Settings  ·  saved for this session", 0, list)
+	-- A profile that didn't load can't save them.
+	sectionTitle(
+		if player:GetAttribute("DataFailed") == true then "Settings  ·  not saved this time" else "Settings",
+		0,
+		list
+	)
 	for i, option in options do
 		local value = player:GetAttribute(option.key)
 		local on = if option.offByDefault then value == true else value ~= false
 		segmented(
 			list,
-			30 + (i - 1) * 54,
+			rowY(i - 1),
 			option.key,
 			option.label,
 			{
@@ -607,14 +651,14 @@ local function settingsPanel()
 			},
 			on,
 			function(v)
-				player:SetAttribute(option.key, v) -- local only; read by the effects code
+				saveSetting(option.key, v)
 			end
 		)
 	end
 	-- Reduce motion follows the Roblox setting until it's picked here.
 	segmented(
 		list,
-		30 + #options * 54,
+		rowY(#options),
 		"SettingReduceMotion",
 		"Reduce motion",
 		{
@@ -623,13 +667,13 @@ local function settingsPanel()
 		},
 		UI.reducedMotion(),
 		function(v)
-			player:SetAttribute("SettingReduceMotion", v)
+			saveSetting("SettingReduceMotion", v)
 		end
 	)
 	local volume = player:GetAttribute("SettingUIVolume")
 	segmented(
 		list,
-		30 + (#options + 1) * 54,
+		rowY(#options + 1),
 		"SettingUIVolume",
 		"Menu sounds",
 		{
@@ -639,7 +683,7 @@ local function settingsPanel()
 		},
 		if typeof(volume) == "number" then volume else 1,
 		function(v)
-			player:SetAttribute("SettingUIVolume", v)
+			saveSetting("SettingUIVolume", v)
 			UI.sound("Press")
 		end
 	)
@@ -653,7 +697,7 @@ local function settingsPanel()
 		local stored = player:GetAttribute(level.key)
 		segmented(
 			list,
-			30 + (#options + 1 + i) * 54,
+			rowY(#options + 1 + i),
 			level.key,
 			level.label,
 			{
@@ -664,7 +708,7 @@ local function settingsPanel()
 			},
 			if typeof(stored) == "number" then stored else 1,
 			function(v)
-				player:SetAttribute(level.key, v)
+				saveSetting(level.key, v)
 				UI.sound("Press")
 			end
 		)

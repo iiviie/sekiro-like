@@ -3,15 +3,18 @@
 -- "BladeOutline" and Shared/Cosmetics/BladeLook puts the look's colours on it as attributes.
 -- Each Highlight is a full-screen pass and the engine draws at most 31 at once, so only the
 -- MAX blades nearest the camera (within RANGE) get one: the perilous tell's Highlight
--- (client/CombatVisuals) always has room, however full the server is.
+-- (client/CombatVisuals) always has room, however full the server is. Under Fewer particles
+-- (SettingReducedEffects, on by default on low-end phones: client/init) only MAX_REDUCED.
 
 local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
 
 local BladeOutlines = {}
 
 local TAG = "BladeOutline"
 local RANGE = 60
 local MAX = 12
+local MAX_REDUCED = 4
 local INTERVAL = 0.2
 local OUTLINE = Color3.fromRGB(20, 18, 22)
 local FILL = Color3.fromRGB(235, 240, 255)
@@ -47,8 +50,9 @@ local function refresh()
 	table.sort(near, function(a, b)
 		return a.distance < b.distance
 	end)
+	local reduced = Players.LocalPlayer:GetAttribute("SettingReducedEffects") == true
 	local keep: { [BasePart]: boolean } = {}
-	for i = 1, math.min(#near, MAX) do
+	for i = 1, math.min(#near, if reduced then MAX_REDUCED else MAX) do
 		keep[near[i].sword] = true
 	end
 	for sword, highlight in outlines do

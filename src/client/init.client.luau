@@ -18,13 +18,51 @@ local TitleScreen = require(script.TitleScreen)
 local Toasts = require(script.Toasts)
 local TrainerReadout = require(script.TrainerReadout)
 
--- Owner-only profile fields (server/StatsService.setPrivate) become local attributes on the
--- LocalPlayer, so the panels read them like the replicated ones.
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+
 local localPlayer = game:GetService("Players").LocalPlayer
 local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+
+-- Low-end phones start on Fewer particles (fewer effects, 4 blade outlines instead of 12):
+-- a touch-only screen whose Roblox graphics quality is Automatic or 4 and below. A choice
+-- saved in the profile replaces it when the profile arrives; the default itself isn't saved
+-- (client/Panels saves only what the player picks).
+local function lowEndTouch(): boolean
+	local touch = (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
+		or workspace:GetAttribute("ForceTouchHUD") == true
+	if not touch then
+		return false
+	end
+	local ok, level = pcall(function()
+		return UserSettings():GetService("UserGameSettings").SavedQualityLevel.Value
+	end)
+	return ok and typeof(level) == "number" and level <= 4
+end
+if localPlayer:GetAttribute("SettingReducedEffects") == nil and lowEndTouch() then
+	localPlayer:SetAttribute("SettingReducedEffects", true)
+end
+
+-- Owner-only profile fields (server/StatsService.setPrivate) become local attributes on the
+-- LocalPlayer, so the panels read them like the replicated ones. "Settings" is the saved
+-- settings: applied once, when the profile arrives (later copies only echo what's shown).
+local settingsApplied = false
 local profilePrivate = remotes:WaitForChild("ProfilePrivate") :: RemoteEvent
 profilePrivate.OnClientEvent:Connect(function(name: unknown, value: unknown)
-	if typeof(name) == "string" then
+	if name == "Settings" then
+		if settingsApplied or typeof(value) ~= "string" then
+			return
+		end
+		settingsApplied = true
+		local ok, saved = pcall(HttpService.JSONDecode, HttpService, value)
+		if ok and typeof(saved) == "table" then
+			for key, setting in saved do
+				if typeof(key) == "string" and string.sub(key, 1, 7) == "Setting" then
+					localPlayer:SetAttribute(key, setting)
+				end
+			end
+		end
+	elseif typeof(name) == "string" then
 		localPlayer:SetAttribute(name, value)
 	end
 end)
