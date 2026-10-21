@@ -402,10 +402,13 @@ local SMEAR_OVERLAP = 1.03 -- pieces overlap a little so no seam shows between t
 local SMEAR_INNER = 0.06 -- a fresh piece's inner end, as a fraction of TrailStart..TrailEnd
 local SMEAR_INNER_AGED = 0.7 -- ...and where it has crept to as the piece dies
 local FADE_LEVELS = 12
--- A piece whose middle comes this close to the camera fades out (gone by SMEAR_NEAR_GONE),
--- so a blade swung past the lens doesn't paint a sheet over half the screen.
-local SMEAR_NEAR = 8
-local SMEAR_NEAR_GONE = 3.5
+-- A piece whose middle comes within SMEAR_NEAR of the camera fades and thins toward the blade's
+-- edge (gone by SMEAR_NEAR_GONE, where only the outer SMEAR_NEAR_INNER..1 band would be left),
+-- so a blade swung past the lens (the trainer's pavilion pulls the camera to ~11 studs) draws
+-- a thin bright crescent instead of a sheet over a third of the screen.
+local SMEAR_NEAR = 15
+local SMEAR_NEAR_GONE = 4.5
+local SMEAR_NEAR_INNER = 0.8
 local POOL_CAP = 260
 
 -- Transparency along a piece, inner end (0) to the edge (1), at full strength.
@@ -611,13 +614,11 @@ local function updatePieces(smear: Smear, track: Track, eye: Vector3): boolean
 			pieces[kept] = piece
 			u = math.max(u, 0)
 			local f = SMEAR_INNER + (SMEAR_INNER_AGED - SMEAR_INNER) * u
+			local middle = piece.hilt:Lerp(piece.tip, (f + 1) / 2)
+			local near = math.clamp(((middle - eye).Magnitude - SMEAR_NEAR_GONE) / (SMEAR_NEAR - SMEAR_NEAR_GONE), 0, 1)
+			f += (math.max(f, SMEAR_NEAR_INNER) - f) * (1 - near)
 			local inner = piece.hilt:Lerp(piece.tip, f)
-			local near = math.clamp(
-				(((inner + piece.tip) / 2 - eye).Magnitude - SMEAR_NEAR_GONE) / (SMEAR_NEAR - SMEAR_NEAR_GONE),
-				0,
-				1
-			)
-			local strength = (1 - u) * near
+			local strength = (1 - u) * math.sqrt(near) -- (the thinning does most of the work)
 			local level = math.ceil(strength * math.sqrt(strength) * FADE_LEVELS)
 			if near >= 1 then
 				level = math.max(level, 1)
