@@ -14,19 +14,20 @@ end
 
 local Flair = {}
 
--- Rarity colours (labels, title text, card accents).
+-- Rarity colours for text on dark (labels, title text, card accents); the UI style
+-- guide's ladder: steel, jade, indigo, wisteria, gold.
 Flair.Rarity = {
-	common = rgb(196, 190, 180),
-	uncommon = rgb(120, 196, 120),
-	rare = rgb(110, 160, 240),
-	epic = rgb(186, 120, 236),
-	legendary = rgb(240, 196, 90),
+	common = rgb(184, 194, 204),
+	uncommon = rgb(108, 196, 164),
+	rare = rgb(127, 176, 234),
+	epic = rgb(190, 140, 235),
+	legendary = rgb(232, 199, 122),
 } :: { [string]: Color3 }
 
 -- The painted rarity frame each catalogue rarity uses (Assets.Icons.RarityFrames keys).
 Flair.Frame = {
 	common = "Common",
-	uncommon = "Common",
+	uncommon = "Uncommon",
 	rare = "Rare",
 	epic = "Epic",
 	legendary = "Legendary",
