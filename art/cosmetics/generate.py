@@ -436,5 +436,7 @@ if __name__ == "__main__":
         ("鶴", "k_crane"), ("波", "k_wave"), ("山", "k_mountain"), ("竹", "k_bamboo"), ("龍", "k_dragon"),
         ("虎", "k_tiger"), ("鬼", "k_oni"), ("千", "k_thousand"), ("金", "k_gold"), ("翠", "k_jade"),
         ("紅", "k_crimson"), ("将軍", "k_shogun"), ("道", "k_path"), ("浪人", "k_ronin"),
+        # the VIP plate (Hatamoto; was Ronin, which is also a bot tier)
+        ("旗本", "k_hatamoto"),
     ]:
         ui.kanji(text, name)

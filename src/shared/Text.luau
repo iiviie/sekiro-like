@@ -42,6 +42,21 @@ function Text.count(n: number, singular: string, pluralForm: string?): string
 	return `{Text.number(n)} {Text.plural(n, singular, pluralForm)}`
 end
 
+-- Currencies by kind (any case: "Shards", "shards"): coins and gems stay lowercase, Whetstones,
+-- Shards and Shrine Draws are proper nouns. Text.currency(1, "Whetstones") -> "1 Whetstone".
+local CURRENCY: { [string]: string } = {
+	coins = "coin",
+	gems = "gem",
+	whetstones = "Whetstone",
+	shards = "Shard",
+	draws = "Shrine Draw",
+}
+
+function Text.currency(n: number, kind: string): string
+	local word = CURRENCY[string.lower(kind)]
+	return if word then Text.count(n, word) else `{Text.number(n)} {kind}`
+end
+
 -- A span of days as players read it: whole weeks when it divides by 7 ("8 weeks"), else days.
 function Text.days(days: number): string
 	if days >= 14 and days % 7 == 0 then
