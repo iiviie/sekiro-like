@@ -12,6 +12,8 @@
 --   Economy.buy(player, itemId, currency?)                 -> (boolean, string?)
 --   Economy.equip(player, slot, itemId)                    -> boolean
 --   Economy.equipped(player, slot)                         -> string   (an item id, "" = none)
+--   Economy.equipIfDefault(player, itemId)                 -> string?  (a new title/blade over the default)
+--   Economy.onEquipped(fn(player, slot))                   auto-equips, so the lobby re-dresses
 --   Economy.unlocked(player, itemId)                       -> (boolean, have, need)
 --   Economy.upgradeLine(player, lineId, gemWhetstones?)    -> (boolean, string?)
 --   Economy.canTransact(player)                            -> boolean
@@ -340,6 +342,34 @@ function Economy.equip(player: Player, slot: Catalog.Slot, id: string): boolean
 	return true
 end
 
+-- Listeners told when a slot changed outside a LobbyAction (an auto-equip), so the lobby can
+-- re-dress the character: fn(player, slot).
+local equipListeners: { (Player, Catalog.Slot) -> () } = {}
+
+function Economy.onEquipped(listener: (Player, Catalog.Slot) -> ())
+	table.insert(equipListeners, listener)
+end
+
+-- Puts a freshly earned or bought title or blade on when its slot still holds only the
+-- default (no title, the plain steel blade), so a new player sees it at once. Returns the
+-- slot's previous id when it equipped (for an "undo"), else nil.
+function Economy.equipIfDefault(player: Player, id: string): string?
+	local d = StatsService.get(player)
+	local item = Catalog.get(id)
+	local slot = item and Catalog.slotOf(item)
+	if not d or not slot or (slot ~= "title" and slot ~= "bladeSkin") then
+		return nil
+	end
+	local current = d.Loadout[slot] or Catalog.Defaults[slot]
+	if current ~= Catalog.Defaults[slot] or not Economy.equip(player, slot, id) then
+		return nil
+	end
+	for _, listener in equipListeners do
+		task.spawn(listener, player, slot)
+	end
+	return current
+end
+
 -- The second title slot (pass.TitleSlot, checked by the caller and passed as `hasSlot`):
 -- any owned title other than the first one; "" clears it. Published in Loadout.title2.
 function Economy.equipTitle2(player: Player, id: string, hasSlot: boolean): boolean
@@ -426,13 +456,17 @@ local function checkAuto(player: Player)
 	if #granted > 0 then
 		StatsService.commit(player)
 		local progressRemote = remote()
-		if progressRemote then
-			for _, item in granted do
-				progressRemote:FireClient(
-					player,
-					"Unlock",
-					{ id = item.id, name = item.name, category = item.category }
-				)
+		for _, item in granted do
+			-- An earned title or blade goes straight on over the default (the client offers undo).
+			local previous = Economy.equipIfDefault(player, item.id)
+			if progressRemote then
+				progressRemote:FireClient(player, "Unlock", {
+					id = item.id,
+					name = item.name,
+					category = item.category,
+					equipped = previous ~= nil,
+					previous = previous,
+				})
 			end
 		end
 	end
