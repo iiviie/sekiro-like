@@ -12,9 +12,8 @@
 -- Dodging, downed and dead bodies don't push (you can dash past or through someone), and
 -- neither do bodies far apart vertically (a jump over a sweep, a stomp).
 
-local CollectionService = game:GetService("CollectionService")
-
 local Config = require(script.Parent.Config)
+local Tagged = require(script.Parent.Tagged)
 local Types = require(script.Parent.Types)
 
 local RULES = Config.Spacing
@@ -67,7 +66,7 @@ local function neighbours(model: Model, lobby: boolean?): { { model: Model, root
 	if arena == nil and not lobby then
 		return out
 	end
-	for _, instance in CollectionService:GetTagged(Types.Tag) do
+	for _, instance in Tagged.list(Types.Tag) do
 		if instance ~= model and instance:IsA("Model") and instance:GetAttribute("Arena") == arena then
 			local root = rootOf(instance)
 			local humanoid = instance:FindFirstChildOfClass("Humanoid")

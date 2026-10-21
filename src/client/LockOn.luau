@@ -9,6 +9,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Tagged = require(ReplicatedStorage.Shared.Tagged)
 local Types = require(ReplicatedStorage.Shared.Types)
 
 local player = Players.LocalPlayer
@@ -113,7 +114,7 @@ function LockOn.findBest(maxDistance: number): Model?
 
 	local best: Model? = nil
 	local bestScore = -math.huge
-	for _, instance in CollectionService:GetTagged(Types.Tag) do
+	for _, instance in Tagged.list(Types.Tag) do
 		if instance ~= character and instance:IsA("Model") and isValid(instance, maxDistance) then
 			local theirs = rootOf(instance) :: BasePart
 			local offset = theirs.Position - mine.Position
@@ -139,7 +140,7 @@ function LockOn.nearest(maxDistance: number, accept: (Model) -> boolean): (Model
 	end
 	local best: Model? = nil
 	local bestDistance = math.huge
-	for _, instance in CollectionService:GetTagged(Types.Tag) do
+	for _, instance in Tagged.list(Types.Tag) do
 		if instance ~= character and instance:IsA("Model") and isValid(instance, maxDistance) and accept(instance) then
 			local distance = ((rootOf(instance) :: BasePart).Position - mine.Position).Magnitude
 			if distance < bestDistance then
@@ -350,19 +351,20 @@ local function updateCamera(dt: number)
 	-- eye pulls the camera in front of it at once (fighters never do).
 	local reach = current - pivot
 	local inShot: { [BasePart]: boolean } = {}
+	-- Fighters are always ignored; what the probes see through is added as they meet it (one
+	-- filter for both probes, set once a frame).
+	probeParams.FilterDescendantsInstances = Tagged.list(Types.Tag)
 	if reach.Magnitude > 0.5 then
-		local ignore: { Instance } = CollectionService:GetTagged(Types.Tag)
 		for _ = 1, 8 do
-			probeParams.FilterDescendantsInstances = ignore
 			local hit = workspace:Spherecast(pivot, PROBE_RADIUS, reach, probeParams)
 			if not hit then
 				break
 			end
 			local part = hit.Instance
 			if part:IsA("BasePart") and part.Transparency >= 0.9 then
-				table.insert(ignore, part) -- invisible fence walls keep players in, not the camera
+				probeParams:AddToFilter(part) -- invisible fence walls keep players in, not the camera
 			elseif part:IsA("BasePart") and isThin(part) then
-				table.insert(ignore, part) -- a post or rail: see through it instead of pulling in
+				probeParams:AddToFilter(part) -- a post or rail: see through it instead of pulling in
 				inShot[part] = true
 			else
 				current = pivot + reach.Unit * math.max(hit.Distance - 0.1, 1.5)
@@ -372,16 +374,14 @@ local function updateCamera(dt: number)
 	end
 	-- Thin props between the eye and the target fade too (a post right in front of the lens).
 	do
-		local ignore: { Instance } = CollectionService:GetTagged(Types.Tag)
 		local line = theirs.Position - current
 		for _ = 1, 4 do
-			probeParams.FilterDescendantsInstances = ignore
 			local hit = workspace:Raycast(current, line, probeParams)
 			local part = hit and hit.Instance
 			if not part or not part:IsA("BasePart") or not (part.Transparency >= 0.9 or isThin(part)) then
 				break
 			end
-			table.insert(ignore, part)
+			probeParams:AddToFilter(part)
 			if part.Transparency < 0.9 then
 				inShot[part] = true
 			end

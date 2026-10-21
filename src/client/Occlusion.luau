@@ -12,6 +12,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local Tagged = require(ReplicatedStorage.Shared.Tagged)
 local Types = require(ReplicatedStorage.Shared.Types)
 local LockOn = require(script.Parent.LockOn)
 
@@ -27,6 +28,7 @@ local Occlusion = {}
 
 local faded: { [Model]: number } = {}
 local parts: { [Model]: { BasePart | Decal } } = {}
+local bodies: { [Model]: { Instance } } = {} -- partsOf minus the blade (hidesTarget's filter)
 
 local function partsOf(model: Model): { BasePart | Decal }
 	local list = parts[model]
@@ -40,8 +42,14 @@ local function partsOf(model: Model): { BasePart | Decal }
 		end
 	end
 	parts[model] = found
-	model.DescendantAdded:Once(function()
-		parts[model] = nil
+	-- Only a new part or decal invalidates the list (not every hit sound or kanji billboard).
+	local connection: RBXScriptConnection
+	connection = model.DescendantAdded:Connect(function(d)
+		if d:IsA("BasePart") or d:IsA("Decal") then
+			parts[model] = nil
+			bodies[model] = nil
+			connection:Disconnect()
+		end
 	end)
 	return found
 end
@@ -87,16 +95,26 @@ local function isBlade(part: Instance): boolean
 end
 local selfParams = RaycastParams.new()
 selfParams.FilterType = Enum.RaycastFilterType.Include
+local selfBody: { Instance }? = nil -- the list selfParams filters on
 
 -- Whether our own body stands between the camera and both the target's head and chest.
 local function hidesTarget(character: Model, target: Model, from: Vector3): boolean
-	local body = {}
-	for _, part in partsOf(character) do
-		if part:IsA("BasePart") and not isBlade(part) then
-			table.insert(body, part)
+	local list = partsOf(character)
+	local body = bodies[character]
+	if not body then
+		local built: { Instance } = {}
+		for _, part in list do
+			if part:IsA("BasePart") and not isBlade(part) then
+				table.insert(built, part)
+			end
 		end
+		bodies[character] = built
+		body = built
 	end
-	selfParams.FilterDescendantsInstances = body
+	if body ~= selfBody then
+		selfParams.FilterDescendantsInstances = body :: { Instance }
+		selfBody = body
+	end
 	local hidden = 0
 	for _, name in { "UpperTorso", "Head" } do
 		local part = target:FindFirstChild(name)
@@ -138,7 +156,7 @@ function Occlusion.start()
 		local from, to = camera.CFrame.Position, head.Position
 		fadeSelf(character :: Model, from, dt)
 		local alpha = math.min(1, dt * RATE)
-		for _, instance in CollectionService:GetTagged(Types.Tag) do
+		for _, instance in Tagged.list(Types.Tag) do
 			if instance:IsA("Model") and instance ~= character then
 				local goal = if blocking(instance, from, to) then FADE else 0
 				local current = faded[instance] or 0
@@ -157,6 +175,7 @@ function Occlusion.start()
 		if instance:IsA("Model") then
 			faded[instance] = nil
 			parts[instance] = nil
+			bodies[instance] = nil
 		end
 	end)
 end
