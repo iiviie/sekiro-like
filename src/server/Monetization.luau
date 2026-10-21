@@ -23,8 +23,10 @@
 -- Published per player: Passes (owned pass keys, comma separated), VIP, LoadoutSlots,
 -- TitleSlots, VictoryCry, PaidRandomRestricted, SeasonPremium (this season bought).
 -- Each purchase also tells the buyer what it granted: Progress "Purchased" { key, items,
--- equipped, gems?, coins? } (client/StoreUI plays the thank-you reveal). Items whose Catalog
--- status is "soon" (or whose category isn't Ready) are refused before any prompt.
+-- equipped, gems?, coins?, refunded? } (client/StoreUI plays the thank-you reveal). Items whose
+-- Catalog status is "soon" (or whose category isn't Ready) are refused before any prompt. A
+-- bundle never charges for what you own: an owned item with a gem price comes back as those
+-- gems (`refunded` { { id, gems } }), and a bundle whose items you all own isn't sold.
 
 local AnalyticsService = game:GetService("AnalyticsService")
 local HttpService = game:GetService("HttpService")
@@ -74,9 +76,15 @@ local function announce(
 	items: { string },
 	equipped: { string },
 	gems: number?,
-	coins: number?
+	coins: number?,
+	refunded: { { id: string, gems: number } }?
 )
-	task.defer(tell, player, "Purchased", { key = key, items = items, equipped = equipped, gems = gems, coins = coins })
+	task.defer(
+		tell,
+		player,
+		"Purchased",
+		{ key = key, items = items, equipped = equipped, gems = gems, coins = coins, refunded = refunded }
+	)
 end
 
 local function contents(player: Player, d: Data, key: string)
@@ -96,10 +104,18 @@ local function contents(player: Player, d: Data, key: string)
 	if c.coins then
 		Economy.grant(player, "Coins", c.coins, key, "IAP", true)
 	end
-	local owned, equipped = {}, {}
+	local owned, equipped, refunded = {}, {}, {}
 	for _, id in c.items or {} do
 		if Economy.own(player, id, "robux", true) then
 			table.insert(owned, id)
+		elseif d.Inventory[id] ~= nil then
+			-- Already yours: its gem price comes back (Stagecraft with an intro you bought).
+			local had = Catalog.get(id)
+			local back = had and had.price and had.price.gems
+			if back and back > 0 then
+				Economy.grant(player, "Gems", back, `{key} owned {id}`, "IAP", true)
+				table.insert(refunded, { id = id, gems = back })
+			end
 		end
 		if c.lineLevel and Catalog.get(id) and (Catalog.get(id) :: Catalog.Item).category == "bladeLine" then
 			d.LineLevels[id] = math.max(d.LineLevels[id] or 1, c.lineLevel)
@@ -111,7 +127,7 @@ local function contents(player: Player, d: Data, key: string)
 			table.insert(equipped, id)
 		end
 	end
-	announce(player, key, owned, equipped, c.gems, c.coins)
+	announce(player, key, owned, equipped, c.gems, c.coins, if #refunded > 0 then refunded else nil)
 end
 
 -- Default grants: gem packs and bundles pay their contents; the season products record
@@ -172,6 +188,14 @@ local function eligible(player: Player, key: string): (boolean, string?)
 		end
 	elseif item.once and d.Inventory[key] ~= nil then
 		return false, "You already own this."
+	elseif item.category == "bundle" and item.contents and item.contents.items and not item.contents.gems then
+		local missing = false
+		for _, id in item.contents.items do
+			missing = missing or d.Inventory[id] == nil
+		end
+		if not missing then
+			return false, "You already own everything in this bundle."
+		end
 	elseif key == "pass.Premium" and d.SeasonPremium[EconomyConfig.Season] then
 		return false, "You already have this season's premium pass."
 	end

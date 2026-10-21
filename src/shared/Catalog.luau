@@ -135,7 +135,9 @@ Catalog.Rarities = { "common", "uncommon", "rare", "epic", "legendary" } :: { Ra
 
 -- Developer products and game passes. Ids are 0 until the place is published and the
 -- products are created in the Creator Dashboard; then paste them here (and nothing else).
--- In Studio a 0 id (or the MockPurchases attribute) takes the mock purchase path.
+-- In Studio a 0 id (or the MockPurchases attribute) takes the mock purchase path. (The three
+-- 1,499 R$ line bundles were removed in review round 1: nothing sold them, and they would
+-- have sold Whetstone levels past the 50% gem cap. Blade lines are 650 gems, L2-L4 earned.)
 Catalog.Products = {
 	["gems.80"] = { kind = "product", id = 0, robux = 79 },
 	["gems.210"] = { kind = "product", id = 0, robux = 199 },
@@ -144,9 +146,6 @@ Catalog.Products = {
 	["gems.1920"] = { kind = "product", id = 0, robux = 1599 },
 	["gems.5000"] = { kind = "product", id = 0, robux = 3999 },
 	["bundle.Initiate"] = { kind = "product", id = 0, robux = 149 },
-	["bundle.LineYozakura"] = { kind = "product", id = 0, robux = 1499 },
-	["bundle.LineRaijin"] = { kind = "product", id = 0, robux = 1499 },
-	["bundle.LineKarasu"] = { kind = "product", id = 0, robux = 1499 },
 	["bundle.Stagecraft"] = { kind = "product", id = 0, robux = 499 },
 	["pass.Premium"] = { kind = "product", id = 0, robux = 449 },
 	["pass.TierSkip"] = { kind = "product", id = 0, robux = 49 },
@@ -178,7 +177,9 @@ local function level(n: number): Rule
 end
 
 --------------------------------------------------------------------------------------------
--- Weapons: coins plus a Mastery gate, never Robux.
+-- Weapons: coins plus a Mastery gate, never Robux. Every new weapon keeps a Mastery or
+-- achievement rule, not a coin price alone, so coins bought with Robux (bundles, the pass)
+-- can never shortcut a weapon.
 add("weapon", "Katana", { name = "Katana", default = true, sources = { "default" }, icon = "Katana" })
 add("weapon", "Odachi", {
 	name = "Odachi",
@@ -410,8 +411,9 @@ end
 
 --------------------------------------------------------------------------------------------
 -- Pre-fight intros (Shared/Intros by ref; clips in Shared/BakedIntros): every one is the same
--- length on screen. Earn paths: default, coins, Mastery, the pass, boss clears; four for gems
--- (and the Stagecraft bundle); the rarest (Dragon Coil, Moon Gaze, Iai Draw) are earn-only.
+-- length on screen. Earn paths: default, coins, Mastery, the pass, boss clears; four for gems,
+-- 200 or 400 (every pack from 210 up buys one), also in the Stagecraft bundle; the rarest
+-- (Dragon Coil, Moon Gaze, Iai Draw) are earn-only.
 add("intro", "Rei", { name = "Kneeling Bow", default = true, sources = { "default" } })
 add("intro", "Chiburi", { name = "Chiburi", price = { coins = 1500 }, sources = { "coins" } })
 add("intro", "Plant", {
@@ -422,10 +424,10 @@ add("intro", "Plant", {
 	sources = { "coins" },
 })
 add("intro", "Kasa", { name = "Wanderer's Kasa", rarity = "uncommon", sources = { "pass" }, season = "S1" })
-add("intro", "Sakura", { name = "Sakura Gust", rarity = "rare", price = { gems = 250 }, sources = { "gems" } })
-add("intro", "Tessen", { name = "War Fan", rarity = "epic", price = { gems = 350 }, sources = { "gems" } })
+add("intro", "Sakura", { name = "Sakura Gust", rarity = "rare", price = { gems = 200 }, sources = { "gems" } })
+add("intro", "Tessen", { name = "War Fan", rarity = "epic", price = { gems = 400 }, sources = { "gems" } })
 add("intro", "Shodo", { name = "Ink Stroke", rarity = "epic", price = { gems = 400 }, sources = { "gems" } })
-add("intro", "Crow", { name = "Crow's Perch", rarity = "epic", price = { gems = 450 }, sources = { "gems" } })
+add("intro", "Crow", { name = "Crow's Perch", rarity = "epic", price = { gems = 400 }, sources = { "gems" } })
 add("intro", "Raiko", { name = "Lightning Call", rarity = "epic", sources = { "pass" }, season = "S1" })
 add("intro", "Iai", {
 	name = "Iai Draw",
@@ -611,20 +613,9 @@ add("bundle", "Initiate", {
 	once = true,
 	sources = { "robux" },
 })
-for _, line in { "Yozakura", "Raijin", "Karasu" } do
-	add("bundle", `Line{line}`, {
-		name = `{line} line, all levels`,
-		rarity = "legendary",
-		price = { product = `bundle.Line{line}` },
-		contents = { items = { `line.{line}`, `finisher.{line}` }, lineLevel = 4 },
-		once = true,
-		sources = { "robux" },
-	})
-end
-
 add("bundle", "Stagecraft", {
 	name = "Stagecraft Bundle",
-	blurb = "Four pre-fight intros: Sakura Gust, War Fan, Ink Stroke and Crow's Perch. Once per account.",
+	blurb = "Four pre-fight intros: Sakura Gust, War Fan, Ink Stroke and Crow's Perch. Any you already own come back as their gem price. Once per account.",
 	rarity = "epic",
 	price = { product = "bundle.Stagecraft" },
 	contents = { items = { "intro.Sakura", "intro.Tessen", "intro.Shodo", "intro.Crow" } },
@@ -634,10 +625,12 @@ add("bundle", "Stagecraft", {
 
 --------------------------------------------------------------------------------------------
 -- Passes: the season pass products and the game passes (cosmetic and convenience only).
+-- Premium: Robux, or `gems` (PassService "BuyGems"; Economy.buy never sells a product item),
+-- so the ~500 gems the premium track pays back can buy the next season's.
 add("pass", "Premium", {
 	name = "Path of the Blade: Premium",
 	rarity = "epic",
-	price = { product = "pass.Premium" },
+	price = { product = "pass.Premium", gems = 450 },
 	sources = { "robux" },
 	season = "S1",
 })
