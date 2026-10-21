@@ -8,6 +8,7 @@
 --   "BuyItem" catalogId    buy with coins or gems (server/Economy.buy)
 --   "EquipItem" catalogId  put an owned item in its slot (a title: "title.X", or "title." for none)
 --   "UpgradeLine" catalogId  raise an owned blade line one level with Whetstones
+--                 (or { id, gems = n }: n of the level's Whetstones paid in gems, capped)
 --   "Purchase" productKey  prompt a Robux purchase (server/Monetization.prompt)
 -- Everything is validated here; the client only ever asks. Requests are rate-limited per
 -- player (a token bucket), so spamming equips can't flood the rig or the attributes.
@@ -215,9 +216,15 @@ local handlers: { [string]: (Player, unknown) -> () } = {
 			dressInLobby(player, "bladeSkin")
 		end
 	end,
-	UpgradeLine = function(player, id)
-		if typeof(id) == "string" then
-			Economy.upgradeLine(player, id)
+	UpgradeLine = function(player, arg)
+		-- "line.X", or { id = "line.X", gems = n } to cover up to half the level with gems.
+		if typeof(arg) == "string" then
+			Economy.upgradeLine(player, arg)
+		elseif typeof(arg) == "table" then
+			local request = arg :: any
+			if typeof(request.id) == "string" then
+				Economy.upgradeLine(player, request.id, if typeof(request.gems) == "number" then request.gems else nil)
+			end
 		end
 	end,
 	Purchase = function(player, key)
