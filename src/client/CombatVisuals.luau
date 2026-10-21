@@ -1348,6 +1348,7 @@ function CombatVisuals.predictAttack(model: Model, kind: Config.AttackKind, wind
 end
 
 -- A fading ghost copy of the body, left behind during a dash.
+local AFTERIMAGE_RANGE = 60
 local function afterimage(model: Model)
 	local ghost = Instance.new("Model")
 	ghost.Name = "Afterimage"
@@ -1414,8 +1415,17 @@ function CombatVisuals.dash(model: Model, direction: Vector3?)
 		end)
 	end
 	playSound("Dodge", rootOf(model), isLocal(model))
-	for i = 0, 2 do
-		task.delay(i * 0.045, function()
+	-- One ghost (it clones the whole body), only for a dash near the camera and not under
+	-- reduced effects.
+	local root = rootOf(model)
+	local camera = workspace.CurrentCamera
+	if
+		root
+		and camera
+		and not reducedEffects()
+		and (camera.CFrame.Position - root.Position).Magnitude <= AFTERIMAGE_RANGE
+	then
+		task.delay(0.045, function()
 			if model.Parent then
 				afterimage(model)
 			end
