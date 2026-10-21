@@ -42,6 +42,7 @@ export type Rule = {
 	stars: number?,
 	count: number?,
 	allBosses: boolean?,
+	noHit: boolean?, -- with `boss`: cleared that boss without taking a hit
 }
 export type LineLevel = { level: number, whetstones: number, text: string }
 export type Contents = { items: { string }?, coins: number?, gems: number?, lineLevel: number? }
@@ -307,6 +308,28 @@ add("bladeSkin", "Niten", {
 	auto = true,
 	sources = { "boss" },
 })
+-- Boss no-hit gold variants: clear that boss without taking a hit (server/BossService).
+for _, g in
+	{
+		{ "GoldWashi", "Enemy03", "Gilded Talisman", "rare", "Shikigami" },
+		{ "GoldNameless", "Enemy01", "Gilded Nameless", "epic", "Nameless Warrior" },
+		{ "GoldCatClaw", "Enemy07", "Gilded Claw", "epic", "Cat General" },
+		{ "GoldMistveil", "Enemy05", "Gilded Mist", "epic", "Guard of Mist" },
+		{ "GoldDemonHorn", "Enemy04", "Gilded Horn", "epic", "Little Demon" },
+		{ "GoldFoxFire", "Enemy06", "Gilded Fox Fire", "legendary", "Night Fox" },
+		{ "GoldNiten", "Enemy09", "Gilded Twin", "legendary", "Niten Usagi" },
+		{ "GoldShadow", "Enemy08", "Gilded Shadow", "legendary", "Crimson Shadow" },
+		{ "GoldPuppet", "Enemy02", "Gilded Strings", "legendary", "Puppet Maiden" },
+	}
+do
+	add("bladeSkin", g[1], {
+		name = g[3],
+		rarity = g[4],
+		rule = { boss = g[2], noHit = true, text = `Clear the {g[5]} trial without taking a hit` },
+		auto = true,
+		sources = { "boss" },
+	})
+end
 -- The Initiate's Bundle exclusive.
 add("bladeSkin", "Initiate", { name = "Initiate's Vow", rarity = "rare", sources = { "bundle" } })
 -- Path of the Blade, season 1 (Shared/Season track): earned on the pass, never sold.
