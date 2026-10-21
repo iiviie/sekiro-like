@@ -28,10 +28,11 @@ export type Category =
 	| "title"
 	| "banner"
 	| "nameplate"
+	| "intro"
 	| "bundle"
 	| "gemPack"
 	| "pass"
-export type Slot = "weapon" | "bladeSkin" | "finisher" | "outfit" | "title" | "banner" | "nameplate"
+export type Slot = "weapon" | "bladeSkin" | "finisher" | "outfit" | "title" | "banner" | "nameplate" | "intro"
 export type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary"
 export type Price = { coins: number?, gems: number?, product: string? }
 export type Rule = {
@@ -80,6 +81,7 @@ Catalog.Prefix = {
 	title = "title",
 	banner = "banner",
 	nameplate = "plate",
+	intro = "intro",
 	bundle = "bundle",
 	gemPack = "gems",
 	pass = "pass",
@@ -95,9 +97,10 @@ Catalog.SlotOf = {
 	title = "title",
 	banner = "banner",
 	nameplate = "nameplate",
+	intro = "intro",
 } :: { [Category]: Slot }
 
-Catalog.Slots = { "weapon", "bladeSkin", "finisher", "outfit", "title", "banner", "nameplate" } :: { Slot }
+Catalog.Slots = { "weapon", "bladeSkin", "finisher", "outfit", "title", "banner", "nameplate", "intro" } :: { Slot }
 
 -- What every slot holds on a fresh save ("" = nothing equipped).
 Catalog.Defaults = {
@@ -108,6 +111,7 @@ Catalog.Defaults = {
 	title = "",
 	banner = "banner.Plain",
 	nameplate = "plate.Plain",
+	intro = "intro.Rei",
 } :: { [Slot]: string }
 
 -- Categories whose visuals have shipped, so their priced items can be bought. Parts C and U
@@ -121,6 +125,7 @@ Catalog.Ready = {
 	title = true, -- part U: nameplate over the head, duel intro card, Locker
 	banner = true, -- part U: duel intro card, Locker (Shared/Flair + part C's FlairArt)
 	nameplate = true, -- part U: the nameplate frame over the head
+	intro = true, -- pre-fight intros: client/IntroCinematic, Shared/Intros
 	bundle = true,
 	gemPack = true,
 	pass = true,
@@ -142,6 +147,7 @@ Catalog.Products = {
 	["bundle.LineYozakura"] = { kind = "product", id = 0, robux = 1499 },
 	["bundle.LineRaijin"] = { kind = "product", id = 0, robux = 1499 },
 	["bundle.LineKarasu"] = { kind = "product", id = 0, robux = 1499 },
+	["bundle.Stagecraft"] = { kind = "product", id = 0, robux = 499 },
 	["pass.Premium"] = { kind = "product", id = 0, robux = 449 },
 	["pass.TierSkip"] = { kind = "product", id = 0, robux = 49 },
 	["pass.Tiers10"] = { kind = "product", id = 0, robux = 399 },
@@ -403,6 +409,47 @@ for _, line in { "Yozakura", "Raijin", "Karasu" } do
 end
 
 --------------------------------------------------------------------------------------------
+-- Pre-fight intros (Shared/Intros by ref; clips in Shared/BakedIntros): every one is the same
+-- length on screen. Earn paths: default, coins, Mastery, the pass, boss clears; four for gems
+-- (and the Stagecraft bundle); the rarest (Dragon Coil, Moon Gaze, Iai Draw) are earn-only.
+add("intro", "Rei", { name = "Kneeling Bow", default = true, sources = { "default" } })
+add("intro", "Chiburi", { name = "Chiburi", price = { coins = 1500 }, sources = { "coins" } })
+add("intro", "Plant", {
+	name = "Planted Blade",
+	rarity = "uncommon",
+	price = { coins = 4000 },
+	rule = level(12),
+	sources = { "coins" },
+})
+add("intro", "Kasa", { name = "Wanderer's Kasa", rarity = "uncommon", sources = { "pass" }, season = "S1" })
+add("intro", "Sakura", { name = "Sakura Gust", rarity = "rare", price = { gems = 250 }, sources = { "gems" } })
+add("intro", "Tessen", { name = "War Fan", rarity = "epic", price = { gems = 350 }, sources = { "gems" } })
+add("intro", "Shodo", { name = "Ink Stroke", rarity = "epic", price = { gems = 400 }, sources = { "gems" } })
+add("intro", "Crow", { name = "Crow's Perch", rarity = "epic", price = { gems = 450 }, sources = { "gems" } })
+add("intro", "Raiko", { name = "Lightning Call", rarity = "epic", sources = { "pass" }, season = "S1" })
+add("intro", "Iai", {
+	name = "Iai Draw",
+	rarity = "rare",
+	rule = level(20),
+	auto = true,
+	sources = { "achievement" },
+})
+add("intro", "Tsukimi", {
+	name = "Moon Gaze",
+	rarity = "epic",
+	rule = { boss = "Enemy06", text = "Defeat the Night Fox" },
+	auto = true,
+	sources = { "boss" },
+})
+add("intro", "Ryu", {
+	name = "Dragon Coil",
+	rarity = "legendary",
+	rule = { allBosses = true, text = "Defeat all nine bosses" },
+	auto = true,
+	sources = { "boss" },
+})
+
+--------------------------------------------------------------------------------------------
 -- Player outfits (Shared/Clothing sets by ref, worn over the avatar; part C dresses them).
 add("outfit", "Avatar", { name = "Your avatar", default = true, sources = { "default" } })
 add("outfit", "indigo", { name = "Indigo Gi", default = true, sources = { "default" } })
@@ -573,6 +620,16 @@ for _, line in { "Yozakura", "Raijin", "Karasu" } do
 		sources = { "robux" },
 	})
 end
+
+add("bundle", "Stagecraft", {
+	name = "Stagecraft Bundle",
+	blurb = "Four pre-fight intros: Sakura Gust, War Fan, Ink Stroke and Crow's Perch. Once per account.",
+	rarity = "epic",
+	price = { product = "bundle.Stagecraft" },
+	contents = { items = { "intro.Sakura", "intro.Tessen", "intro.Shodo", "intro.Crow" } },
+	once = true,
+	sources = { "robux" },
+})
 
 --------------------------------------------------------------------------------------------
 -- Passes: the season pass products and the game passes (cosmetic and convenience only).
