@@ -935,10 +935,18 @@ function Toasts.start()
 		elseif kind == "PassPremium" then
 			local crest = (ICONS :: any).SeasonPass or Assets.RankCrests.Gold
 			local text = `{Text.count(data.claimable or 0, "reward")} ready to claim`
-			stage(3, function()
-				banner(crest, "Premium unlocked", text, UI.Gold)
-			end, function()
-				Toasts.notice(`Premium unlocked  ·  {text}`, UI.Gold)
+			-- A purchase's "Thank you" reveal opens about half a second after this arrives
+			-- (StorePanel waits for the grant's attributes) and already says how many rewards
+			-- are ready: give it that long, and leave the line to the reveal if it opened.
+			task.delay(1, function()
+				if revealOpen() then
+					return
+				end
+				stage(3, function()
+					banner(crest, "Premium unlocked", text, UI.Gold)
+				end, function()
+					Toasts.notice(`Premium unlocked  ·  {text}`, UI.Gold)
+				end)
 			end)
 			UI.sound("Robux")
 		elseif kind == "PassClaim" then
