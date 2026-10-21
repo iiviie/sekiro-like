@@ -39,6 +39,9 @@ local T = UI.Theme
 local PREMIUM_TINT = T.Plate:Lerp(T.Gold, 0.22) -- the premium row's plates (gold-brown lacquer)
 local DONE_TINT = T.Plate:Lerp(T.Jade, 0.25) -- a finished mission's plate
 local HEADER_H = 60
+-- The outlines drawn outside a button or chip (Claim all's glow, the PREMIUM OWNED rim) stay
+-- this far inside the panel's right edge.
+local STROKE_INSET = 4
 local ROW2_Y = 68 -- tabs, Claim all and the tier skips (60 px tall: >= 45 pt on a phone)
 local CONTENT_Y = 136
 local DETAIL_H = 24
@@ -367,8 +370,8 @@ local function header(body: Frame, width: number)
 			material = "inset",
 			tint = PREMIUM_TINT,
 			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.fromOffset(right - 12, HEADER_H),
+			Position = UDim2.new(1, -STROKE_INSET, 0, 0),
+			Size = UDim2.fromOffset(right - 12 - STROKE_INSET, HEADER_H),
 		}, body)
 		UI.stroke(chip, T.Gold, 1.5, 0.05)
 		UI.text({
@@ -507,8 +510,8 @@ local function tabs(body: Frame, size: Vector2, redraw: () -> ()): TextLabel?
 	local actions = UI.new("Frame", {
 		Name = "Actions",
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.fromOffset(width, ROW2_Y),
-		Size = UDim2.fromOffset(width - x, UI.Touch),
+		Position = UDim2.fromOffset(width - STROKE_INSET, ROW2_Y),
+		Size = UDim2.fromOffset(width - x - STROKE_INSET, UI.Touch),
 		BackgroundTransparency = 1,
 	}, body)
 	UI.new("UIListLayout", {
@@ -529,12 +532,22 @@ local function tabs(body: Frame, size: Vector2, redraw: () -> ()): TextLabel?
 			Text = `Claim all  ({claimable})`,
 			sound = "Claim",
 		}, actions)
+		-- The glow hugs the button's art (a rounded ring just inside its frame), not the frame.
+		local ring = UI.new("Frame", {
+			Name = "Glow",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.new(1, -6, 1, -6),
+			BackgroundTransparency = 1,
+			ZIndex = all.ZIndex + 2,
+		}, all)
+		UI.new("UICorner", { CornerRadius = UDim.new(0, 8) }, ring)
 		local glow = UI.new("UIStroke", {
 			Color = T.JadeText,
 			Thickness = 2,
 			Transparency = 0,
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		}, all)
+		}, ring)
 		pulse(glow)
 		all.Activated:Connect(function()
 			action("ClaimAll")
