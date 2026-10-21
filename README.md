@@ -88,8 +88,17 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   coins and XP earned, the Mastery bar), ranked rating (pairwise Elo against the other humans you placed above or below;
   bots don't count), and the next royale ~14 s later if you're still queued.
 
-Everything persists with DataStores in `PlayerData_v2` (old `PlayerStats_v1` Wins/Kills migrate on first visit), and
-is session-only in an unpublished place.
+Everything persists with DataStores in `PlayerData_v2` as a schema-3 profile under a session lock
+([StatsService.luau](src/server/StatsService.luau): v2 saves and old `PlayerStats_v1` Wins/Kills migrate on load,
+unknown fields and item ids are kept). A profile that can't load leaves you on session-only defaults with a notice
+in the lobby, and purchases and spends are off for that session. Studio uses an in-memory store unless
+`ServerStorage.UseRealDataStore` is set before Play. **Economy:** every item is in
+[Catalog.luau](src/shared/Catalog.luau) (prices, unlock rules, sources), every pacing number in
+[EconomyConfig.luau](src/shared/EconomyConfig.luau); [Economy.luau](src/server/Economy.luau) owns the wallet (coins,
+gems, earn-only Whetstones, shards, Shrine Draws, pass XP), inventory and loadout, and
+[Monetization.luau](src/server/Monetization.luau) the Robux side (idempotent receipts, game passes, a Studio mock path
+while product ids are 0). Royale wins against bots only don't count on the Wins board or titles, duels against the same
+player pay less after the second that day, and a fighter's kill coins pay once per match.
 
 | Action | Keyboard / mouse | Gamepad | Touch |
 |---|---|---|---|
@@ -226,7 +235,10 @@ decides a round. In Studio,
 `ServerStorage.CombatTest` (a BindableFunction from DevHooks) spawns dummy fighters, performs actions with exact
 timing, reads their state (including blocking, the buffered input, when the deflect window opened and the posture
 recovery delay), moves them (`pivot`), deals damage (`damage("player", 500)` tests a resurrection), sets resurrections
-and grants currency, for automated combat tests. `ServerStorage.BossTest` drives boss fights: `start("Enemy01")` puts
+and grants currency (`grant`; it marks the session as a test so it never writes a real save), and drives the economy:
+`economy("buy"|"equip"|"own"|"spend"|"upgrade", ...)`, mock purchases (`receipt(key, purchaseId)`, `prompt(key)`,
+`pass(key)`), profile tests (`reload(rawProfile)`, `raw()`, `writeRaw(raw)`, `save()`) and fight results
+(`progress("boss"|"royale"|"duel", ...)`), for automated tests. `ServerStorage.BossTest` drives boss fights: `start("Enemy01")` puts
 the first player in a fight without the pad, `state()` snapshots it (AI mode, lives, action, flags, vitality, posture),
 `log(n)` lists the boss's last moves and reactions (`R:<name>`), `tally()` counts the outcomes of blows involving the
 boss, `posture(v)` / `health(v)` set the boss's bars, `god(true)` keeps the player's vitality from dropping (blows still land; it lasts through the countdown, attacking and later fights until `god(false)`), `stop()` ends the fight.
