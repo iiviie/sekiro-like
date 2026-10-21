@@ -671,6 +671,16 @@ local function applyRating(d: Data, delta: number)
 	d.PeakRating = math.max(d.PeakRating, d.Rating)
 end
 
+-- The ranked soft reset between seasons (server/ShopService calls it once per player per
+-- ended season, after paying that season's rewards): the rating keeps EconomyConfig
+-- Ranked.SoftReset.Keep of its distance from Toward. PeakRating (all-time) is kept.
+function StatsService.softResetRating(d: Data): (number, number)
+	local rule = EconomyConfig.Ranked.SoftReset
+	local from = d.Rating
+	d.Rating = math.max(0, math.floor(rule.Toward + (from - rule.Toward) * rule.Keep + 0.5))
+	return from, d.Rating
+end
+
 -- Records a finished match. `placements` lists every human participant, best first.
 -- Ranked rating moves by pairwise results against the other humans you placed above or
 -- below (bots never count), Elo style. A win with another human in the match also counts

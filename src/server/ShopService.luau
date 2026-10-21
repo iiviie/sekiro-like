@@ -928,10 +928,13 @@ local function seasonTier(r: { [string]: any }?): string?
 	return Ranks.of(math.max(tonumber(r.peak) or 0, tonumber(r.last) or 0)).tier
 end
 
--- Pays every ended season this player hasn't been paid for. Mutates the profile quietly and
--- returns what was granted (the caller commits and tells the player).
-local function payEndedSeasons(player: Player, d: Data, now: number): { { [string]: any } }
+-- Pays every ended season this player hasn't been paid for, then soft-resets the rating
+-- (StatsService.softResetRating) once for that season: the rewards use the tier reached
+-- before the reset. Mutates the profile quietly and returns what was granted and whether
+-- anything changed (the caller commits and tells the player).
+local function payEndedSeasons(player: Player, d: Data, now: number): ({ { [string]: any } }, boolean)
 	local paid = {}
+	local changed = false
 	local done = d.Ext.SeasonRewards
 	if typeof(done) ~= "table" then
 		done = {}
@@ -942,7 +945,9 @@ local function payEndedSeasons(player: Player, d: Data, now: number): { { [strin
 		if now >= endsAt and done[season] == nil then
 			local r = if typeof(ranked) == "table" and ranked.season == season then ranked else nil
 			local tier = seasonTier(r)
-			done[season] = { tier = tier or "", t = os.time() }
+			local from, to = StatsService.softResetRating(d)
+			done[season] = { tier = tier or "", t = os.time(), reset = { from = from, to = to } }
+			changed = true
 			if tier then
 				local items = rewardsFor(season, tier)
 				for _, id in items do
@@ -952,17 +957,19 @@ local function payEndedSeasons(player: Player, d: Data, now: number): { { [strin
 				if gems > 0 then
 					Economy.grant(player, "Gems", gems, `Ranked {season} {tier}`, "TimedReward", true)
 				end
-				table.insert(paid, { season = season, tier = tier, items = items, gems = gems })
+				table.insert(paid, { season = season, tier = tier, items = items, gems = gems, from = from, to = to })
 				pcall(function()
 					AnalyticsService:LogCustomEvent(player, "RankedSeasonReward", 1, {
 						[Enum.AnalyticsCustomFieldKeys.CustomField01.Name] = season,
 						[Enum.AnalyticsCustomFieldKeys.CustomField02.Name] = tier,
 					})
 				end)
+			elseif from ~= to then
+				table.insert(paid, { season = season, items = {}, from = from, to = to })
 			end
 		end
 	end
-	return paid
+	return paid, changed
 end
 
 local function announce(player: Player, paid: { { [string]: any } })
@@ -973,7 +980,9 @@ local function announce(player: Player, paid: { { [string]: any } })
 	-- One unlock toast at a time (they share a slot on screen); runs in its own thread.
 	for _, reward in paid do
 		remote:FireClient(player, "Notice", {
-			text = `Season {reward.season} is over: you finished {reward.tier}. {reward.gems} gems and your season rewards are in your locker.`,
+			text = if reward.tier
+				then `Season {reward.season} is over: you finished {reward.tier}. {reward.gems} gems and your season rewards are in your locker. Your rating eases from {reward.from} to {reward.to} for the new season.`
+				else `Ranked season {reward.season} is over. Your rating eases from {reward.from} to {reward.to} for the new season.`,
 		})
 		for _, id in reward.items do
 			local item = Catalog.get(id)
@@ -985,6 +994,19 @@ local function announce(player: Player, paid: { { [string]: any } })
 	end
 end
 
+-- The latest season's soft reset for the Profile panel: JSON { season, from, to }, or "".
+local function lastReset(d: Data): string
+	local done = d.Ext.SeasonRewards
+	local best: { [string]: any }? = nil
+	for season, entry in if typeof(done) == "table" then done else {} do
+		local reset = typeof(entry) == "table" and entry.reset
+		if typeof(reset) == "table" and reset.from ~= reset.to and (not best or (tonumber(entry.t) or 0) > best.t) then
+			best = { season = season, from = reset.from, to = reset.to, t = tonumber(entry.t) or 0 }
+		end
+	end
+	return if best then HttpService:JSONEncode(best) else ""
+end
+
 -- Tracks this season's rating and pays ended seasons. Runs inside every profile publish.
 local function trackRanked(player: Player, d: Data)
 	if not StatsService.isLoaded(player) then
@@ -992,7 +1014,7 @@ local function trackRanked(player: Player, d: Data)
 		return
 	end
 	local now = seasonNow()
-	local paid = payEndedSeasons(player, d, now)
+	local paid, changed = payEndedSeasons(player, d, now)
 	local season = liveSeason(now)
 	local r = d.Ext.Ranked
 	if season then
@@ -1007,7 +1029,8 @@ local function trackRanked(player: Player, d: Data)
 	end
 	local tier = if season and typeof(r) == "table" and r.season == season then seasonTier(r) else nil
 	player:SetAttribute("SeasonPeakTier", tier or "")
-	if #paid > 0 then
+	player:SetAttribute("RankedReset", lastReset(d))
+	if changed then
 		task.defer(function()
 			if player.Parent then
 				StatsService.commit(player)

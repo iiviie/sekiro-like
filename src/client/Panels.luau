@@ -272,6 +272,23 @@ local function trialsPanel()
 	}, body)
 end
 
+-- The Season card's bottom line: the soft reset this player just had (for two weeks after a
+-- season ends, from the server's RankedReset), else where the season end will ease the
+-- rating to (EconomyConfig Ranked.SoftReset; the server applies it).
+local function rankedNote(rating: number, rank: Ranks.Rank): string
+	local ok, reset = pcall(function()
+		return HttpService:JSONDecode(attr("RankedReset", ""))
+	end)
+	if ok and typeof(reset) == "table" and os.time() - (tonumber(reset.t) or 0) < 14 * 86400 then
+		return `{reset.season} ended  ·  eased {reset.from} → {reset.to}`
+	end
+	local rule = EconomyConfig.Ranked.SoftReset
+	local eased = math.floor(rule.Toward + (rating - rule.Toward) * rule.Keep + 0.5)
+	return if eased == rating
+		then `{rank.floor} → {rank.ceiling}  ·  vs players, not bots`
+		else `{rank.floor} → {rank.ceiling}  ·  season end: {eased}`
+end
+
 local function profilePanel()
 	local wins, losses = attr("Wins", 0), attr("Losses", 0)
 	local played = attr("Played", 0)
@@ -383,7 +400,7 @@ local function profilePanel()
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextSize = 14,
 		TextColor3 = UI.Theme.Ash,
-		Text = `{rank.floor} → {rank.ceiling}  ·  vs players, not bots`,
+		Text = rankedNote(rating, rank),
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, season)
 end
