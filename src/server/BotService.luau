@@ -55,6 +55,13 @@ type Brain = {
 }
 
 local TARGET_SHARE_PENALTY = 30 -- studs added per other bot already on a target
+-- Samurai and Kensei bots finish with a premium finisher, so players see one on the kill-cam
+-- without owning it (Shared/Cosmetics.Finishers).
+local BOT_FINISHERS = { "InkBrush", "CrowFeathers", "LightningSheath", "SakuraScatter", "MoonCrescent" }
+
+-- What a bot looks like: its outfit and weapon (by roster index), blade skin and finisher.
+-- A duel bot keeps one across rounds.
+export type BotLook = { index: number, skin: string, finisher: string? }
 local NAMES = {
 	"Hayato",
 	"Genji",
@@ -117,22 +124,38 @@ local function spawnPoint(): CFrame
 	return CFrame.lookAt(position, Vector3.new(0, 4, 0))
 end
 
-local function buildRig(index: number, rigTier: string): Model
-	local description = Instance.new("HumanoidDescription")
-	Outfit.describe(description, index)
-
-	local model = Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R15)
-	model.Name = `{Config.Bots.Tiers[rigTier].Title} {NAMES[math.random(#NAMES)]}`
-	model:SetAttribute("BotTier", rigTier)
+-- A fresh look for a bot of `rigTier` at roster `index`.
+local function rollLook(index: number, rigTier: string): BotLook
 	-- Stronger bots show off rarer blades: players see what's worth earning.
 	local skins = Progression.Skins
 	local skinIndex = if rigTier == "Master"
 		then math.random(4, #skins)
 		elseif rigTier == "Adept" then math.random(1, 3)
 		else 1
-	model:SetAttribute("Skin", skins[skinIndex].id)
+	local finisher = if rigTier == "Master" or rigTier == "Adept"
+		then BOT_FINISHERS[math.random(#BOT_FINISHERS)]
+		else nil
+	return { index = index, skin = skins[skinIndex].id, finisher = finisher }
+end
+
+local function buildRig(look: BotLook, rigTier: string): Model
+	local description = Instance.new("HumanoidDescription")
+	Outfit.describe(description, look.index)
+
+	local model = Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R15)
+	model.Name = `{Config.Bots.Tiers[rigTier].Title} {NAMES[math.random(#NAMES)]}`
+	model:SetAttribute("BotTier", rigTier)
+	model:SetAttribute("Skin", look.skin)
+	model:SetAttribute("Finisher", look.finisher)
 	-- Mix the weapon roster so players meet every archetype.
-	model:SetAttribute("Weapon", Weapons.Order[(index - 1) % #Weapons.Order + 1])
+	model:SetAttribute("Weapon", Weapons.Order[(look.index - 1) % #Weapons.Order + 1])
+	-- Our EnemyBars carry the bars (and, from client/CombatHUD, the name): no Roblox name or
+	-- health bar over a bot, in fights or in intros.
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	end
 	Outfit.dress(model)
 	return model
 end
@@ -157,6 +180,12 @@ local function chooseTarget(brain: Brain): Combatant?
 					score += TARGET_SHARE_PENALTY
 					hunters += 1
 				end
+			end
+			-- A bot already fighting a human is left to that fight: swinging at it means swinging
+			-- at the human beside it (CB-02).
+			local otherTarget = brains[other] and brains[other].target
+			if otherTarget and otherTarget.player and otherTarget ~= self then
+				score += Config.Bots.HumanFoePenalty
 			end
 			-- Never gang up on a human: one bot at a time, the rest find someone else.
 			if other.player and hunters >= Config.Bots.MaxBotsPerPlayer then
@@ -220,8 +249,13 @@ local function think(brain: Brain)
 	local humanoid, root = c.humanoid, c.root
 	local t = now()
 
+	local was = brain.target
 	brain.target = chooseTarget(brain)
 	local target = brain.target
+	-- Testing aid: workspace attribute DebugBotTargets = true publishes who each bot hunts.
+	if target ~= was and workspace:GetAttribute("DebugBotTargets") then
+		c.model:SetAttribute("DebugTarget", if target then target.model.Name else nil)
+	end
 	if not target then
 		brain.align.Enabled = false
 		humanoid.AutoRotate = true
@@ -440,7 +474,9 @@ local ladders: { [Combatant]: { [Combatant]: { level: number, at: number } } } =
 local function rungOf(bot: Combatant, attacker: Combatant): number
 	local byAttacker = ladders[bot]
 	local rung = byAttacker and byAttacker[attacker]
-	if not rung or now() - rung.at > Config.Bots.Ladder.Memory then
+	local brain = brains[bot]
+	local memory = brain and brain.tier.Memory or Config.Bots.Ladder.Memory
+	if not rung or now() - rung.at > memory then
 		return 0
 	end
 	return rung.level
@@ -710,12 +746,17 @@ local function animate(model: Model, rigTier: string): Brain?
 			task.wait(Config.Bots.ThinkInterval)
 		end
 		brains[c] = nil
+		-- Forget its defence ladders and guard holds, and every rung held against it (PERF-07).
+		ladders[c], guardUntil[c] = nil, nil
+		for _, byAttacker in ladders do
+			byAttacker[c] = nil
+		end
 	end)
 	return brain
 end
 
 local function spawnBot(index: number)
-	local model = buildRig(index, tierName)
+	local model = buildRig(rollLook(index, tierName), tierName)
 	model:PivotTo(spawnPoint())
 	model.Parent = botFolder
 	slots[index] = model
@@ -745,19 +786,22 @@ end
 
 -- A duel opponent of skill `rigTier` at `cframe`, fighting only `foe` and staying within
 -- `radius` of `center`. `name` keeps the same bot across rounds; the body is cleared away a
--- few seconds after it falls. Not part of the royale roster, so setCount never touches it.
+-- few seconds after it falls. `look` (returned from the first round) keeps its outfit, weapon,
+-- blade and finisher too. Not part of the royale roster, so setCount never touches it.
 function BotService.spawnDuelist(
 	rigTier: string,
 	cframe: CFrame,
 	foe: Combatant,
 	center: Vector3,
 	radius: number,
-	name: string?
-): Combatant?
+	name: string?,
+	look: BotLook?
+): (Combatant?, BotLook?)
 	if not Config.Bots.Tiers[rigTier] then
 		rigTier = "Adept"
 	end
-	local model = buildRig(math.random(1, 12), rigTier)
+	local chosen = look or rollLook(math.random(1, 12), rigTier)
+	local model = buildRig(chosen, rigTier)
 	if name then
 		model.Name = name
 	end
@@ -776,7 +820,7 @@ function BotService.spawnDuelist(
 			model:Destroy()
 		end)
 	end)
-	return brain.c
+	return brain.c, chosen
 end
 
 -- Points a duel bot at its foe for this round (a player's body is new after each death).

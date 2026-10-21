@@ -879,7 +879,8 @@ local Config = {
 		-- Defence is Kannagi's escalation ladder, tracked per attacker (no dice for slashes):
 		-- an idle bot that sees a swing coming raises guard; a bot that was hit holds guard
 		-- for the next one; a bot that guarded deflects the next one; a deflect is followed by
-		-- a counter once the attacker stops. Ladder.Memory without contact resets it. A tier
+		-- a counter once the attacker stops. The tier's Memory (else Ladder.Memory) seconds
+		-- without contact resets it, so a Kensei isn't guard-broken by patient pokes. A tier
 		-- follows each rung with probability Follow (else it drops a rung) and needs
 		-- Reaction seconds to see a windup, so Ronin bots still eat honest strings.
 		Ladder = {
@@ -900,6 +901,9 @@ local Config = {
 		OpeningCooldown = 0.6,
 		-- Only this many bots may fight one human at a time; the rest pick other targets.
 		MaxBotsPerPlayer = 1,
+		-- Studs added to a bot that is busy with a human, as another bot's target: the bots left
+		-- out by MaxBotsPerPlayer fight each other away from the human, not the bot beside them.
+		HumanFoePenalty = 60,
 
 		-- Skill tiers scale the numbers above. A match's tier follows its least experienced
 		-- human (see Bots.tierFor), so a newcomer's first fights are winnable: players who
@@ -907,6 +911,7 @@ local Config = {
 		Tiers = {
 			Novice = {
 				Title = "Ronin",
+				Memory = 1.5, -- seconds a ladder rung lasts without contact
 				Follow = 0.4, -- chance to climb each ladder rung
 				Reaction = 0.4, -- seconds to react to a windup
 				Perfect = 0.05, -- share of its deflects that are perfect
@@ -922,6 +927,7 @@ local Config = {
 			},
 			Adept = {
 				Title = "Samurai",
+				Memory = 2.5,
 				Follow = 0.72,
 				Reaction = 0.27,
 				Perfect = 0.2,
@@ -935,6 +941,7 @@ local Config = {
 			},
 			Master = {
 				Title = "Kensei",
+				Memory = 4,
 				Follow = 0.93,
 				Reaction = 0.18,
 				Perfect = 0.4,

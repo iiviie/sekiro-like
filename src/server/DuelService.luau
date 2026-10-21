@@ -47,6 +47,7 @@ type Side = {
 	player: Player?, -- nil for the bot
 	c: Combatant?, -- this round's body
 	name: string,
+	look: BotService.BotLook?, -- a bot keeps its outfit, weapon, blade and finisher every round
 	wins: number,
 }
 
@@ -351,8 +352,15 @@ local function runDuel(ground: Ground, players: { Player })
 					BotService.setFoe(side.c :: Combatant, foe)
 				else
 					local name = if side.name ~= "" then side.name else nil
-					side.c =
-						BotService.spawnDuelist(botTier, mark(ground, i), foe, ground.arena, DUEL.ArenaRadius, name)
+					side.c, side.look = BotService.spawnDuelist(
+						botTier,
+						mark(ground, i),
+						foe,
+						ground.arena,
+						DUEL.ArenaRadius,
+						name,
+						side.look
+					)
 					if not side.c then
 						forfeit = side
 						break

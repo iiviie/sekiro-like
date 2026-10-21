@@ -42,28 +42,31 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   will put you), **Rewards** (7-day daily streak), **Settings** (camera shake, hitstop, menu sound, reduce motion).
   Top left: your **Mastery** level and XP bar; top right: coins, gems and Whetstones. See
   [Progression and monetisation](#progression-and-monetisation).
-- **Match:** queued players plus bots filling up to six fighters start on a circle around the courtyard. Bots match the
-  least experienced human: **Ronin** (Novice) for a player's first 3 matches (up to 8 until their first win),
-  **Samurai** (Adept), **Kensei** (Master, with rare blades) for proven players (15+ matches and a ranked rating of 800,
-  or winning 45% of their royales); only one bot fights a given human at a time. About one match in three has an
-  **Omen**: Blood Moon (every deathblow kills, the sky turns red), Iron Will (posture breaks 40% faster) or Rushing Mist
-  (the ring closes twice as fast). After 20 s a ring of red mist starts closing and hurts anyone outside it (except
-  a cut-down fighter kneeling to rise). Every player
-  has one **Resurrection** (回生) per match: the first lethal blow cuts you down to your knees, untouchable, and you rise
-  2.2 s later at half vitality. The second death is final; you spectate. When two remain, the 一騎討 **Final duel**
-  is announced. The last one standing wins. The match ends as soon as no human is left alive, so nobody waits for bots.
+- **Match:** queued players plus bots filling up to six fighters start on a circle around the courtyard. Bots match
+  the least experienced human: **Ronin** (Novice) for a player's first 3 matches (up to 8 until their first win),
+  **Samurai** (Adept), **Kensei** (Master, with rare blades) for proven players (15+ matches and a ranked rating of
+  800, or winning 45% of their royales); only one bot fights a given human at a time, and the bots left out leave that
+  pair alone and fight each other. Fighters start facing the middle. Samurai and Kensei bots carry a premium finisher
+  (Ink Brush, Crow Feathers, Lightning Sheath, Sakura Scatter or Moon Crescent), so you see one on their deathblows.
+  About one match in three has an **Omen**: Blood Moon (every deathblow kills, the sky turns red), Iron Will (posture
+  breaks 40% faster) or Rushing Mist (the ring closes twice as fast). After 20 s a ring of red mist starts closing and
+  hurts anyone outside it (except a cut-down fighter kneeling to rise). Every player has one **Resurrection** (回生) per
+  match: the first lethal blow cuts you down to your knees, untouchable, and you rise 2.2 s later at half vitality.
+  The second death is final; you spectate. When two remain, the 一騎討 **Final duel** is announced. The last one standing
+  wins. The match ends as soon as no human is left alive, so nobody waits for bots.
 - **Duels (一騎討).** Two pairs of gold **duel pads** sit on the lower tier (east and west of the spawn plaza). Stand on
   one: when someone takes the facing pad a first-to-3 duel starts at once; alone, a bot matched to your experience
-  (the royale's tier rule) steps in after 8 s. The pair's duellists go to its fenced terrace floating just off the rim,
-  in view of the lobby. Each round both start on their marks, full and protected through a 3 s countdown; there is no
-  resurrection, the first to fall loses the round, and a round still going after 75 s goes to whoever has more
-  vitality. The Coach still prompts new players. Afterwards both return to the lobby: deflects, kills, deathblows and
-  missions count as in the royale, a duel pays "Duel fought" plus XP per round taken, a win pays 60 XP and 25 coins,
-  and it counts toward Played (bot tier, Coach, newcomer assist) and the separate duel wins and losses. A duel between
-  two humans is a ranked result: one full-weight Elo game on the ranked rating (`Config.Rating.K`); duels against bots
-  never move it. Leaving mid-duel forfeits. While you're on a pad or in a duel you're held out of the royale queue.
-  Numbers in `Config.Duel`; the loop is [DuelService.luau](src/server/DuelService.luau), the pads and terraces are in
-  LobbyBuilder, the score banner is [DuelHUD.luau](src/client/DuelHUD.luau).
+  (the royale's tier rule) steps in after 8 s and keeps its name, outfit, weapon, blade and finisher every round. The
+  pair's duellists go to its fenced terrace floating just off the rim, in view of the lobby. Each round both start on
+  their marks, full and protected through a 3 s countdown; there is no resurrection, the first to fall loses the
+  round, and a round still going after 75 s goes to whoever has more vitality. The Coach still prompts new players.
+  Afterwards both return to the lobby: deflects, kills, deathblows and missions count as in the royale, a duel pays
+  "Duel fought" plus XP per round taken, a win pays 60 XP and 25 coins, and it counts toward Played (bot tier, Coach,
+  newcomer assist) and the separate duel wins and losses. A duel between two humans is a ranked result: one
+  full-weight Elo game on the ranked rating (`Config.Rating.K`); duels against bots never move it. Leaving mid-duel
+  forfeits. While you're on a pad or in a duel you're held out of the royale queue. Numbers in `Config.Duel`; the loop
+  is [DuelService.luau](src/server/DuelService.luau), the pads and terraces are in LobbyBuilder, the score banner is
+  [DuelHUD.luau](src/client/DuelHUD.luau).
 - **Boss trials (試練).** Cross the rope bridge to the back islet and step on the violet shrine pad under the small
   torii: a picker lists Kannagi Usagi's nine bosses (the tutorial trainer first, then by difficulty: Nameless Warrior,
   Cat General, Guard of Mist, Little Demon, Night Fox, Crimson Shadow, Puppet Maiden, Niten Usagi), with ✓ on the ones
@@ -132,9 +135,9 @@ never over the fighters), a deflect that recoils the attacker is followed by **C
 **DEATHBLOW**, and perilous attacks name their answer; those perilous prompts stay through the first 10 matches until
 each kind (thrust, sweep) has been prompted once. A new keyboard or gamepad player's first royale exchange is followed
 by a one-time **R / LOCK ON**. Touch and gamepad players see their own button names (client/InputNames), in the Coach,
-its death tips and the Guide. For the first 10 matches the deflect window is up to 1.2× wider, tapering to normal
-(`Config.NewcomerAssist`). A new player's first royale report points once at the duel pads and the boss shrine, and the
-Guide has an "Other fights" entry.
+its death tips and the Guide. For the first 10 matches the deflect window is up to 1.2× wider (the perfect window
+1.3×), tapering to normal (`Config.NewcomerAssist`). A new player's first royale report points once at the duel
+pads and the boss shrine, and the Guide has an "Other fights" entry.
 
 ## Progression and monetisation
 
@@ -334,8 +337,9 @@ stomp window) are per-move fields in `Config.Attacks` with defaults in `Config.M
 - **Healing gourd.** A 0.9 s sip that slows you; a hit mid-sip wastes it. There is no passive regeneration.
 - **Bots** defend with Kannagi's ladder, per attacker: an idle bot that sees a swing coming raises guard; once hit it
   holds guard for the next one and steps back; once it has guarded it deflects; after a deflect that stops you it
-  counters. Their tier sets how often they climb each rung and how fast they react (Ronin 40% / 0.4 s, Samurai 72% /
-  0.27 s, Kensei 93% / 0.18 s), so a Ronin still eats an honest string. A Samurai or Kensei mixes up a full string's
+  counters. Their tier sets how often they climb each rung, how fast they react and how long a rung lasts without
+  contact (Ronin 40% / 0.4 s / 1.5 s, Samurai 72% / 0.27 s / 2.5 s, Kensei 93% / 0.18 s / 4 s), so a Ronin still eats an
+  honest string and patient single pokes don't reset a Kensei's defence. A Samurai or Kensei mixes up a full string's
   third hit (`Bots.Tiers.*.Mix`: a delayed Overhead, a perilous morph or a feint; Ronin stays on rhythm), and misreads
   your delayed Overhead as the on-rhythm third hit at its tier's miss rate (1 − Follow), so mix-ups work both ways. Perilous answers (jump, Mikiri, sidestep,
   stomp) are still rolls. They exploit recovery and sips, always go for the deathblow on a broken posture, and turn at

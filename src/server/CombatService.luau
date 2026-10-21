@@ -1786,6 +1786,12 @@ local function onCharacterAdded(player: Player, character: Model)
 	if player.Character ~= character then
 		return
 	end
+	-- Our EnemyBars show vitality; Roblox's own health bar under the name would double it.
+	-- The name stays, so friends can find each other in the lobby.
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	end
 	CombatService.register(character, player)
 
 	-- Once the avatar has fully loaded and is in the world, swap in the Ninja animation
