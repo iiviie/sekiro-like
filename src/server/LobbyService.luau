@@ -19,7 +19,8 @@
 -- Everything is validated here; the client only ever asks. Requests are rate-limited per
 -- player (a token bucket), so spamming equips can't flood the rig or the attributes.
 --
--- Published per player: LoadoutPresets (JSON { { slot, name, slots = { slot: id } } }; the
+-- Sent to the owner only (StatsService.setPrivate: local attributes on their LocalPlayer, not
+-- replicated to everyone): LoadoutPresets (JSON { { slot, name, slots = { slot: id } } }; the
 -- count allowed is Monetization's LoadoutSlots) and Wishlist (comma-separated ids).
 
 local HttpService = game:GetService("HttpService")
@@ -352,7 +353,7 @@ local function publishExtras(player: Player, d: StatsService.Data)
 	table.sort(out, function(a, b)
 		return a.slot < b.slot
 	end)
-	player:SetAttribute("LoadoutPresets", HttpService:JSONEncode(out))
+	StatsService.setPrivate(player, "LoadoutPresets", HttpService:JSONEncode(out))
 	local wishes = {}
 	if typeof(d.Ext.Wishlist) == "table" then
 		for id, on in d.Ext.Wishlist do
@@ -362,7 +363,7 @@ local function publishExtras(player: Player, d: StatsService.Data)
 		end
 	end
 	table.sort(wishes)
-	player:SetAttribute("Wishlist", table.concat(wishes, ","))
+	StatsService.setPrivate(player, "Wishlist", table.concat(wishes, ","))
 end
 
 local handlers: { [string]: (Player, unknown) -> () } = {
