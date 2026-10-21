@@ -1435,6 +1435,14 @@ function UI.tabs(
 	-- Icon tabs on a wide screen stack a small caption (`caption`, else `label`) under every
 	-- icon, so each tab says what it is; a phone keeps icon + the open tab's name in a row.
 	local stacked = not UI.compact(UI.viewport())
+	local anyColumn = false
+	for _, tab in tabs do
+		if stacked and tab.icon and (tab.caption or tab.label) ~= "" then
+			anyColumn = true
+		end
+	end
+	-- The crimson underline; a slimmer one under stacked captions, so it doesn't cross them.
+	local lineH = if anyColumn then 8 else 14
 	local key = ""
 	for _, tab in tabs do
 		key ..= tab.id .. "|"
@@ -1498,12 +1506,15 @@ function UI.tabs(
 		UI.new("UIListLayout", {
 			FillDirection = if column then Enum.FillDirection.Vertical else Enum.FillDirection.Horizontal,
 			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
+			VerticalAlignment = if column then Enum.VerticalAlignment.Top else Enum.VerticalAlignment.Center,
 			Padding = UDim.new(0, if column then 0 else 6),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}, content)
+		if column then
+			(content:FindFirstChildWhichIsA("UIPadding") :: UIPadding).PaddingTop = UDim.new(0, 2)
+		end
 		if tab.icon then
-			local size = if column then math.min(30, h - 22) else 34
+			local size = if column then math.min(28, h - lineH - 18) else 34
 			UI.new("ImageLabel", {
 				Name = "Icon",
 				LayoutOrder = 1,
@@ -1568,7 +1579,7 @@ function UI.tabs(
 		}, bar)
 		local line = UI.brush(overlay, "underline", {
 			Name = "Underline",
-			Size = UDim2.fromOffset(0, 14),
+			Size = UDim2.fromOffset(0, lineH),
 			color = T.Crimson,
 		})
 		local layout = row:FindFirstChildWhichIsA("UIListLayout") :: UIListLayout
@@ -1586,13 +1597,13 @@ function UI.tabs(
 			end
 			x, w = x / uiScale, w / uiScale
 			local target = {
-				Position = UDim2.fromOffset(x + 8, h - 14),
-				Size = UDim2.fromOffset(math.max(40, w - 16), 14),
+				Position = UDim2.fromOffset(x + 8, h - lineH),
+				Size = UDim2.fromOffset(math.max(40, w - 16), lineH),
 			}
 			local prev = lastTab[key]
 			if animate and prev and not UI.reducedMotion() and math.abs(prev.x - x) > 1 then
-				line.Position = UDim2.fromOffset(prev.x + 8, h - 14)
-				line.Size = UDim2.fromOffset(math.max(40, prev.w - 16), 14)
+				line.Position = UDim2.fromOffset(prev.x + 8, h - lineH)
+				line.Size = UDim2.fromOffset(math.max(40, prev.w - 16), lineH)
 				UI.play(line, UI.Motion.Select, target)
 			else
 				line.Position = target.Position
@@ -2076,8 +2087,9 @@ function UI.card(props: CardProps, parent: Instance?): TextButton
 	}, band)
 	UI.text({
 		Name = "ItemName",
-		Position = UDim2.new(0, 8, 1, bandY),
-		Size = UDim2.new(1, -16, 0, NAME_H),
+		-- Inset past the rarity frame's border (legendary's is the thickest).
+		Position = UDim2.new(0, 14, 1, bandY),
+		Size = UDim2.new(1, -28, 0, NAME_H),
 		FontFace = UI.Fonts.Label,
 		TextSize = 16,
 		TextWrapped = true,

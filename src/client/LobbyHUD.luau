@@ -183,7 +183,7 @@ local function applyLayout()
 		firstHint.Position = UDim2.new(1, 0, 0, -8)
 	else
 		firstHint.AnchorPoint = Vector2.new(1, 0.5)
-		firstHint.Position = UDim2.new(0, -18, 1, -HUD.Play.Y / 2)
+		firstHint.Position = UDim2.new(0, -58, 1, -HUD.Play.Y / 2)
 	end
 
 	-- The "+" next to the gems: a touch-sized hit area around a small disc.
@@ -383,18 +383,17 @@ local function build()
 		Size = UDim2.fromOffset(HUD.Play.X, 160),
 		BackgroundTransparency = 1,
 	}, bottom)
-	-- A soft warm glow behind the swipe, only on a brand-new player's first visit.
-	playGlow = UI.new("ImageLabel", {
+	-- A warm gold brush halo behind the crimson swipe, only on a brand-new player's first
+	-- visit (the soft Glow image doesn't read over the sand; the brush does).
+	playGlow = UI.brush(playCluster, "swipe", {
 		Name = "FirstGlow",
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Size = UDim2.fromOffset(HUD.Play.X + 110, HUD.Play.Y + 80),
-		BackgroundTransparency = 1,
-		Image = Assets.UI.Glow,
-		ImageColor3 = UI.Theme.GoldHi,
+		Size = UDim2.fromOffset(HUD.Play.X + 90, HUD.Play.Y + 36),
+		color = UI.Theme.GoldHi,
 		ImageTransparency = 1,
 		Visible = false,
 		ZIndex = 0,
-	}, playCluster)
+	})
 	playSwipe = UI.brush(playCluster, "swipe", {
 		Name = "PlaySwipe",
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -696,9 +695,9 @@ function refresh()
 			existing:Destroy()
 		end
 		if firstVisit then
-			playGlow.ImageTransparency = 0.55
+			playGlow.ImageTransparency = 0.25
 			if not UI.reducedMotion() then
-				local tween = UI.play(playGlow, FIRST_BREATH, { ImageTransparency = 0.85 })
+				local tween = UI.play(playGlow, FIRST_BREATH, { ImageTransparency = 0.75 })
 				tween.Name = "BreathTween"
 				tween.Parent = playGlow
 			end
