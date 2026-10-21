@@ -17,16 +17,15 @@ local player = Players.LocalPlayer
 local TrainerReadout = {}
 
 local label: TextLabel
+local group: CanvasGroup
 local pendingHitAt: { [Model]: number } = {}
 
 local function show(text: string, color: Color3)
 	label.Text = text
 	label.TextColor3 = color
-	label.TextTransparency = 0
-	label.TextStrokeTransparency = 0.4
-	TweenService:Create(label, TweenInfo.new(1.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-		TextTransparency = 1,
-		TextStrokeTransparency = 1,
+	group.GroupTransparency = 0
+	TweenService:Create(group, TweenInfo.new(1.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		GroupTransparency = 1,
 	}):Play()
 end
 
@@ -57,7 +56,7 @@ local function outcome(kind: string, data: { [string]: any })
 			)
 		end
 	elseif kind == "Guard" then
-		local grey = Color3.fromRGB(170, 175, 185)
+		local grey = UI.Theme.Steel
 		if LocalCombat.pressDelayed and ms <= window + 200 then
 			show(`GUARDED  ·  re-pressed too soon after lowering guard: the window opened late`, grey)
 		elseif ms > 600 then
@@ -67,29 +66,43 @@ local function outcome(kind: string, data: { [string]: any })
 		end
 	elseif kind == "Hit" then
 		if ms < 0 and ms > -400 then
-			show(`TOO LATE  ·  {-ms} ms after impact`, UI.Crimson)
+			show(`TOO LATE  ·  {-ms} ms after impact`, UI.Theme.CrimsonText)
 		elseif LocalCombat.pressDelayed and ms >= 0 and ms <= window + 200 then
-			show(`HIT  ·  re-pressed too soon after lowering guard: the window opened late`, UI.Crimson)
+			show(`HIT  ·  re-pressed too soon after lowering guard: the window opened late`, UI.Theme.CrimsonText)
 		elseif ms >= 0 and ms < 1500 then
-			show(`TOO EARLY  ·  {ms} ms  (and guard wasn't held)`, UI.Crimson)
+			show(`TOO EARLY  ·  {ms} ms  (and guard wasn't held)`, UI.Theme.CrimsonText)
 		else
-			show("HIT  ·  press block just before the blade lands", UI.Crimson)
+			show("HIT  ·  press block just before the blade lands", UI.Theme.CrimsonText)
 		end
 	end
 end
 
 function TrainerReadout.start()
 	local screen = UI.new("ScreenGui", { Name = "TrainerReadout", ResetOnSpawn = false, DisplayOrder = 4 })
-	label = UI.text({
+	-- The line sits on a lacquer plate (it's over the world), fading as one.
+	group = UI.new("CanvasGroup", {
+		Name = "Readout",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.62),
-		Size = UDim2.fromOffset(700, 30),
-		Font = UI.Bold,
-		TextSize = 24,
-		TextTransparency = 1,
-		TextStrokeTransparency = 1,
-		Text = "",
+		Size = UDim2.fromOffset(0, 46),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundTransparency = 1,
+		GroupTransparency = 1,
 	}, screen)
+	local plate = UI.panel({
+		Name = "Plate",
+		material = "plain",
+		sliceScale = 0.4,
+		Size = UDim2.fromOffset(0, 46),
+		AutomaticSize = Enum.AutomaticSize.X,
+	}, group)
+	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 18), PaddingRight = UDim.new(0, 18) }, plate)
+	label = UI.label("label", {
+		Size = UDim2.fromScale(0, 1),
+		AutomaticSize = Enum.AutomaticSize.X,
+		TextSize = 22,
+		Text = "",
+	}, plate)
 	screen.Parent = player:WaitForChild("PlayerGui")
 
 	local combatEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent

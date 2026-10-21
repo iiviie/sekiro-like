@@ -31,8 +31,8 @@ local DEATH_TIPS: { [string]: string } = {
 	Riposte2 = "That was a counter-string. After a riposte lands, hold F: the second cut follows fast.",
 	DodgeSlash = "They dodged and cut straight back. Don't swing into a dodge: guard instead.",
 	MikiriSlash = "Your thrust was Mikiri-countered. Thrusts are a read: use them when they're not dashing in.",
-	Perilous = "Red 危 thrust: deflect it on the glint, or dash INTO it with Q for a Mikiri Counter.",
-	Sweep = "Red 危 sweep: only a jump avoids it (dodging doesn't). Press jump again over them to stomp.",
+	Perilous = "Red perilous thrust: deflect it on the glint, or dash INTO it with Q for a Mikiri Counter.",
+	Sweep = "Red perilous sweep: only a jump avoids it (dodging doesn't). Press jump again over them to stomp.",
 	Deathblow = "Your posture broke. When the middle bar fills up, back off and let it drain.",
 	Mist = "The red mist hurts. Stay inside the ring.",
 }
@@ -40,6 +40,7 @@ local DEATH_TIPS: { [string]: string } = {
 local Coach = {}
 
 local tipLabel: TextLabel
+local tipGroup: CanvasGroup
 local lastHitKind: string? = nil
 local lastHitAt = 0
 
@@ -114,11 +115,11 @@ local function showTip()
 		return
 	end
 	tipLabel.Text = tip
-	tipLabel.Visible = true
-	tipLabel.TextTransparency = 1
-	UI.tween(tipLabel, 0.4, { TextTransparency = 0 })
+	tipGroup.Visible = true
+	tipGroup.GroupTransparency = 1
+	UI.tween(tipGroup, 0.4, { GroupTransparency = 0 })
 	task.delay(5, function()
-		UI.tween(tipLabel, 0.6, { TextTransparency = 1 })
+		UI.tween(tipGroup, 0.6, { GroupTransparency = 1 })
 	end)
 end
 
@@ -159,7 +160,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 				return
 			end
 			if kind == "Sweep" then
-				show(if touch() then "JUMP" else "SPACE", "JUMP IT", Color3.fromRGB(255, 90, 70), 0.5)
+				show(if touch() then "JUMP" else "SPACE", "JUMP IT", UI.Theme.CrimsonText, 0.5)
 				-- Then a second press over their head stomps them.
 				task.delay(0.42, function()
 					if active() then
@@ -167,7 +168,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 					end
 				end)
 			elseif kind == "Perilous" then
-				show(if touch() then "BLOCK" else "F", "DEFLECT THE THRUST", Color3.fromRGB(255, 90, 70), 0.5)
+				show(if touch() then "BLOCK" else "F", "DEFLECT THE THRUST", UI.Theme.CrimsonText, 0.5)
 			else
 				show(if touch() then "BLOCK" else "F", "DEFLECT", UI.Parchment, 0.4)
 			end
@@ -192,10 +193,10 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if model and model ~= player.Character and active() then
 			local mine, theirs = rootOf(player.Character), rootOf(model)
 			if mine and theirs and (mine.Position - theirs.Position).Magnitude < 14 then
-				show(if touch() then "SLASH" else "CLICK", "DEATHBLOW", Color3.fromRGB(255, 70, 60), 0.9)
+				show(if touch() then "SLASH" else "CLICK", "DEATHBLOW", UI.Theme.CrimsonText, 0.9)
 			end
 		elseif model == player.Character and active() then
-			show(if touch() then "DODGE" else "Q", "GET AWAY", Color3.fromRGB(255, 70, 60), 0.9)
+			show(if touch() then "DODGE" else "Q", "GET AWAY", UI.Theme.CrimsonText, 0.9)
 		end
 	end,
 }
@@ -241,7 +242,7 @@ function Coach.start()
 	keyLabel = UI.text({
 		Size = UDim2.fromScale(0, 1),
 		AutomaticSize = Enum.AutomaticSize.X,
-		Font = UI.Bold,
+		Font = UI.Number,
 		TextSize = 22,
 		Text = "F",
 	}, cap)
@@ -252,24 +253,44 @@ function Coach.start()
 		AutomaticSize = Enum.AutomaticSize.X,
 		Font = UI.Display,
 		TextSize = 30,
+		TextStrokeColor3 = UI.Theme.Ink,
 		TextStrokeTransparency = 0.2,
 		Text = "DEFLECT",
 	}, prompt)
 
-	-- The death tip sits just above where the prompt flashes, clear of the screen's centre.
-	tipLabel = UI.text({
+	-- The death tip sits just above where the prompt flashes, clear of the screen's centre,
+	-- on a lacquer plate so it reads over any ground.
+	tipGroup = UI.new("CanvasGroup", {
+		Name = "Tip",
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -312),
 		Size = UDim2.fromOffset(760, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, screen)
+	local plate = UI.panel({
+		Name = "Plate",
+		material = "plain",
+		sliceScale = 0.4,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	}, tipGroup)
+	UI.new("UIPadding", {
+		PaddingLeft = UDim.new(0, 20),
+		PaddingRight = UDim.new(0, 20),
+		PaddingTop = UDim.new(0, 12),
+		PaddingBottom = UDim.new(0, 14),
+	}, plate)
+	tipLabel = UI.text({
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
 		TextWrapped = true,
 		Font = UI.Display,
-		TextSize = 26,
-		TextStrokeTransparency = 0.3,
+		TextSize = 22,
 		TextColor3 = UI.Gold,
-		Visible = false,
 		Text = "",
-	}, screen)
+	}, plate)
 
 	local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent
 	remote.OnClientEvent:Connect(function(kind: string, data: { [string]: any })
