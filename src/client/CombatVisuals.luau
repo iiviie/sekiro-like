@@ -17,6 +17,7 @@ local CombatHUD = require(script.Parent.CombatHUD)
 local LocalCombat = require(script.Parent.LocalCombat)
 local LockOn = require(script.Parent.LockOn)
 local Motion = require(script.Parent.Motion)
+local UI = require(script.Parent.UI)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Types = require(ReplicatedStorage.Shared.Types)
@@ -401,6 +402,10 @@ local SMEAR_OVERLAP = 1.03 -- pieces overlap a little so no seam shows between t
 local SMEAR_INNER = 0.06 -- a fresh piece's inner end, as a fraction of TrailStart..TrailEnd
 local SMEAR_INNER_AGED = 0.7 -- ...and where it has crept to as the piece dies
 local FADE_LEVELS = 12
+-- A piece whose middle comes this close to the camera fades out (gone by SMEAR_NEAR_GONE),
+-- so a blade swung past the lens doesn't paint a sheet over half the screen.
+local SMEAR_NEAR = 8
+local SMEAR_NEAR_GONE = 3.5
 local POOL_CAP = 260
 
 -- Transparency along a piece, inner end (0) to the edge (1), at full strength.
@@ -471,6 +476,15 @@ local perilUntil: { [Model]: number } = {} -- a 危 attack is coming: its arc bu
 local heavyKind: { [Model]: boolean } = {}
 local sweepDir: { [Model]: Vector3 } = {} -- the blade's latest direction of travel
 local sweepAt: { [Model]: number } = {}
+-- Per-model bookkeeping kept further down (the deflect chain, predicted defences, combat
+-- stance), declared here so stepSmears can sweep out models that are gone.
+local chainAt: { [Model]: number } = {}
+local chainCount: { [Model]: number } = {}
+local predictedDefences: { [Model]: number } = {}
+local lastCombatAt: { [Model]: number } = {}
+local MODEL_TABLES = { chainAt, chainCount, predictedDefences, lastCombatAt } :: { { [Model]: any } }
+local SWEEP_INTERVAL = 2
+local nextSweepAt = 0
 
 local function acquireQuad(): Quad
 	local quad = table.remove(smearPool)
@@ -584,7 +598,7 @@ local function sampleTrack(smear: Smear, track: Track, dt: number)
 end
 
 -- Ages a blade's pieces; returns whether any are left.
-local function updatePieces(smear: Smear, track: Track): boolean
+local function updatePieces(smear: Smear, track: Track, eye: Vector3): boolean
 	local pieces = track.pieces
 	local kept = 0
 	for i = 1, #pieces do
@@ -596,15 +610,23 @@ local function updatePieces(smear: Smear, track: Track): boolean
 			kept += 1
 			pieces[kept] = piece
 			u = math.max(u, 0)
-			local strength = 1 - u
-			local level = math.max(math.ceil(strength * math.sqrt(strength) * FADE_LEVELS), 1)
+			local f = SMEAR_INNER + (SMEAR_INNER_AGED - SMEAR_INNER) * u
+			local inner = piece.hilt:Lerp(piece.tip, f)
+			local near = math.clamp(
+				(((inner + piece.tip) / 2 - eye).Magnitude - SMEAR_NEAR_GONE) / (SMEAR_NEAR - SMEAR_NEAR_GONE),
+				0,
+				1
+			)
+			local strength = (1 - u) * near
+			local level = math.ceil(strength * math.sqrt(strength) * FADE_LEVELS)
+			if near >= 1 then
+				level = math.max(level, 1)
+			end
 			local beam = piece.quad.beam
 			if level ~= piece.level then
 				piece.level = level
-				beam.Transparency = FADE[level]
+				beam.Transparency = if level == 0 then HIDDEN else FADE[level]
 			end
-			local f = SMEAR_INNER + (SMEAR_INNER_AGED - SMEAR_INNER) * u
-			local inner = piece.hilt:Lerp(piece.tip, f)
 			local chord = piece.hiltChord:Lerp(piece.tipChord, f)
 			if chord.Magnitude < 1e-3 then
 				chord = piece.tipChord * 1e-3 -- the blade pivots here: the piece pinches to a point
@@ -935,6 +957,7 @@ local function stepSmears(dt: number)
 		end
 	end
 
+	local eye = workspace.CurrentCamera.CFrame.Position
 	for i = #smears, 1, -1 do
 		local smear = smears[i]
 		if clock >= (frozenUntil[smear.model] or 0) then
@@ -945,7 +968,7 @@ local function stepSmears(dt: number)
 			if smear.live then
 				sampleTrack(smear, track, dt)
 			end
-			if updatePieces(smear, track) then
+			if updatePieces(smear, track, eye) then
 				left = true
 			end
 		end
@@ -958,6 +981,16 @@ local function stepSmears(dt: number)
 		end
 	end
 	stepStreaks(dt, clock)
+	if clock >= nextSweepAt then
+		nextSweepAt = clock + SWEEP_INTERVAL
+		for _, byModel in MODEL_TABLES do
+			for model in byModel do
+				if not model.Parent then
+					byModel[model] = nil
+				end
+			end
+		end
+	end
 end
 
 -- The direction the attacker's blade was travelling as it struck, if it was just swinging.
@@ -1495,7 +1528,8 @@ local function popText(target: Model, text: string, color: Color3, big: boolean?
 	end
 	local gui = Instance.new("BillboardGui")
 	gui.Size = UDim2.fromOffset(220, 40)
-	gui.StudsOffsetWorldSpace = Vector3.new((math.random() - 0.5) * 1.5, 2.2, 0)
+	-- Starts above the EnemyBars billboard (2.9 studs over the head), not on it.
+	gui.StudsOffsetWorldSpace = Vector3.new((math.random() - 0.5) * 1.5, 4.2, 0)
 	gui.AlwaysOnTop = true
 	gui.LightInfluence = 0
 	gui.MaxDistance = 60
@@ -1503,7 +1537,7 @@ local function popText(target: Model, text: string, color: Color3, big: boolean?
 	local label = Instance.new("TextLabel")
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.SourceSansBold
+	label.FontFace = UI.Fonts.Number
 	label.TextSize = if big then 30 else 22
 	label.TextColor3 = color
 	label.TextStrokeTransparency = 0.3
@@ -1524,9 +1558,6 @@ local alreadyShown: (attacker: Model, defender: Model) -> boolean
 
 -- Deflects chained in quick succession ring a little higher each time, so the rhythm of a
 -- good exchange can be heard. Tracked per defender.
-local chainAt: { [Model]: number } = {}
-local chainCount: { [Model]: number } = {}
-
 local function specOf(attacker: Model, kind: any): Config.AttackSpec?
 	return Bosses.specFor(Weapons.of(attacker), kind) -- a weapon move, or a boss hit
 end
@@ -1633,7 +1664,6 @@ end
 -- Your own deflects are shown the instant the blow lands, predicted from your last block
 -- press; the server's verdict follows later and shouldn't replay the same effects.
 local PREDICTED_DEFENCE_WINDOW = 0.6
-local predictedDefences: { [Model]: number } = {}
 
 function alreadyShown(attacker: Model, defender: Model): boolean
 	if not isLocal(defender) then
@@ -1682,7 +1712,6 @@ end
 -- Fighters relax (sword low at the side) out of combat and raise a guard stance once
 -- they're in a fight: locked on, or within COMBAT_LINGER seconds of any exchange.
 local COMBAT_LINGER = 4
-local lastCombatAt: { [Model]: number } = {}
 
 local function inCombat(model: Model): boolean
 	if isLocal(model) and LockOn.target() ~= nil then
@@ -1870,7 +1899,9 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Deathblow = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
-		if isLocal(attacker) then
+		-- Only on a knock-down, where "-65" is news: a kill or a boss's lost life already gets
+		-- the 斬 splash, and four labels would pile up over the body.
+		if isLocal(attacker) and data.lethal == false and not data.boss and defender:GetAttribute("Boss") == nil then
 			popText(defender, `DEATHBLOW  -{Config.DeathblowDamage}`, Color3.fromRGB(230, 50, 40), true)
 		end
 		playClip(attacker, "Deathblow")
