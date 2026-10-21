@@ -40,7 +40,7 @@ FlairArt.Banners = {
 
 -- Nameplates with ornate (kamon-cornered) frames, and the watermark kanji some carry.
 FlairArt.OrnatePlates = {
-	Ronin = "Ronin",
+	Ronin = "Hatamoto", -- the VIP plate (id plate.Ronin) reads 旗本
 	S1Gold = "Gold",
 	S1Jade = "Jade",
 	S1Crimson = "Crimson",

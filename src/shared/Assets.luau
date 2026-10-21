@@ -244,6 +244,7 @@ local Assets = {
 			Shogun = "rbxassetid://110125898057346", -- 将軍
 			Path = "rbxassetid://104475987167439", -- 道
 			Ronin = "rbxassetid://95630061646070", -- 浪人
+			Hatamoto = "rbxassetid://90150269048352", -- 旗本
 		} :: { [string]: string },
 		-- Tileable 256px patterns (pat_mountains is 512x256 and best cropped, not tiled).
 		Patterns = {
