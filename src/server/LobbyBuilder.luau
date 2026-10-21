@@ -5,7 +5,10 @@
 --   Spawn plaza (lower tier)  ->  grand stair  ->  Torii terrace (upper tier, overlooking
 --   the castle): the glowing Royale pad, a great torii and two towering stone lanterns.
 --   Left wing: the dojo, with the deflect trainer under a pavilion.
---   Right wing: the hall of champions, with the leaderboards.
+--   Right wing: the hall of champions, with the leaderboards and a pedestal showing the
+--   season's capstone blade (earned at the last tier of the pass, never sold).
+--   Spawn plaza: the Store and Season boards (painted, Assets.Boards); walking up shows a
+--   prompt and a click opens the panel (client/LobbyHUD reads their OpensPanel attribute).
 --   Duel grounds: two pairs of gold duel pads on the lower tier, each sending its pair to a
 --   fenced terrace floating just off the rim (east and west).
 --   Two ponds spill off the rim as waterfalls; rope bridges lead to two small islets; more
@@ -21,7 +24,10 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Assets = require(ReplicatedStorage.Shared.Assets)
+local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Config = require(ReplicatedStorage.Shared.Config)
+local SwordRig = require(script.Parent.SwordRig)
 local EnvironmentProfile = require(script.Parent.EnvironmentProfile)
 local Palette = require(ReplicatedStorage.Shared.Palette)
 local Torii = require(script.Parent.Torii)
@@ -982,6 +988,198 @@ local function boards(parent: Instance, spots: { Vector3 }, faceToward: Vector3)
 	end
 end
 
+-- How a board or pedestal opens its panel: a prompt when you walk up, a click from afar.
+-- The client (LobbyHUD) handles both through the OpensPanel attribute.
+local function opens(target: BasePart, panel: string, action: string, objectText: string)
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "OpenPanel"
+	prompt.ActionText = action
+	prompt.ObjectText = objectText
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt:SetAttribute("OpensPanel", panel)
+	prompt.Parent = target
+	local click = Instance.new("ClickDetector")
+	click.MaxActivationDistance = 60
+	click:SetAttribute("OpensPanel", panel)
+	click.Parent = target
+end
+
+-- A painted board on two timber posts under a tiled cap, with a title strip over the art.
+local function panelBoard(parent: Instance, base: Vector3, faceToward: Vector3, spec: { [string]: string })
+	local look = CFrame.lookAt(base, Vector3.new(faceToward.X, base.Y, faceToward.Z))
+	local holder = Instance.new("Model")
+	holder.Name = spec.name
+	for _, side in { -1, 1 } do
+		part({
+			Name = "BoardPost",
+			Size = Vector3.new(0.7, 9.6, 0.7),
+			CFrame = look * CFrame.new(side * 5.6, 4.8, 0.3),
+			Material = Enum.Material.Wood,
+			Color = Palette.Timber,
+			CastShadow = false,
+		}, holder)
+	end
+	local board = part({
+		Name = "Board",
+		Size = Vector3.new(10.4, 5.2, 0.35),
+		CFrame = look * CFrame.new(0, 5.6, 0),
+		Material = Enum.Material.SmoothPlastic,
+		Color = Palette.Ink,
+		CastShadow = false,
+	}, holder)
+	part({
+		Name = "BoardCap",
+		Size = Vector3.new(12.6, 0.6, 1.5),
+		CFrame = look * CFrame.new(0, 8.6, 0.2),
+		Material = Enum.Material.ClayRoofTiles,
+		Color = Palette.Roof,
+		CastShadow = false,
+	}, holder)
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = "Art"
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+	gui.CanvasSize = Vector2.new(1024, 512)
+	gui.LightInfluence = 0.25
+	gui.Brightness = 1.2
+	gui.MaxDistance = 220
+	gui.Parent = board
+	local art = Instance.new("ImageLabel")
+	art.Size = UDim2.fromScale(1, 1)
+	art.BackgroundTransparency = 1
+	art.Image = spec.image
+	art.Parent = gui
+	local strip = Instance.new("Frame")
+	strip.AnchorPoint = Vector2.new(0, 1)
+	strip.Position = UDim2.fromScale(0, 1)
+	strip.Size = UDim2.new(1, 0, 0, 132)
+	strip.BackgroundColor3 = Palette.Ink
+	strip.BackgroundTransparency = 0.25
+	strip.BorderSizePixel = 0
+	strip.Parent = art
+	local heading = Instance.new("TextLabel")
+	heading.BackgroundTransparency = 1
+	heading.Position = UDim2.fromOffset(0, 6)
+	heading.Size = UDim2.new(1, 0, 0, 78)
+	heading.Font = Enum.Font.Garamond
+	heading.TextSize = 72
+	heading.TextColor3 = Palette.Parchment
+	heading.Text = spec.title
+	heading.Parent = strip
+	local sub = heading:Clone()
+	sub.Position = UDim2.fromOffset(0, 84)
+	sub.Size = UDim2.new(1, 0, 0, 40)
+	sub.Font = Enum.Font.SourceSansSemibold
+	sub.TextSize = 32
+	sub.TextColor3 = Color3.fromRGB(232, 190, 92)
+	sub.Text = spec.subtitle
+	sub.Parent = strip
+	opens(board, spec.panel, spec.action, spec.title)
+	holder.Parent = parent
+	return holder
+end
+
+-- The season capstone (the last tier's premium blade), from Shared/Season when it exists.
+local function capstone(): (string?, string?)
+	local module = ReplicatedStorage.Shared:FindFirstChild("Season")
+	if not module or not module:IsA("ModuleScript") then
+		return nil, nil
+	end
+	local ok, Season = pcall(require, module)
+	if not ok or typeof(Season) ~= "table" or typeof(Season.at) ~= "function" then
+		return nil, nil
+	end
+	local def = Season.at() or Season.List[1]
+	local last = def and def.tiers and def.tiers[#def.tiers]
+	for _, reward in (last and last.premium) or {} do
+		local item = reward.kind == "item" and Catalog.get(reward.id)
+		if item and item.category == "bladeSkin" then
+			return item.ref, `{item.name}  ·  {def.name or "Season"}`
+		end
+	end
+	return nil, nil
+end
+
+-- The Hall of Champions pedestal: a stone plinth holding the season's capstone blade point
+-- up, lit, with a plaque. Pressing it opens the pass (the blade is its last tier).
+local function pedestal(parent: Instance, base: Vector3, faceToward: Vector3)
+	local look = CFrame.lookAt(base, Vector3.new(faceToward.X, base.Y, faceToward.Z))
+	local holder = Instance.new("Model")
+	holder.Name = "ChampionPedestal"
+	disc(3.2, 0.8, base + Vector3.new(0, 0.4, 0), {
+		Name = "PlinthBase",
+		Material = Enum.Material.Slate,
+		Color = Palette.Stone,
+	}, holder)
+	part({
+		Name = "Plinth",
+		Size = Vector3.new(2.6, 3.4, 2.6),
+		CFrame = look * CFrame.new(0, 2.5, 0),
+		Material = Enum.Material.Limestone,
+		Color = Palette.LanternStone,
+	}, holder)
+	local top = part({
+		Name = "PlinthTop",
+		Size = Vector3.new(3.4, 0.5, 3.4),
+		CFrame = look * CFrame.new(0, 4.45, 0),
+		Material = Enum.Material.Slate,
+		Color = Palette.Lacquer,
+	}, holder)
+	-- The blade: a stand-in "hand" holds it like a fighter would, turned point up.
+	local ref, label = capstone()
+	local stand = Instance.new("Model")
+	stand.Name = "Blade"
+	local hand = part({
+		Name = "RightHand",
+		Size = Vector3.new(0.6, 0.6, 0.6),
+		CFrame = look * CFrame.new(0, 5.6, 0) * CFrame.Angles(math.rad(90), 0, 0),
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+	}, stand)
+	hand.Anchored = true
+	stand.Parent = holder
+	local sword = SwordRig.attach(stand, "Katana")
+	if sword then
+		SwordRig.applySkin(stand, ref)
+		local glow = Instance.new("PointLight")
+		glow.Name = "Showcase"
+		glow.Color = Color3.fromRGB(255, 214, 170)
+		glow.Range = 10
+		glow.Brightness = 1.4
+		glow.Shadows = false
+		glow.Parent = top
+	end
+	local plaque = Instance.new("BillboardGui")
+	plaque.Name = "Plaque"
+	plaque.Size = UDim2.fromScale(9, 2.2) -- in studs: it shrinks with distance like the board
+	plaque.StudsOffsetWorldSpace = Vector3.new(0, 6.5, 0)
+	plaque.MaxDistance = 60
+	plaque.LightInfluence = 0
+	plaque.Parent = top
+	local heading = Instance.new("TextLabel")
+	heading.BackgroundTransparency = 1
+	heading.Size = UDim2.fromScale(1, 0.55)
+	heading.Font = Enum.Font.Garamond
+	heading.TextScaled = true
+	heading.TextColor3 = Color3.fromRGB(232, 190, 92)
+	heading.TextStrokeTransparency = 0.5
+	heading.Text = label or "The season blade"
+	heading.Parent = plaque
+	local sub = heading:Clone()
+	sub.Position = UDim2.fromScale(0, 0.58)
+	sub.Size = UDim2.fromScale(1, 0.38)
+	sub.Font = Enum.Font.SourceSansSemibold
+	sub.TextColor3 = Palette.Parchment
+	sub.Text = "Earned at the pass's last tier, never sold"
+	sub.Parent = plaque
+	opens(top, "Pass", "See the season", "Hall of Champions")
+	holder.Parent = parent
+end
+
 -- An open dojo pavilion: four lacquered posts and a tiled roof over a wooden deck.
 local function pavilion(parent: Instance, center: Vector3, facing: Vector3)
 	local look = CFrame.lookAt(center, center + facing)
@@ -1187,6 +1385,25 @@ function LobbyBuilder.build(): Folder
 	for _, z in { -14, 10 } do
 		lantern(at(34, WING, z), lobby)
 	end
+	pedestal(lobby, at(52, WING, -6), at(30, WING, -2))
+
+	-- The Store and Season boards, either side of the spawn plaza, facing where you spawn.
+	panelBoard(lobby, at(-24, LOWER, 26), at(0, LOWER, 34), {
+		name = "SeasonBoard",
+		image = Assets.Boards.Season,
+		title = "PATH OF THE BLADE",
+		subtitle = "Season rewards and missions",
+		panel = "Pass",
+		action = "See the season",
+	})
+	panelBoard(lobby, at(24, LOWER, 26), at(0, LOWER, 34), {
+		name = "StoreBoard",
+		image = Assets.Boards.Store,
+		title = "STORE",
+		subtitle = "Daily shop  ·  gems  ·  the shrine",
+		panel = "Store",
+		action = "Open the Store",
+	})
 
 	-- Bridges and their islets.
 	bridge(lobby, BRIDGE_LEFT)
