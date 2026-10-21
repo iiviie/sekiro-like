@@ -524,6 +524,27 @@ local function save(player: Player, release: boolean?): boolean
 	return committed
 end
 
+-- Releases a lock this session wrote for a player whose load didn't finish (they left).
+local function releaseLock(player: Player)
+	local dataStore = store
+	if not dataStore then
+		return
+	end
+	local ok, err = pcall(function()
+		dataStore:UpdateAsync(key(player), function(old: any)
+			local lock = typeof(old) == "table" and old.Lock or nil
+			if typeof(lock) ~= "table" or lock.id ~= session then
+				return nil -- not ours (or already released): leave it
+			end
+			old.Lock = nil
+			return old
+		end)
+	end)
+	if not ok then
+		warn(`[StatsService] release {player.UserId}: {err}`)
+	end
+end
+
 -- Loads (and locks) a profile. Returns the data and nil, or nil and why it failed.
 local function load(player: Player): (Data?, string?)
 	local dataStore = store :: Store
@@ -548,6 +569,9 @@ local function load(player: Player): (Data?, string?)
 			end)
 		end)
 		if not player.Parent then
+			if ok and result then
+				releaseLock(player) -- we locked it: don't leave it locked for LOCK_STALE
+			end
 			return nil, "left"
 		end
 		if ok and result then
@@ -599,6 +623,9 @@ local function onPlayerAdded(player: Player)
 	if store then
 		d, reason = load(player)
 		if reason == "left" or not player.Parent then
+			if d then
+				releaseLock(player) -- left during the legacy read, after the lock was written
+			end
 			return
 		end
 	else
