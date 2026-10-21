@@ -1,17 +1,23 @@
 --!strict
--- Procedural animator: layers hand-authored poses on top of the Roblox locomotion
--- animations by writing joint Transforms every RunService.PreSimulation, after the
--- Animator has written its own. Works with both Motor6D and AnimationConstraint rigs.
+-- Procedural animator: writes joint Transforms every RunService.PreSimulation, after the
+-- Roblox Animator has written its own. Works with both Motor6D and AnimationConstraint rigs.
 --
--- Two layers per character:
+-- Three layers per character, bottom to top:
+--   loco   the swordsman stance and footwork (Shared/Gait): a low, wide idle with the hips
+--          turned off the facing, and walk / run / strafe steps along the real ground velocity
+--          with leg IK, so feet stay planted. It replaces Roblox's idle/walk/run on the ground
+--          and hands back to Roblox's jump/fall/climb animations in the air.
 --   base   a held stance (Ready, Guard, Broken) that blends smoothly when it changes
 --   action a one-shot clip (a swing, a recoil) that fades in over its first segment
 --          and back out to the base stance when it ends
--- Joints a pose doesn't mention keep whatever the locomotion animation gave them.
+-- Joints a pose doesn't mention keep the layer below. A pose's Waist is relative to its own
+-- Root (or, if it has none, to a body square to the facing), so the chest keeps the facing a
+-- pose was authored for however the hips below have turned.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local Gait = require(ReplicatedStorage.Shared.Gait)
 local Poses = require(ReplicatedStorage.Shared.Poses)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local ClipLibrary = require(ReplicatedStorage.Shared.Clips)
@@ -60,11 +66,36 @@ type State = {
 	written: { [string]: CFrame },
 	source: { [string]: CFrame },
 	scale: number, -- BodyScale: pose offsets (a crouch's hip drop) are authored for a 1x body
+	gait: Gait.Memory,
+	loco: number, -- 0..1, how much the stance layer drives the body (0 in the air)
+	ground: { [string]: number }, -- smoothed ground height under each foot (root space)
+	squareRoot: CFrame, -- the Root a pose without one is relative to: square to the facing
 }
 
 local BASE_BLEND_RATE = 14
 local MOVE_BLEND_RATE = 10
 local MOVING_SPEED = 2.5 -- studs/s
+-- Faster than this (x BodyScale) is a lunge, dash or knockback, not walking: a clip playing then
+-- keeps its own legs instead of handing them to the footwork.
+local LUNGE_SPEED = 21
+local LOCO_RATE = 10 -- the stance layer hands over to Roblox's air animations (and back) this fast
+local GROUND_RATE = 18 -- smoothing of each foot's ground height
+local REST_LEG = 1.8 -- hip-to-ankle length (studs) Shared/Gait's distances are authored for
+local PROBE_RANGE = 150 -- beyond this distance from the camera, feet skip the ground probe
+-- Stances that hold the sword up for a fight: the footwork takes its low, wide shape under them.
+local COMBAT_STANCES = { Ready = true, Guard = true, GuardImpact = true }
+-- Humanoid states where Roblox's own animations (fall, climb, swim, sit, death) take the body.
+local OFF_GROUND = {
+	[Enum.HumanoidStateType.Dead] = true,
+	[Enum.HumanoidStateType.Seated] = true,
+	[Enum.HumanoidStateType.Climbing] = true,
+	[Enum.HumanoidStateType.Swimming] = true,
+	[Enum.HumanoidStateType.Freefall] = true,
+	[Enum.HumanoidStateType.Jumping] = true,
+	[Enum.HumanoidStateType.FallingDown] = true,
+	[Enum.HumanoidStateType.Ragdoll] = true,
+	[Enum.HumanoidStateType.PlatformStanding] = true,
+}
 -- A clip that replaces one still on screen crossfades out of it over this long (on top of
 -- blending its first key in from the replaced pose).
 local CROSSFADE = 0.08
@@ -98,6 +129,19 @@ local Animator = {
 }
 
 local states: { [Model]: State } = {}
+
+-- Ground probes ignore every fighter (bodies, swords, accessories).
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+groundParams.RespectCanCollide = true
+
+local function refreshGroundFilter()
+	local fighters = {}
+	for model in states do
+		table.insert(fighters, model)
+	end
+	groundParams.FilterDescendantsInstances = fighters
+end
 
 -- Poses.luau compiles every pose to joint Transforms at load.
 local poseFrames: { [string]: PoseFrames } = Poses
@@ -309,6 +353,190 @@ local function scaled(cf: CFrame, scale: number): CFrame
 	return if scale == 1 then cf else cf.Rotation + cf.Position * scale
 end
 
+-- The rotation taking direction `restDir` onto `dir` and, about it, `restFwd` onto `fwd`.
+local function frameMap(restDir: Vector3, restFwd: Vector3, dir: Vector3, fwd: Vector3): CFrame
+	local f0 = restFwd - restDir * restFwd:Dot(restDir)
+	local f1 = fwd - dir * fwd:Dot(dir)
+	if f0.Magnitude < 1e-4 or f1.Magnitude < 1e-4 then
+		return between(restDir, dir)
+	end
+	f0, f1 = f0.Unit, f1.Unit
+	local rest = CFrame.fromMatrix(Vector3.zero, restDir, f0, restDir:Cross(f0))
+	local goal = CFrame.fromMatrix(Vector3.zero, dir, f1, dir:Cross(f1))
+	return goal * rest:Inverse()
+end
+
+local FORWARD = Vector3.new(0, 0, -1)
+
+-- Leg IK in HumanoidRootPart space: hip, knee and ankle Transforms that put the ankle pivot on
+-- `target` with the knee bent over the toes and the foot at `footRot`. Writes into `out`.
+local function solveLeg(
+	side: string,
+	j: { [string]: any },
+	lowerTorso: CFrame,
+	target: Vector3,
+	footRot: CFrame,
+	out: { [string]: CFrame }
+)
+	local hip, knee, ankle = j[side .. "Hip"], j[side .. "Knee"], j[side .. "Ankle"]
+	local hC0, hC1 = offsets(hip)
+	local kC0, kC1 = offsets(knee)
+	local aC0, aC1 = offsets(ankle)
+	local pivot = (lowerTorso * hC0).Position
+	local upperRest = kC0.Position - hC1.Position -- hip to knee, in upper leg space
+	local lowerRest = aC0.Position - kC1.Position -- knee to ankle, in lower leg space
+	local l1, l2 = upperRest.Magnitude, lowerRest.Magnitude
+	if l1 < 1e-3 or l2 < 1e-3 then
+		return
+	end
+	local d = target - pivot
+	local dist = math.clamp(d.Magnitude, 0.05, (l1 + l2) * 0.999)
+	local dir = d.Unit
+	local cosA = math.clamp((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist), -1, 1)
+	local toes = footRot.LookVector
+	local pole = toes - dir * toes:Dot(dir)
+	pole = if pole.Magnitude > 1e-4 then pole.Unit else lowerTorso.LookVector
+	local kneeAt = pivot + dir * (l1 * cosA) + pole * (l1 * math.sqrt(1 - cosA * cosA))
+	local ankleAt = pivot + dir * dist
+	local upper = frameMap(upperRest.Unit, FORWARD, (kneeAt - pivot).Unit, pole)
+	local lower = frameMap(lowerRest.Unit, FORWARD, (ankleAt - kneeAt).Unit, pole)
+	out[side .. "Hip"] = hC0.Rotation:Inverse() * lowerTorso.Rotation:Inverse() * upper * hC1.Rotation
+	out[side .. "Knee"] = kC0.Rotation:Inverse() * upper:Inverse() * lower * kC1.Rotation
+	out[side .. "Ankle"] = aC0.Rotation:Inverse() * lower:Inverse() * footRot.Rotation * aC1.Rotation
+end
+
+-- The rest ankle pivot of a leg in HumanoidRootPart space (every Transform identity).
+local function restAnkle(side: string, j: { [string]: any }): Vector3
+	local legTop = link(j.Root, CFrame.identity) * link(j[side .. "Hip"], CFrame.identity)
+	local shin = legTop * link(j[side .. "Knee"], CFrame.identity)
+	local ankleC0 = offsets(j[side .. "Ankle"])
+	return (shin * ankleC0).Position
+end
+
+local LEG_JOINTS = { "Root", "RightHip", "RightKnee", "RightAnkle", "LeftHip", "LeftKnee", "LeftAnkle" }
+
+-- The stance layer: advances the footwork and returns its full-body pose (nil when the body is
+-- in the air, dead or not an R15 rig) and how strongly it applies.
+local function locomotion(
+	state: State,
+	dt: number,
+	root: BasePart?,
+	humanoid: Humanoid?
+): ({ [string]: CFrame }?, number)
+	local j = state.joints
+	for _, name in LEG_JOINTS do
+		if not j[name] then
+			return nil, 0
+		end
+	end
+	if not root or not humanoid then
+		return nil, 0
+	end
+	local hrp = root.CFrame
+	local groundRest = -(humanoid.HipHeight + root.Size.Y / 2) -- the floor, in root space
+	local ankles: { [string]: Vector3 } = { Right = restAnkle("Right", j), Left = restAnkle("Left", j) }
+	local hipPivot = (link(j.Root, CFrame.identity) * offsets(j.RightHip)).Position
+	local k = math.max((hipPivot - ankles.Right).Magnitude / REST_LEG, 0.2)
+
+	local alive = humanoid.Health > 0 and state.model:GetAttribute("CombatState") ~= "Dead"
+	local grounded = alive
+		and not OFF_GROUND[humanoid:GetState()]
+		and workspace:Raycast(root.Position, hrp.UpVector * (groundRest - 1.2 * k), groundParams) ~= nil
+	state.loco += ((if grounded then 1 else 0) - state.loco) * (1 - math.exp(-dt * LOCO_RATE))
+
+	local base = state.baseName
+	local combat = if (base and COMBAT_STANCES[base]) or state.action then 1 else 0
+	local velocity = hrp:VectorToObjectSpace(root.AssemblyLinearVelocity) / k
+	local look = hrp.LookVector
+	local t = Gait.step(state.gait, dt, velocity, combat, math.deg(math.atan2(-look.X, -look.Z)))
+	if state.loco < 1e-3 then
+		state.ground = {}
+		return nil, 0
+	end
+
+	-- Ground under each foot (uneven terrain, steps), smoothed; near the camera only.
+	local camera = workspace.CurrentCamera
+	local probe = camera ~= nil and (camera.CFrame.Position - root.Position).Magnitude < PROBE_RANGE
+	local feet: { [string]: Gait.Foot } = { Right = t.right, Left = t.left }
+	local lowest = groundRest
+	for side, f in feet do
+		local x, z = f.pos.X * k, f.pos.Z * k
+		local ground = groundRest
+		if probe then
+			local from = hrp:PointToWorldSpace(Vector3.new(x, groundRest + 1.6 * k, z))
+			local hit = workspace:Raycast(from, hrp.UpVector * (-3.2 * k), groundParams)
+			if hit then
+				ground = math.clamp(hrp:PointToObjectSpace(hit.Position).Y, groundRest - 1.2 * k, groundRest + 1.2 * k)
+			end
+		end
+		local was = state.ground[side] or ground
+		state.ground[side] = was + (ground - was) * (1 - math.exp(-dt * GROUND_RATE))
+		lowest = math.min(lowest, state.ground[side])
+	end
+
+	local pose: { [string]: CFrame } = {}
+	-- Hips: dropped into the stance (and further when a foot stands lower than the body), turned.
+	local drop = t.drop * k + math.min(groundRest - lowest, 0.6 * k)
+	local rootT = CFrame.new(0, -drop, 0) * CFrame.Angles(0, t.hipYaw, 0) * CFrame.Angles(0, 0, t.hipRoll)
+	pose.Root = rootT
+	local lowerTorso = link(j.Root, rootT)
+	-- The chest squares back up to the facing (leaning into a run); stance poses build on that.
+	local square = CFrame.Angles(t.lean, 0, 0)
+	state.squareRoot = CFrame.new():Lerp(square, state.loco)
+	pose.Waist = rootT.Rotation:Inverse() * square
+	pose.Neck = CFrame.identity
+
+	for side, f in feet do
+		local rest = ankles[side]
+		local target = Vector3.new(f.pos.X * k, state.ground[side] + (rest.Y - groundRest) + f.pos.Y * k, f.pos.Z * k)
+		local footRot = CFrame.Angles(0, f.yaw, 0) * CFrame.Angles(f.pitch, 0, 0)
+		solveLeg(side, j, lowerTorso, target, footRot, pose)
+	end
+
+	-- Arms hang loose and swing against the legs where no stance holds them.
+	local swing = t.armSwing
+	pose.LeftShoulder = CFrame.Angles(swing + math.rad(3), 0, math.rad(-7))
+	pose.LeftElbow = CFrame.Angles(math.rad(14) + math.max(swing, 0) * 0.8, 0, 0)
+	pose.LeftWrist = CFrame.identity
+	pose.RightShoulder = CFrame.Angles(-swing + math.rad(3), 0, math.rad(7))
+	pose.RightElbow = CFrame.Angles(math.rad(14) + math.max(-swing, 0) * 0.8, 0, 0)
+	pose.RightWrist = CFrame.identity
+	return pose, state.loco
+end
+
+-- Lays a weighted pose over `below` (joint Transforms) and returns the result. Lower-body joints
+-- take `legs` of their weight (the footwork keeps them while walking). The Waist is rotated so
+-- the upper torso faces where the pose meant it to relative to the pose's own Root (or the
+-- square Root, for poses without one), whatever Root the body ends up with.
+local function applyLayer(
+	state: State,
+	below: { [string]: CFrame },
+	pose: { [string]: Weighted }?,
+	legs: number
+): { [string]: CFrame }
+	if not pose then
+		return below
+	end
+	local out = table.clone(below)
+	local poseRoot = pose.Root
+	if poseRoot and below.Root then
+		out.Root = below.Root:Lerp(scaled(poseRoot.cf, state.scale), poseRoot.w * legs)
+	end
+	for name, layered in pose do
+		local current = below[name]
+		if name ~= "Root" and current then
+			local target = scaled(layered.cf, state.scale)
+			local bodyRoot = out.Root
+			if name == "Waist" and bodyRoot then
+				local intended = if poseRoot then poseRoot.cf else state.squareRoot
+				target = (bodyRoot.Rotation:Inverse() * intended.Rotation) * target
+			end
+			out[name] = current:Lerp(target, if LOWER_BODY[name] then layered.w * legs else layered.w)
+		end
+	end
+	return out
+end
+
 local function step(state: State, dt: number)
 	-- Base layer: ease every joint towards the target stance.
 	local k = 1 - math.exp(-dt * BASE_BLEND_RATE)
@@ -383,20 +611,14 @@ local function step(state: State, dt: number)
 		})
 	end
 
-	local root = state.model:FindFirstChild("HumanoidRootPart")
-	local velocity = if root and root:IsA("BasePart") then root.AssemblyLinearVelocity else Vector3.zero
-	local moving = if Vector3.new(velocity.X, 0, velocity.Z).Magnitude > MOVING_SPEED then 1 else 0
+	local rootPart = state.model:FindFirstChild("HumanoidRootPart")
+	local root = if rootPart and rootPart:IsA("BasePart") then rootPart else nil
+	local velocity = if root then root.AssemblyLinearVelocity else Vector3.zero
+	local flatSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+	-- Walking hands the legs to the footwork; a lunge or dash (faster) leaves them to the clip.
+	local moving = if flatSpeed > MOVING_SPEED and flatSpeed < LUNGE_SPEED * state.scale then 1 else 0
 	state.move += (moving - state.move) * (1 - math.exp(-dt * MOVE_BLEND_RATE))
 	local legsKept = 1 - state.move
-
-	local function layer(result: CFrame, name: string, pose: { [string]: Weighted }?): CFrame
-		local layered = pose and pose[name]
-		if layered then
-			local w = if LOWER_BODY[name] then layered.w * legsKept else layered.w
-			return result:Lerp(scaled(layered.cf, state.scale), w)
-		end
-		return result
-	end
 
 	local results: { [string]: CFrame } = {}
 	for name, joint in state.joints do
@@ -407,17 +629,30 @@ local function step(state: State, dt: number)
 			current = state.source[name]
 		end
 		state.source[name] = current
+		results[name] = current
+	end
 
-		local result = current
-		local base = state.base[name]
-		if base then
-			result = result:Lerp(scaled(base.cf, state.scale), base.w)
+	-- Stance and footwork under everything else.
+	local locoPose, locoWeight = locomotion(state, dt, root, state.model:FindFirstChildOfClass("Humanoid"))
+	if locoPose then
+		for name, cf in locoPose do
+			local current = results[name]
+			if current then
+				results[name] = current:Lerp(cf, locoWeight)
+			end
 		end
-		local layered = layer(result, name, actionPose)
-		if previousPose then
-			layered = layer(result, name, previousPose):Lerp(layered, cross)
+	else
+		state.squareRoot = CFrame.identity
+	end
+
+	results = applyLayer(state, results, state.base, legsKept)
+	local based = results
+	results = applyLayer(state, based, actionPose, legsKept)
+	if previousPose then
+		local fading = applyLayer(state, based, previousPose, legsKept)
+		for name, cf in results do
+			results[name] = fading[name]:Lerp(cf, cross)
 		end
-		results[name] = layered
 	end
 
 	-- Two-hand grip, as strong as the two-handed layers currently are.
@@ -475,8 +710,13 @@ function Animator.attach(model: Model)
 		written = {},
 		source = {},
 		scale = 1,
+		gait = Gait.new(),
+		loco = 0,
+		ground = {},
+		squareRoot = CFrame.identity,
 	}
 	states[model] = state
+	refreshGroundFilter()
 	local function readScale()
 		local scale = model:GetAttribute("BodyScale")
 		state.scale = if typeof(scale) == "number" and scale > 0 then scale else 1
@@ -493,6 +733,7 @@ function Animator.attach(model: Model)
 	model.DescendantRemoving:Connect(markIfJoint)
 	model.Destroying:Once(function()
 		states[model] = nil
+		refreshGroundFilter()
 	end)
 end
 

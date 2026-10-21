@@ -82,19 +82,30 @@ local function compile(spec: PoseSpec): Pose
 end
 
 local specs: { [string]: PoseSpec } = {
-	-- Out of combat: the sword carried low at the right side, tip forward and down, so the
-	-- walk reads upright and natural. Only the sword arm is posed; the left arm swings
-	-- with the locomotion animation.
+	-- Stances sit on the footwork (client/Animator + Shared/Gait), which turns the hips ~20
+	-- (relaxed) to ~38 (fight) degrees left of the facing, right hip forward, and squares the
+	-- chest back up; a stance's Waist turns the chest from square, its Neck brings the eyes back.
+
+	-- Out of combat: the sword carried low in the right hand, blade angled forward and down
+	-- about 25 degrees (the tip clears the ground), edge down, clear of the leg. Only the sword arm is posed; the left arm
+	-- swings with the footwork.
 	Relaxed = {
-		RightArm = { upper = v(0.12, -1, 0.05), fore = v(0.05, -0.75, -0.65), blade = v(0.12, -0.4, -1), edge = DOWN },
+		RightArm = { upper = v(0.1, -1, -0.12), fore = v(0.08, -0.42, -0.9), blade = v(0.26, -0.5, -1), edge = DOWN },
 	},
 
-	-- In combat: a low guard, blade forward toward the opponent, edge down; both hands near
-	-- the hilt, torso square (not twisted) so the stance stays upright.
+	-- In combat: chudan, both hands on the hilt in front of the navel, blade toward the
+	-- opponent's throat, edge down. The chest turns a little off the facing with the hips (the
+	-- right shoulder forward), so the arms aim back across it.
 	Ready = {
-		RightArm = { upper = v(0.2, -0.9, -0.35), fore = v(0.05, -0.35, -1), blade = v(-0.2, 0.3, -1), edge = DOWN },
-		LeftArm = { upper = v(-0.15, -1, -0.2), fore = v(0.15, -0.6, -0.8) },
-		Waist = { 0, 6, 0 },
+		RightArm = {
+			upper = v(-0.33, -0.83, -0.44),
+			fore = v(-0.38, -0.38, -0.59),
+			blade = v(0.24, 0.5, -1),
+			edge = DOWN,
+		},
+		LeftArm = { upper = v(0.05, -0.85, -0.5), fore = v(0.5, -0.3, -0.8) },
+		Waist = { -4, 14, 0 },
+		Neck = { 2, -12, 0 },
 	},
 
 	-- Blade raised across the body, edge out, to catch strikes.
@@ -511,9 +522,15 @@ for name, spec in specs do
 	Poses[name] = compile(spec)
 end
 -- Poses keyed in Blender (art/anim) and exported as joint Transforms override the
--- hand-written ones of the same name.
+-- hand-written ones of the same name, except the stances authored for the footwork's turned
+-- hips (the baked ones stay as Legacy.<name>).
+local AUTHORED = { Ready = true, Relaxed = true }
 for name, pose in require(script.Parent.BakedPoses) do
-	Poses[name] = pose
+	if AUTHORED[name] then
+		Poses["Legacy." .. name] = pose
+	else
+		Poses[name] = pose
+	end
 end
 
 -- Reaction poses by weight (Kannagi's Damage01-04, GuardSuccess01-03, Hajiki Right / Left /
@@ -588,6 +605,16 @@ local derived: { [string]: () -> Pose } = {
 for name, build in derived do
 	if not Poses[name] then -- an authored (baked) pose of the same name wins
 		Poses[name] = build()
+	end
+end
+
+-- A pose that bends a knee owns that foot too: a missing ankle would otherwise keep the angle
+-- the footwork's leg IK gave it, tilting the foot off the ground.
+for _, pose in Poses do
+	for _, side in { "Right", "Left" } do
+		if pose[side .. "Knee"] and not pose[side .. "Ankle"] then
+			pose[side .. "Ankle"] = CFrame.identity
+		end
 	end
 end
 
