@@ -264,7 +264,11 @@ local function drawTable(): ({ OutcomeDef }, number, Pools)
 end
 
 local function currencyLabel(def: OutcomeDef): string
-	return `{def.amount} {LABEL[def.kind] or def.kind}`
+	local word = LABEL[def.kind] or def.kind
+	if def.amount == 1 then
+		word = string.gsub(word, "s$", "") -- "1 Whetstone", not "1 Whetstones"
+	end
+	return `{def.amount} {word}`
 end
 
 function ShopService.drawOdds(): { [string]: any }
@@ -1046,6 +1050,34 @@ end
 --------------------------------------------------------------------------------------------
 -- Publishing.
 
+-- Items on the player's wishlist (Ext.Wishlist, LobbyService "Wish") that are in today's shop:
+-- one calm notice a day, once they're past the title card (LobbyService republishes then).
+local function wishNotice(player: Player, d: Data, rotation: { [string]: any })
+	local wish = d.Ext.Wishlist
+	if typeof(wish) ~= "table" or player:GetAttribute("Entered") ~= true or d.Ext.WishDay == rotation.day then
+		return
+	end
+	local names = {}
+	for _, list in { rotation.coin or {}, rotation.gem or {}, rotation.featured.items or {} } do
+		for _, id in list do
+			local item = Catalog.get(id)
+			if wish[id] and d.Inventory[id] == nil and item and not table.find(names, item.name) then
+				table.insert(names, item.name)
+			end
+		end
+	end
+	if #names == 0 then
+		return
+	end
+	d.Ext.WishDay = rotation.day
+	local remote = progressRemote()
+	if remote then
+		remote:FireClient(player, "Notice", {
+			text = `From your wishlist, in the Store today: {table.concat(names, ", ")}`,
+		})
+	end
+end
+
 local function publishPlayer(player: Player, d: Data)
 	local setup = capsuleState(player)
 	if setup then
@@ -1069,8 +1101,10 @@ local function publishPlayer(player: Player, d: Data)
 	else
 		player:SetAttribute("Capsule", nil)
 	end
-	local _, price = featuredFor(d, ShopService.rotation())
+	local rotation = ShopService.rotation()
+	local _, price = featuredFor(d, rotation)
 	player:SetAttribute("ShopFeaturedPrice", price)
+	wishNotice(player, d, rotation)
 	trackRanked(player, d)
 end
 
