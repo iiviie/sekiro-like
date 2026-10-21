@@ -105,13 +105,13 @@ local N = {
 	-- uncommon items); an owned item pays Shards.Dup instead.
 	Shrine = {
 		Outcomes = {
-			{ key = "coins100", kind = "Coins", amount = 100, weight = 32 },
-			{ key = "coins250", kind = "Coins", amount = 250, weight = 14 },
-			{ key = "stones2", kind = "Whetstones", amount = 2, weight = 18 },
-			{ key = "stones5", kind = "Whetstones", amount = 5, weight = 6 },
-			{ key = "gems10", kind = "Gems", amount = 10, weight = 10 },
-			{ key = "gems25", kind = "Gems", amount = 25, weight = 4 },
-			{ key = "shards10", kind = "Shards", amount = 10, weight = 6 },
+			{ key = "coins100", kind = "Coins", amount = 100, weight = 40 },
+			{ key = "coins250", kind = "Coins", amount = 250, weight = 12 },
+			{ key = "stones1", kind = "Whetstones", amount = 1, weight = 15 },
+			{ key = "stones3", kind = "Whetstones", amount = 3, weight = 3 },
+			{ key = "gems5", kind = "Gems", amount = 5, weight = 8 },
+			{ key = "gems20", kind = "Gems", amount = 20, weight = 2 },
+			{ key = "shards10", kind = "Shards", amount = 10, weight = 10 },
 			{ key = "common", kind = "item", weight = 6 },
 			{ key = "rare", kind = "item", weight = 3 },
 			{ key = "epic", kind = "item", weight = 1 },
