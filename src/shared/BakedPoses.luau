@@ -14,7 +14,6 @@ for _, rows in
 	{
 		require(script.Parent.Baked.PosesK1),
 		require(script.Parent.Baked.PosesK2),
-		require(script.Parent.Baked.PosesK3),
 		require(script.Parent.Baked.PosesLegacy1),
 	}
 do
