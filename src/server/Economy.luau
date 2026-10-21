@@ -231,7 +231,8 @@ local function progress(d: Data, rule: Rule): (number, number)
 	if rule.stat then
 		return (d :: any)[rule.stat] or 0, rule.atLeast or 1
 	elseif rule.boss then
-		return if (d.BossClears[rule.boss] or 0) > 0 then 1 else 0, 1
+		local clears = if rule.noHit then d.BossNoHit else d.BossClears
+		return if (clears[rule.boss] or 0) > 0 then 1 else 0, 1
 	elseif rule.stars then
 		local have = 0
 		for _, id in Bosses.List do
