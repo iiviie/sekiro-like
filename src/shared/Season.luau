@@ -83,7 +83,8 @@ local function item(id: string): Reward
 	return { kind = "item", id = id }
 end
 
--- Season 1 track. Premium pays back 500 gems (enough for the next pass), Whetstones, Shrine
+-- Season 1 track. Premium pays back 500 gems (premium is also 450 gems, Catalog pass.Premium,
+-- so it buys the next season's), Whetstones, Shrine
 -- Draws, two blades, a nameplate and the Lightning Call intro (tier 18); the capstone is the season
 -- blade with its finisher and title. Free pays 100 gems, the Pilgrim's Cedar blade, the Pilgrim
 -- title and the Wanderer's Kasa intro (tier 15) among 12 rewards.
@@ -288,16 +289,6 @@ local DAILY = {
 			xp = 80,
 			pass = 50,
 		},
-		{ id = "royale2", text = "Fight 2 royales", event = "Royale", goal = 2, coins = 110, xp = 80, pass = 50 },
-		{
-			id = "top3",
-			text = "Finish a royale in the top 3",
-			event = "Top3",
-			goal = 1,
-			coins = 150,
-			xp = 100,
-			pass = 50,
-		},
 	},
 	finish = {
 		{ id = "kill3", text = "Cut down 3 fighters", event = "Kill", goal = 3, coins = 120, xp = 80, pass = 50 },
@@ -423,6 +414,23 @@ local WEEKLY = {
 }
 -- END WEEKLY
 
+-- Retired dailies: no longer drawn (the "mode" daily always pulls you into a duel or a boss
+-- trial, review round 1), kept so a day's set saved before the change still reads.
+local RETIRED = {
+	mode = {
+		{ id = "royale2", text = "Fight 2 royales", event = "Royale", goal = 2, coins = 110, xp = 80, pass = 50 },
+		{
+			id = "top3",
+			text = "Finish a royale in the top 3",
+			event = "Top3",
+			goal = 1,
+			coins = 150,
+			xp = 100,
+			pass = 50,
+		},
+	},
+}
+
 local DAILY_GROUPS = { "skill", "mode", "finish" }
 local WEEKLY_GROUPS = { "skill", "duel", "boss", "royale", "finish" }
 local WEEKLY_STONES = 1
@@ -451,6 +459,7 @@ local function register(pools: { [string]: { any } }, weekly: boolean)
 	end
 end
 register(DAILY, false)
+register(RETIRED, false)
 register(WEEKLY, true)
 
 function Season.mission(id: string?): Mission?

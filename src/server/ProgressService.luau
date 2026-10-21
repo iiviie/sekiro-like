@@ -9,8 +9,9 @@
 -- Anti-farm: a fighter's kill coins pay once per match (finishing someone who rose from a
 -- cut-down pays XP only); duels against the same human pay less after the second that day
 -- (EconomyConfig.AntiFarm); Whetstones and Shrine Draws from wins are capped per day; bots
--- cut down in a royale pay half coins, and wins against bots only pay half after the first
--- few of the day (AntiFarm.BotRoyale).
+-- cut down in a royale or a duel pay half coins, and wins against bots only (a bot royale,
+-- a duel with a bot) pay half after the first few of the day (AntiFarm.BotRoyale; royales
+-- and duels count separately). A season's first fight lifts the pass to tier 1 (PassService).
 --
 -- Remotes (server -> one client), on ReplicatedStorage.Remotes.Progress:
 --   "Reward"  { xp, coins, reason }         a toast
@@ -206,6 +207,7 @@ function ProgressService.matchEnded(places: { [Player]: number }, fighters: numb
 			funnel(player, 5)
 			reward(player, "Played", "Match fought")
 			passXP(player, EconomyConfig.Pass.Played, "Match fought")
+			PassService.firstFight(player)
 			trialEvent(player, "Played")
 			trialEvent(player, "Royale")
 			-- Placement among every fighter (bots count): outlasting them is worth something.
@@ -254,6 +256,12 @@ export type DuelResult = { won: boolean, rounds: number, score: string, opponent
 -- "fight" trial but not the royale-only ones (top 3, win a royale). The third and later duel
 -- against the same human in a day pays less (StatsService.recordDuel counts them).
 function ProgressService.duelEnded(results: { [Player]: DuelResult })
+	-- DuelService reports its human duellists only: one result means the other side was a bot
+	-- (or a human who left mid-duel, which is rare and only matters after the day's first wins).
+	local humans = 0
+	for _ in results do
+		humans += 1
+	end
 	for player, result in results do
 		if player.Parent then
 			local factor = StatsService.lastDuelFactor(player)
@@ -262,6 +270,7 @@ function ProgressService.duelEnded(results: { [Player]: DuelResult })
 			trialEvent(player, "Played")
 			if factor > 0 then
 				passXP(player, EconomyConfig.Pass.Played * factor, "Duel fought")
+				PassService.firstFight(player)
 				trialEvent(player, "Duel")
 			end
 			local perRound = Progression.Rewards.DuelRound.XP or 0
@@ -274,7 +283,14 @@ function ProgressService.duelEnded(results: { [Player]: DuelResult })
 				)
 			end
 			if result.won and factor > 0 then
-				reward(player, "DuelWin", "Duel won", factor)
+				-- A duel won against a bot pays WinFactor of its coins and XP after the day's first
+				-- FullWinsPerDay (AntiFarm.BotRoyale), like a bot royale; Pass XP and extras unchanged.
+				local bots = EconomyConfig.AntiFarm.BotRoyale
+				local winFactor = factor
+				if humans <= 1 and Economy.dayCount(player, "botDuelWins", 1) >= bots.FullWinsPerDay then
+					winFactor = factor * bots.WinFactor
+				end
+				reward(player, "DuelWin", "Duel won", winFactor)
 				passXP(player, EconomyConfig.Pass.Win * factor, "Duel won")
 				trialEvent(player, "DuelWin")
 				if factor >= 1 then
@@ -323,6 +339,7 @@ function ProgressService.bossEnded(player: Player, result: BossResult): boolean
 	funnel(player, 5)
 	pay(rewards.Fought, 1, "Boss fought")
 	passXP(player, EconomyConfig.Pass.Played, "Boss fought")
+	PassService.firstFight(player)
 	trialEvent(player, "Played")
 	trialEvent(player, "BossFought")
 	if result.lives > 0 then
@@ -439,10 +456,8 @@ local function onKill(victim: Combatant, killer: Combatant?, deathblow: boolean)
 	if other and (killer :: Combatant).model:GetAttribute("InDuel") == true then
 		factor = EconomyConfig.repeatFactor(StatsService.duelsToday(player, other))
 	end
-	-- A bot cut down in a royale pays fewer coins (AntiFarm.BotRoyale; XP is unchanged).
-	local coinFactor = if other == nil and (killer :: Combatant).model:GetAttribute("InDuel") ~= true
-		then EconomyConfig.AntiFarm.BotRoyale.KillCoins
-		else 1
+	-- A bot cut down in a royale or a duel pays fewer coins (AntiFarm.BotRoyale; XP is unchanged).
+	local coinFactor = if other == nil then EconomyConfig.AntiFarm.BotRoyale.KillCoins else 1
 	if d then
 		d.Kills += 1
 		if deathblow then

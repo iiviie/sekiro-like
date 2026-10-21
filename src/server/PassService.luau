@@ -8,6 +8,7 @@
 --   PassService.addXP(player, amount, reason, quiet?) -> number      Pass XP actually added
 --   PassService.missionEvent(player, event, amount?) -> { Payout }   missions it completed
 --   PassService.tier(player) -> number
+--   PassService.firstFight(player)        a season's first fight: tops the pass up to tier 1
 --
 -- Pass XP comes from missions (Season) and a trickle from every fight (ProgressService, per
 -- EconomyConfig.Pass), x2 in a season's final week and none outside a live season. Rewards are
@@ -19,6 +20,7 @@
 -- Client requests: ReplicatedStorage.Remotes.PassAction (rate-limited)
 --   "Claim" track ("free" | "premium") tier     "ClaimAll"     "Reroll" missionId
 --   "Buy" productKey ("pass.Premium" | "pass.TierSkip" | "pass.Tiers10")
+--   "BuyGems"  this season's premium for its Catalog gem price (pass.Premium price.gems)
 -- Feedback: Remotes.Progress "Mission" { id, text, weekly, pass, coins, xp }, "PassTier"
 --   { tier, claimable }, "PassPremium" { claimable }, "Notice" { text }.
 --
@@ -55,6 +57,7 @@ type PassState = {
 	premium: { [string]: boolean },
 	lastTier: number,
 	premiumSeen: boolean,
+	firstFight: string, -- the season whose first-fight top-up was paid ("" = none yet)
 	daily: { day: number, ids: { string }, rerolled: boolean },
 	weekly: { week: number, ids: { string }, progress: { [string]: number } },
 	archive: { [string]: { xp: number, tier: number, premium: boolean, at: number } },
@@ -108,6 +111,9 @@ local function stateOf(d: Data): PassState
 		st.lastTier = 0
 	end
 	st.premiumSeen = st.premiumSeen == true
+	if typeof(st.firstFight) ~= "string" then
+		st.firstFight = ""
+	end
 	if typeof(st.daily) ~= "table" or typeof(st.daily.ids) ~= "table" then
 		st.daily = { day = -1, ids = {}, rerolled = false }
 	end
@@ -284,6 +290,24 @@ function PassService.addXP(player: Player, amount: number, reason: string, quiet
 	end
 	Economy.grant(player, "PassXP", gained, reason, "Gameplay", quiet)
 	return gained
+end
+
+-- "First steps on the path": the first fight of a season (any mode, called by ProgressService
+-- after its Pass XP) lifts the pass to EconomyConfig.Pass.FirstFightTier, once per season, so
+-- a new player's first look at the pass is a tier reached, not a sales button. Not multiplied.
+function PassService.firstFight(player: Player)
+	local d, st = stateFor(player)
+	local _, state = Season.at()
+	if not d or not st or st.season == "" or st.firstFight == st.season or state ~= "live" then
+		return
+	end
+	st.firstFight = st.season
+	local need = math.min(EconomyConfig.Pass.FirstFightTier * Season.TierXP, Season.MaxXP) - d.PassXP
+	if need > 0 then
+		Economy.grant(player, "PassXP", need, "First steps on the path", "Gameplay")
+	else
+		StatsService.commit(player)
+	end
 end
 
 function PassService.tier(player: Player): number
@@ -487,6 +511,38 @@ local function buy(player: Player, d: Data, st: PassState, key: string)
 	Monetization.prompt(player, key)
 end
 
+-- This season's premium for gems (the Catalog item's gem price), with the same checks as the
+-- Robux path; the client confirms first (balance before and after). The thank-you reveal is
+-- the Robux one (Progress "Purchased").
+local function buyWithGems(player: Player, d: Data, st: PassState)
+	local def, state = Season.at()
+	local item = Catalog.get(Season.Products.Premium)
+	local gems = item and item.price and item.price.gems
+	if not def or state ~= "live" or not gems then
+		notice(player, "No season is running right now.")
+		return
+	end
+	if premiumOwned(d, st) then
+		notice(player, "You already have this season's premium pass.")
+		return
+	end
+	if not StatsService.canTransact(player) then
+		notice(player, Text.ProgressFailed)
+		return
+	end
+	if d.Gems < gems then
+		notice(player, `Premium costs {gems} gems: you have {d.Gems}.`)
+		return
+	end
+	if not Economy.spend(player, "Gems", gems, `Pass {def.id} premium`, Season.Products.Premium) then
+		notice(player, `Premium costs {gems} gems: you have {d.Gems}.`)
+		return
+	end
+	d.SeasonPremium[def.id] = os.time()
+	StatsService.commit(player)
+	task.defer(tell, player, "Purchased", { key = Season.Products.Premium, items = {}, equipped = {} })
+end
+
 local function onAction(player: Player, verb: unknown, a: unknown, b: unknown)
 	if typeof(verb) ~= "string" or not allowed(player) then
 		return
@@ -538,6 +594,8 @@ local function onAction(player: Player, verb: unknown, a: unknown, b: unknown)
 		if typeof(a) == "string" then
 			buy(player, d, st, a)
 		end
+	elseif verb == "BuyGems" then
+		buyWithGems(player, d, st)
 	end
 end
 
@@ -553,8 +611,9 @@ end
 
 -- Studio only: ServerStorage.PassTest (BindableFunction) for playtests.
 --   "state" -> JSON     "xp" n     "event" name n     "clock" offsetSeconds     "reset"
---   "buy" productKey (mock receipt)     "claimAll"     "rollover" (archive + reset this season,
---   paying what's unclaimed, as a calendar rollover does)
+--   "buy" productKey (mock receipt)     "buyGems" (premium for gems, as the Pass button)
+--   "claimAll"     "rollover" (archive + reset this season, paying what's unclaimed, as a
+--   calendar rollover does)
 local function testHook()
 	if not RunService:IsStudio() then
 		return
@@ -591,6 +650,10 @@ local function testHook()
 			return "reset"
 		elseif cmd == "buy" then
 			return tostring(Monetization.mockReceipt(player, tostring(a)))
+		elseif cmd == "buyGems" then
+			StatsService.markTest(player)
+			buyWithGems(player, d, st)
+			return HttpService:JSONEncode({ premium = premiumOwned(d, st), gems = d.Gems })
 		elseif cmd == "rollover" then
 			StatsService.markTest(player)
 			local before = { Coins = d.Coins, Gems = d.Gems, Whetstones = d.Whetstones, Draws = d.Draws }
