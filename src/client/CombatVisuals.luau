@@ -795,7 +795,10 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			local startedAt = if alreadyPlaying and swing then swing.startedAt else now()
 			LocalCombat.swing = { kind = kind, startedAt = startedAt, hitAt = data.hitAt, confirmed = true }
 		end
-		if not alreadyPlaying and not data.boss then
+		-- Our own predicted swing is re-timed where it stands, never restarted: a restart rewinds the
+		-- blade to its first frame a round trip after the click.
+		local retimed = isLocal(model) and Animator.retime(model, kind, remaining)
+		if not alreadyPlaying and not retimed and not data.boss then
 			playClip(model, kind, remaining)
 		end
 
@@ -1190,6 +1193,14 @@ function CombatVisuals.start()
 				-- Hold a named pose as the stance until released (clip = pose name).
 				heldTestPose = clip
 				Animator.setBase(model, clip)
+			elseif command == "legacyChain" then
+				Animator.legacyChain = clip == "on" -- A/B the old clip chaining
+			elseif command == "trace" then
+				-- Start (model given) or stop and collect (nil) a per-frame trace of the animator.
+				local log = Animator.traceLog
+				Animator.traceModel = model
+				Animator.traceLog = {}
+				return log
 			elseif command == "release" then
 				heldTestPose = nil
 				Animator.unfreeze(model)

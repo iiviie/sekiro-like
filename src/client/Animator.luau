@@ -31,6 +31,13 @@ type Action = {
 	fadeOut: number,
 	t: number,
 	impactAt: number, -- clip time the strike lands (0 for clips without a windup)
+	-- Playback speed until impactAt: a re-timed windup (Animator.retime) speeds up or slows down
+	-- from where it is instead of restarting.
+	rate: number,
+	-- The pose on screen when this clip replaced another (unscaled joint Transforms): the first
+	-- segment blends from it instead of from the stance, so chained swings flow on.
+	from: PoseFrames?,
+	fromGrip: number, -- how two-handed the grip was at that moment
 }
 
 type State = {
@@ -42,6 +49,11 @@ type State = {
 	baseName: string?,
 	move: number, -- 0..1, how much the fighter is moving: legs follow the walk cycle
 	action: Action?,
+	-- The clip `action` replaced, still playing underneath for a short crossfade so the motion
+	-- keeps its momentum through the switch.
+	previous: Action?,
+	crossT: number,
+	grip: number, -- last frame's two-hand grip weight
 	freezeUntil: number,
 	frozenAction: Action?, -- the clip a hitstop froze; a clip started later plays on
 	pinned: boolean, -- tooling froze it unconditionally (Animator.freeze)
@@ -53,6 +65,12 @@ type State = {
 local BASE_BLEND_RATE = 14
 local MOVE_BLEND_RATE = 10
 local MOVING_SPEED = 2.5 -- studs/s
+-- A clip that replaces one still on screen crossfades out of it over this long (on top of
+-- blending its first key in from the replaced pose).
+local CROSSFADE = 0.08
+-- The two-hand grip weight changes by at most this much per second, so a stance change (Relaxed
+-- to Ready as a fight starts) brings the left hand to the hilt instead of snapping it there.
+local GRIP_RATE = 5
 -- While moving, attack poses leave these to the walk cycle, so the legs keep stepping
 -- under a swing instead of freezing mid-stride.
 local LOWER_BODY = {
@@ -70,7 +88,14 @@ local LEFT_GRIP = Vector3.new(0, -0.05, 0.38)
 -- The left elbow points down, out and slightly back (in upper torso space).
 local LEFT_POLE = Vector3.new(-1, -0.7, 0.35)
 
-local Animator = {}
+local Animator = {
+	-- Studio tooling (CombatVisuals' AnimTest "trace"): when set, every frame and every play()
+	-- on this model is logged into traceLog.
+	traceModel = nil :: Model?,
+	traceLog = {} :: { any },
+	-- Studio A/B: true restores the old chaining (each clip blends in from the stance).
+	legacyChain = false,
+}
 
 local states: { [Model]: State } = {}
 
@@ -118,16 +143,18 @@ local function blendInto(out: { [string]: Weighted }, from: PoseFrames?, to: Pos
 	end
 end
 
--- Samples the action layer. Returns nil once the clip has fully faded out.
-local function sampleAction(action: Action): ({ [string]: Weighted }?, boolean)
+-- Samples the action layer. Returns nil once the clip has fully faded out. The third value
+-- is how far the first segment has blended in (1 past it).
+local function sampleAction(action: Action): ({ [string]: Weighted }?, boolean, number)
 	local keys = action.keys
 	local t = action.t
 	local out: { [string]: Weighted } = {}
 
 	local first = keys[1]
 	if t <= first.at then
-		blendInto(out, nil, first.pose, ease(first.ease, t / math.max(first.at, 1e-3)), 1)
-		return out, first.trail
+		local alpha = ease(first.ease, t / math.max(first.at, 1e-3))
+		blendInto(out, action.from, first.pose, alpha, 1)
+		return out, first.trail, alpha
 	end
 	for i = 2, #keys do
 		local key = keys[i]
@@ -135,7 +162,7 @@ local function sampleAction(action: Action): ({ [string]: Weighted }?, boolean)
 			local previous = keys[i - 1]
 			local alpha = ease(key.ease, (t - previous.at) / math.max(key.at - previous.at, 1e-3))
 			blendInto(out, previous.pose, key.pose, alpha, 1)
-			return out, key.trail
+			return out, key.trail, 1
 		end
 	end
 
@@ -143,13 +170,27 @@ local function sampleAction(action: Action): ({ [string]: Weighted }?, boolean)
 	local after = t - last.at - action.hold
 	if after <= 0 then
 		blendInto(out, nil, last.pose, 1, 1)
-		return out, false
+		return out, false, 1
 	end
 	if after >= action.fadeOut then
-		return nil, false
+		return nil, false, 1
 	end
 	blendInto(out, nil, last.pose, 1, 1 - ease("inOut", after / action.fadeOut))
-	return out, false
+	return out, false, 1
+end
+
+-- Advances a clip by `dt`, at its re-timed rate until the strike.
+local function advance(action: Action, dt: number)
+	local t = action.t
+	if t < action.impactAt and action.rate ~= 1 then
+		local nextT = t + dt * action.rate
+		if nextT > action.impactAt then
+			nextT = action.impactAt + (nextT - action.impactAt) / action.rate
+		end
+		action.t = nextT
+	else
+		action.t = t + dt
+	end
 end
 
 -- Trails are colour-coded by what's swinging: steel-white for slashes, red for perilous.
@@ -236,7 +277,10 @@ local function solveGrip(state: State, results: { [string]: CFrame }, w: number)
 	-- Shoulder: point the upper arm at the elbow, with its hinge axis across the arm plane.
 	local u = (elbow - shoulder).Unit
 	local v = (wrist - elbow).Unit
-	local hinge = u:Cross(v)
+	-- The bend plane's normal. u x v points the same way while the arm is bent but shrinks to
+	-- noise as it straightens, flipping the upper arm's twist frame to frame; pole x dir is the
+	-- same axis without that.
+	local hinge = pole:Cross(dir)
 	hinge = if hinge.Magnitude > 1e-4 then hinge.Unit else pole:Cross(u).Unit
 	local a = upperRest.Unit
 	local b = (Vector3.xAxis - a * a:Dot(Vector3.xAxis)).Unit
@@ -290,29 +334,69 @@ local function step(state: State, dt: number)
 	end
 
 	-- Action layer.
+	-- Hitstop only holds the clip that was playing when it hit, and never a windup, so a
+	-- swing started during a freeze (a riposte off a deflect) still lands on hitAt.
+	local clock = os.clock()
+	local function frozen(clip: Action): boolean
+		return clock < state.freezeUntil and (state.pinned or (clip == state.frozenAction and clip.t >= clip.impactAt))
+	end
 	local actionPose: { [string]: Weighted }? = nil
 	local trailOn = false
+	local blendIn = 1
 	local action = state.action
 	if action then
-		-- Hitstop only holds the clip that was playing when it hit, and never a windup, so a
-		-- swing started during a freeze (a riposte off a deflect) still lands on hitAt.
-		local frozen = os.clock() < state.freezeUntil
-			and (state.pinned or (action == state.frozenAction and action.t >= action.impactAt))
-		if not frozen then
-			action.t += dt
+		if not frozen(action) then
+			advance(action, dt)
 		end
-		actionPose, trailOn = sampleAction(action)
+		actionPose, trailOn, blendIn = sampleAction(action)
 		if not actionPose then
 			state.action = nil
 		end
 	end
+	-- The replaced clip plays on under a short crossfade, so the switch keeps its momentum.
+	local previousPose: { [string]: Weighted }? = nil
+	local cross = 1
+	local previous = state.previous
+	if previous then
+		state.crossT += dt
+		if not frozen(previous) then
+			advance(previous, dt)
+		end
+		local previousTrail
+		previousPose, previousTrail = sampleAction(previous)
+		if previousPose and state.crossT < CROSSFADE then
+			cross = ease("inOut", state.crossT / CROSSFADE)
+			trailOn = trailOn or previousTrail
+		else
+			previousPose = nil
+			state.previous = nil
+		end
+	end
 	setTrail(state.model, trailOn, action and action.name)
+	if Animator.traceModel == state.model then
+		table.insert(Animator.traceLog, {
+			c = clock,
+			a = action and action.name,
+			t = action and action.t,
+			w = actionPose and actionPose.RightShoulder and actionPose.RightShoulder.w or 0,
+			x = cross,
+		})
+	end
 
 	local root = state.model:FindFirstChild("HumanoidRootPart")
 	local velocity = if root and root:IsA("BasePart") then root.AssemblyLinearVelocity else Vector3.zero
 	local moving = if Vector3.new(velocity.X, 0, velocity.Z).Magnitude > MOVING_SPEED then 1 else 0
 	state.move += (moving - state.move) * (1 - math.exp(-dt * MOVE_BLEND_RATE))
 	local legsKept = 1 - state.move
+
+	local function layer(result: CFrame, name: string, pose: { [string]: Weighted }?): CFrame
+		local layered = pose and pose[name]
+		if layered then
+			local w = if LOWER_BODY[name] then layered.w * legsKept else layered.w
+			return result:Lerp(scaled(layered.cf, state.scale), w)
+		end
+		return result
+	end
 
 	local results: { [string]: CFrame } = {}
 	for name, joint in state.joints do
@@ -329,24 +413,35 @@ local function step(state: State, dt: number)
 		if base then
 			result = result:Lerp(scaled(base.cf, state.scale), base.w)
 		end
-		local layered = actionPose and actionPose[name]
-		if layered then
-			local w = if LOWER_BODY[name] then layered.w * legsKept else layered.w
-			result = result:Lerp(scaled(layered.cf, state.scale), w)
+		local layered = layer(result, name, actionPose)
+		if previousPose then
+			layered = layer(result, name, previousPose):Lerp(layered, cross)
 		end
-		results[name] = result
+		results[name] = layered
 	end
 
 	-- Two-hand grip, as strong as the two-handed layers currently are.
-	local actionWeight = if actionPose and actionPose.RightShoulder then actionPose.RightShoulder.w else 0
 	local baseLayer = state.base.RightShoulder
 	local baseTwo = if baseLayer
 			and state.baseName
 			and ClipLibrary.TwoHandedStances[state.baseName]
 		then baseLayer.w
 		else 0
-	local actionTwo = if action and action.twoHanded then 1 else 0
-	local grip = actionWeight * actionTwo + (1 - actionWeight) * baseTwo
+	local function gripOf(clip: Action?, pose: { [string]: Weighted }?): number
+		local weight = if pose and pose.RightShoulder then pose.RightShoulder.w else 0
+		local two = if clip and clip.twoHanded then 1 else 0
+		return weight * two + (1 - weight) * baseTwo
+	end
+	local grip = gripOf(action, actionPose)
+	if action and action.from and blendIn < 1 then
+		grip = action.fromGrip + (grip - action.fromGrip) * blendIn -- from the grip on screen
+	end
+	if previousPose then
+		local from = gripOf(previous, previousPose)
+		grip = from + (grip - from) * cross
+	end
+	grip = state.grip + math.clamp(grip - state.grip, -dt * GRIP_RATE, dt * GRIP_RATE)
+	state.grip = grip
 	if grip > 1e-3 and results.LeftShoulder and results.RightShoulder then
 		solveGrip(state, results, grip)
 	end
@@ -371,6 +466,9 @@ function Animator.attach(model: Model)
 		baseName = nil,
 		move = 0,
 		action = nil,
+		previous = nil,
+		crossT = 0,
+		grip = 0,
 		freezeUntil = 0,
 		frozenAction = nil,
 		pinned = false,
@@ -490,6 +588,33 @@ function Animator.play(model: Model, clipName: string, windup: number?, freeze: 
 		})
 	end
 
+	if Animator.traceModel == model then
+		local previous = state.action
+		table.insert(Animator.traceLog, {
+			c = os.clock(),
+			play = clipName,
+			windup = windup,
+			prev = previous and previous.name,
+			prevT = previous and previous.t,
+			src = debug.traceback("", 2),
+		})
+	end
+	-- Replacing a clip still on screen (a chained swing, a reaction cutting in): the new clip
+	-- starts from the pose being shown, not the stance, and the old one plays on underneath
+	-- for a short crossfade.
+	local replaced = state.action
+	local from: PoseFrames? = nil
+	if replaced and not Animator.legacyChain then
+		from = {}
+		local inverse = 1 / state.scale
+		for joint, cf in state.written do
+			(from :: PoseFrames)[joint] = if state.scale == 1 then cf else cf.Rotation + cf.Position * inverse
+		end
+		state.previous = replaced
+		state.crossT = 0
+	else
+		state.previous = nil
+	end
 	state.action = {
 		name = clipName,
 		twoHanded = clip.twoHanded == true,
@@ -498,7 +623,24 @@ function Animator.play(model: Model, clipName: string, windup: number?, freeze: 
 		fadeOut = clip.fadeOut or 0.2,
 		t = 0,
 		impactAt = impactAt,
+		rate = 1,
+		from = from,
+		fromGrip = state.grip,
 	}
+end
+
+-- The server confirmed the clip that's already playing (a predicted swing) with a slightly
+-- different hit time: speed it up or slow it down from where it is so the strike still lands
+-- `windup` seconds from now, instead of restarting it. False when that clip isn't in its windup.
+function Animator.retime(model: Model, clipName: string, windup: number): boolean
+	local state = states[model]
+	local action = state and state.action
+	if not action or action.name ~= clipName or action.t >= action.impactAt or Animator.legacyChain then
+		return false
+	end
+	local left = action.impactAt - action.t
+	action.rate = math.clamp(left / math.max(windup, 1e-3), 0.5, 2.5)
+	return true
 end
 
 -- Fades the current clip out early (feints, interrupts).

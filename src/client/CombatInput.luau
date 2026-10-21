@@ -170,6 +170,15 @@ local function predictSlash()
 		return
 	end
 	local sequence = Config.Combo.Sequence
+	-- Slashes chained out of a recovery start on the server alone (we only predict from Idle), so
+	-- take the string's position from the server's latest swing: guessing on from our own count
+	-- predicts the wrong slash, and the server's Windup then swaps the clip a round trip later.
+	local confirmed = LocalCombat.swing
+	if confirmed and confirmed.confirmed then
+		local spec = Weapons.spec(weapon, confirmed.kind)
+		comboIndex = if confirmed.kind == "Overhead" then 3 else table.find(sequence, confirmed.kind) or 0
+		comboUntil = t + (confirmed.hitAt - serverNow) + Config.Net.ResolveGrace + spec.recovery + Config.Combo.Window
+	end
 	if t > comboUntil or comboIndex >= #sequence then
 		comboIndex = 0
 	end
