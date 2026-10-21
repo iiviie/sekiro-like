@@ -34,11 +34,13 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   readout says how many milliseconds before impact you pressed and what it earned. Fall off the island and you're put
   back. Two boards show **Total Wins** and **Ranked Rating** (OrderedDataStores once published; this server's players
   until then), and every player carries a title with their wins and rank.
-- **Menus** (bottom bar, painted icons): **How to fight** (the rules in plain words), **Arsenal** (weapons to equip or
-  unlock with coins, and **Blades**: cosmetic skins), **Trials** (three daily goals), **Store** (how coins are earned; gem
-  packs once developer products exist), **Profile** (wins, losses, W/L, kills, deathblows, most used weapons, ranked
-  season tier with its crest), **Rewards** (7-day daily streak, gems on day 7), **Settings** (camera shake, hitstop,
-  controls hint). Top left: your **Mastery** level and XP bar.
+- **Menus** (bottom bar, painted icons; a left rail on phones): **How to fight** (the rules in plain words),
+  **Locker** (equip and unlock weapons, blades and blade lines, finishers, outfits, titles, banners, nameplates),
+  **Pass** (the season pass and its missions), **Store** (daily shop, gems, offers, the shrine), **Profile** (wins,
+  losses, W/L, kills, deathblows, most used weapons, ranked season tier with its crest and where the season-end reset
+  will put you), **Rewards** (7-day daily streak), **Settings** (camera shake, hitstop, menu sound, reduce motion).
+  Top left: your **Mastery** level and XP bar; top right: coins, gems and Whetstones. See
+  [Progression and monetisation](#progression-and-monetisation).
 - **Match:** queued players plus bots filling up to six fighters start on a circle around the courtyard. Bots match the
   least experienced human: **Ronin** (Novice) for a player's first 3 matches, **Samurai** (Adept), **Kensei** (Master,
   with rare blades) for proven players; only one bot fights a given human at a time. About one match in three has an
@@ -53,7 +55,7 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   in view of the lobby. Each round both start on their marks, full and protected through a 3 s countdown; there is no
   resurrection, the first to fall loses the round, and a round still going after 75 s goes to whoever has more
   vitality. The Coach still prompts new players. Afterwards both return to the lobby: deflects, kills, deathblows and
-  Trials count as in the royale, a duel pays "Duel fought" plus XP per round taken, a win pays 60 XP and 25 coins,
+  missions count as in the royale, a duel pays "Duel fought" plus XP per round taken, a win pays 60 XP and 25 coins,
   and it counts toward Played (bot tier, Coach, newcomer assist) and the separate duel wins and losses. A duel between
   two humans is a ranked result: one full-weight Elo game on the ranked rating (`Config.Rating.K`); duels against bots
   never move it. Leaving mid-duel forfeits. While you're on a pad or in a duel you're held out of the royale queue.
@@ -72,7 +74,8 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   resurrection and your gourd; a boss's blow on your broken guard is a hit, not a deathblow. The tutorial trainer
   (Shikigami) runs Kannagi's staged lessons, one per deathblow: attack, deflect, double deflect, jump the sweep,
   Mikiri the thrust, then two real lives. A fight pays "Boss fought", XP per life taken, a clear (× stars) and a
-  first-clear bonus once per boss (`Config.Bosses.Rewards`, clears saved in `BossClears`), with the report card
+  first-clear bonus once per boss (`EconomyConfig.N.Boss`, clears saved in `BossClears`); a clear without losing any
+  vitality after the countdown also earns that boss's gold blade (`BossNoHit`), with the report card
   ("Trial cleared", counting the deathblows that took the boss's lives). The camera locks on to the boss as the fight
   starts. There's one boss terrace, so one trial runs at a time: picking while it's taken puts you in line (the picker
   says who's fighting and your place; LEAVE LINE gives it up) and your trial starts by itself when the arena frees up.
@@ -83,22 +86,19 @@ Press Play. A letterboxed title card (a slow dolly toward the shrine) shows firs
   [Bosses.luau](src/shared/Bosses.luau) (over the generated `Shared/KannagiMoves` data), and the picker and boss bar
   are [BossHUD.luau](src/client/BossHUD.luau) with animation in [BossVisuals.luau](src/client/BossVisuals.luau).
 - **Rewards as they happen.** Every deflect, kill, deathblow and placement pays XP (and kills pay coins) with a toast on
-  the right; levels pay coins; a finished Trial pays at once; your own kills splash 斬 with a streak count.
+  the right; levels pay coins; a finished mission pays at once; your own kills splash 斬 with a streak count.
 - **Results:** a victory banner, then a **report card** (your place, cut downs, deathblows, deflects, perfect deflects,
   coins and XP earned, the Mastery bar), ranked rating (pairwise Elo against the other humans you placed above or below;
-  bots don't count), and the next royale ~14 s later if you're still queued.
+  bots don't count), and the next royale ~14 s later if you're still queued. When a human placed in the top three,
+  everyone then sees a **podium** for 5 s: the top three on three steps in front of their banners, with title, name
+  and blade ([Podium.luau](src/client/Podium.luau); it waits for your report card to close).
 
 Everything persists with DataStores in `PlayerData_v2` as a schema-3 profile under a session lock
 ([StatsService.luau](src/server/StatsService.luau): v2 saves and old `PlayerStats_v1` Wins/Kills migrate on load,
 unknown fields and item ids are kept). A profile that can't load leaves you on session-only defaults with a notice
 in the lobby, and purchases and spends are off for that session. Studio uses an in-memory store unless
-`ServerStorage.UseRealDataStore` is set before Play. **Economy:** every item is in
-[Catalog.luau](src/shared/Catalog.luau) (prices, unlock rules, sources), every pacing number in
-[EconomyConfig.luau](src/shared/EconomyConfig.luau); [Economy.luau](src/server/Economy.luau) owns the wallet (coins,
-gems, earn-only Whetstones, shards, Shrine Draws, pass XP), inventory and loadout, and
-[Monetization.luau](src/server/Monetization.luau) the Robux side (idempotent receipts, game passes, a Studio mock path
-while product ids are 0). Royale wins against bots only don't count on the Wins board or titles, duels against the same
-player pay less after the second that day, and a fighter's kill coins pay once per match.
+`ServerStorage.UseRealDataStore` is set before Play. The economy is described in
+[Progression and monetisation](#progression-and-monetisation).
 
 | Action | Keyboard / mouse | Gamepad | Touch |
 |---|---|---|---|
@@ -127,6 +127,129 @@ lobby it appears only next to the trainer or a sparring partner.
 never over the fighters), a deflect is followed by **CLICK / RIPOSTE**, a broken opponent by
 **DEATHBLOW**, and perilous attacks name their answer. Touch players see button names instead of keys. For the same
 first 10 matches the deflect window is up to 1.4× wider (perfect 1.3×), tapering to normal (`Config.NewcomerAssist`).
+
+## Progression and monetisation
+
+The rule the whole system follows: **Robux never buys whether you win.** Weapons are coins + Mastery only, nothing sold
+changes stats, XP or coin rates, and finishers take exactly the default deathblow's time. Every cosmetic category can be
+earned, and the most prestigious items (ranked season rewards, boss gold blades, achievement titles, Mastery
+evolutions) can only be earned. There are no pop-ups on first load, no fake timers, no paid refresh or streak repair.
+
+Where things live: every item (id, category, rarity, price, unlock rule, sources) is in
+[Catalog.luau](src/shared/Catalog.luau); every pacing number in the `N` table of
+[EconomyConfig.luau](src/shared/EconomyConfig.luau); the season calendar, pass track and missions in
+[Season.luau](src/shared/Season.luau). The server owns all state: [Economy.luau](src/server/Economy.luau) (wallet,
+inventory, loadout, rules, achievement auto-grants), [Monetization.luau](src/server/Monetization.luau) (receipts, game
+passes, PolicyService), [PassService.luau](src/server/PassService.luau) (pass and missions) and
+[ShopService.luau](src/server/ShopService.luau) (daily shop, draws, capsule, shards, ranked season end). The client
+panels only read `Catalog` and the attributes the server publishes. Every source and sink is logged with
+`AnalyticsService:LogEconomyEvent`. The pacing simulation (`research_notes/progression/sim/pacing_sim.py`, report in
+`04_pacing_sim.md`) reads these files directly; re-run it after changing any number.
+
+### Currencies
+
+| Currency | Earned from | Spent on |
+|---|---|---|
+| **Coins** | Matches (10 a fight, 15 a kill, 5 a deathblow, 60 a royale win, 25 a duel win), level-ups (50 + 5 × level, capped at 150, +100 every 5th level), daily missions and weekly bounties, boss trials (10 fought, 30 × stars a clear, 120 on a first clear), the daily streak (50 to 150), Shrine Draws, pass tiers | The Odachi (1,500, Mastery 5), base blade skins (some Mastery-gated), outfits, titles, banners; the daily shop's coin slots. About 131k coins of items: ~42 h at an hour a day |
+| **Gems** (premium) | Gem packs (Robux), and slowly by play: 10 + 10 per star on a boss first clear, 10 every 5th Mastery level, 20 on streak day 7, Shrine Draws, the pass (free track ~100, premium ~500), ranked season end (20 Bronze to 250 Shogun) | Finishers, blade lines (L1 650), premium outfits and banners, the daily shop's gem slots and weekly featured set, the Shrine Capsule, up to half of a line upgrade (10 gems a Whetstone) |
+| **Whetstones** (earn-only, never sold) | 1 per daily mission and weekly bounty, 1 per win (the first 2 wins a day), boss clears (1 per star) and first clears (2), every 5th Mastery level (2), streak day 7 (5), pass tiers, Shrine Draws | Blade line upgrades: L2 / L3 / L4 cost 20 / 40 / 60. A full line takes ~12 days at 40 min a day |
+| **Shards** | Duplicates from draws and the capsule (5 common to 150 legendary) | Any shrine pool item in the shard shop (25 to 750) |
+| **Pass XP** | 30 a fight, +20 a win, 50 a daily mission, 200 a weekly bounty; double in a season's final week | Pass tiers (1,000 each) |
+| **Shrine Draws** | 1 per royale win (3 a day), the first duel win of the day, pass tiers | Opening a draw at the shrine |
+
+Mastery (XP) levels: `160 + 95(L-1)` XP below level 10 (about an hour), then +8% a level up to 6,000. Weapon Mastery
+(per weapon XP) evolves the blade: a ribbon at M10, an engraved edge at M25, an aura at M50. The daily streak pauses on
+a missed day instead of resetting. Anti-farm: royale wins against bots only don't count for the Wins board or the
+win titles (`HumanWins`), duels against the same player pay 100/100/50/25/0% for the 1st-5th that day, and a fighter's
+kill coins pay once per match.
+
+### Unlocks and the Locker
+
+Seven slots: weapon, blade (skins and blade lines), finisher, outfit, title (a second title slot with its pass),
+banner, nameplate. Items unlock by price (coins or gems), by rule (Mastery level, a stat such as deathblows, boss
+clears), or by source (pass, ranked, bundle, VIP). Ruled items with `auto` are granted the moment the rule is met
+(achievement titles, boss-trial blades and outfits, and the **gold boss blades**: clear that boss without losing any
+vitality after the countdown). **Blade lines** (Yozakura, Raijin, Karasu) start at L1 for 650 gems and level with
+Whetstones: L2 adds a swing smear, L3 a deflect effect, L4 the line's own finisher. Your title, banner and blade show on
+the duel intro card, the end-of-round podium and the nameplate over your head.
+
+### The season pass: Path of the Blade
+
+A 6-week season (S1: 2026-10-19 to 2026-11-30, then a week's break) with 30 tiers of 1,000 Pass XP. The free track
+pays coins, gems, Whetstones, Shrine Draws, a blade and a title; the premium track (449 R$) pays about 500 gems back,
+Whetstones, draws, two blades, a banner, a nameplate, and the capstone at tier 30 (the season blade, its finisher and a
+title). Premium is retroactive: everything already reached becomes claimable. Three daily missions (one free reroll a
+day) and five weekly bounties replace the old Trials. A daily player finishes around day 32 without the double-XP
+week; a 3-times-a-week player reaches about tier 20. Tier skips: +1 (49 R$), +10 (399 R$).
+
+### Store, draws and odds
+
+- **Daily shop:** 2 coin and 2 gem items a day, plus a weekly featured set of 3 at 20% off (you pay only for what you
+  don't own). Items come back within a couple of weeks. No paid refresh; the only timers are the real rotation times.
+- **Shrine Draw** (earned, no Robux): opens one outcome. Odds: 100 coins 40%, 250 coins 12%, 1 Whetstone 15%,
+  3 Whetstones 3%, 5 gems 8%, 20 gems 2%, 10 Shards 10%, a common/uncommon cosmetic 6%, rare 3%, epic 1%. The odds
+  sheet shows before your first draw of a session and from the Odds button any time; owned items read "owned → N
+  Shards".
+- **Shrine Capsule** (gems: 100 for one, 900 for ten): featured legendary 2%, epic 10%, rare 28%, common 60%. Pity: an
+  epic or better by draw 10, the featured legendary by draw 40, counters kept across banners (14-day banners). Odds,
+  long-run rates with pity and your pity counters show before every purchase; every pool item also has a direct gem or
+  coin price and a shard price, both shown next to it.
+- **Policy gating:** the capsule is hidden entirely (not greyed out) for players whose
+  `PolicyService:GetPolicyInfoForPlayerAsync().ArePaidRandomItemsRestricted` is true; for them, Shrine Draws that came
+  from the premium pass track pay a fixed 100 coins, 1 Whetstone and 5 gems instead. The capsule also has a master
+  switch, `EconomyConfig.PaidCapsule`: `"studio"` (default: on in Studio, **off in live servers**), `"on"`, `"off"`.
+- **Offers:** the Initiate's Bundle (149 R$, once per account, for 72 h after your first join), the premium pass and the
+  game passes. At most one contextual card per account (after a first level-up or first loss), only in the lobby.
+
+### Ranked seasons
+
+Rating starts at 400 and moves by Elo against other humans only (royale placements and human duels); six tiers of
+three divisions, 200 points each. A season's rewards use the best tier reached (after at least 5 rated games): a title
+for every tier, a banner and nameplate from Gold up, and gems. They are paid within 15 s of the season's end (or on
+your next login). Then your rating **soft-resets** halfway to 400 (1,950 becomes 1,175; 200 becomes 300), once per
+season, after the rewards; Profile shows the reset for two weeks and, before it, where the next one will put you
+(`EconomyConfig.N.Ranked.SoftReset`).
+
+### Ronin VIP
+
+A game pass, cosmetic only: the Ronin nameplate frame (wisteria), a **[Ronin]** chat tag in the same colour
+([ChatTags.luau](src/client/ChatTags.luau) with TextChatService; [Ronin.luau](src/server/Ronin.luau) sets the speaker
+tag while the place still uses the legacy chat), and an exclusive black-lacquer sheath with gold fittings and a faint
+wisteria aura on the left hip (Ronin.luau). No boosts.
+
+### Products to create (paste the ids into `Catalog.Products`)
+
+Until an id is filled in (it's `0` today), Studio purchases take Monetization's mock path and live prompts are refused.
+
+| Key | Type | Robux | Grants |
+|---|---|---|---|
+| `gems.80` / `gems.210` / `gems.440` / `gems.920` / `gems.1920` / `gems.5000` | Developer product | 79 / 199 / 399 / 799 / 1,599 / 3,999 | that many gems |
+| `bundle.Initiate` | Developer product | 149 | Initiate's Vow blade, Initiate title, 300 gems, 1,500 coins (once, 72 h) |
+| `bundle.LineYozakura` / `LineRaijin` / `LineKarasu` | Developer product | 1,499 | the line at L4 with its finisher (marked "soon": not on sale yet) |
+| `pass.Premium` | Developer product (bought per season) | 449 | the season's premium track |
+| `pass.TierSkip` / `pass.Tiers10` | Developer product | 49 / 399 | +1 / +10 pass tiers |
+| `pass.VIP` | Game pass | 299 | Ronin nameplate, chat tag, sheath |
+| `pass.Loadouts` | Game pass | 99 | 6 loadout slots (3 without) |
+| `pass.TitleSlot` | Game pass | 99 | a second title slot |
+| `pass.VictoryCry` | Game pass | 149 | the victory cry |
+
+Purchases are idempotent (a PurchaseId ledger in the profile), granted only after the save commits, and refused while
+a profile is loading or failed to load.
+
+### Test hooks (Studio)
+
+- `ServerStorage.CombatTest` (BindableFunction): `grant(currency, n)` (marks the session as a test: never written to a
+  real save), `economy("buy"|"equip"|"own"|"spend"|"upgrade", ...)`, mock purchases `receipt(key, purchaseId)`,
+  `prompt(key)`, `pass(key)`, profile tests `reload(raw)`, `raw()`, `writeRaw(raw)`, `save()`, and fight results
+  `progress("boss"|"royale"|"duel", ...)`.
+- `ServerStorage.PassTest`: `state`, `xp n`, `event name n`, `clock offsetSeconds` (shifts the season clock on both
+  sides), `reset`, `buy key`, `claimAll`, `rollover`.
+- `ServerStorage.ShopTest`: `simulate(pool, n, seed)`, `invoke(action, arg)`, `policy(restricted)`, `capsule(on|nil)`,
+  `ready(category, on)`, `seasonEnd(season, epoch|false)` (ends a ranked season now: pays rewards and soft-resets),
+  `rotation(fromDay, days)`, `state()`, `grantDraws(n, paid)`, `republish()`.
+- `ServerStorage.BossTest`: `start(id)`, `god(true)` (a god-mode clear counts as no-hit), `state()`, `stop()`.
+- Client: `PlayerScripts.CosmeticTest:Invoke(fn, ...)` (finisher / blade / outfit previews), `DuelHUD.previewIntro(foe?)`
+  and `Podium.preview(entries?)` (require the module from the client command bar).
 
 ## Combat rules
 
@@ -349,7 +472,7 @@ order: naginata (reach), then dual blades; kusarigama last.
   fade out on your screen ([Occlusion.luau](src/client/Occlusion.luau)). A boss gets no floating bars, only its
   bar at the bottom of the screen, which shows the red deathblow marker on its posture bar while it's broken (its body
   carries the marker too). The dead let go of their swords: the blade drops and lies beside the body.
-  Rewards, level-ups, Trials and the end-of-match report card are in [Toasts.luau](src/client/Toasts.luau).
+  Rewards, level-ups, missions and the end-of-match report card are in [Toasts.luau](src/client/Toasts.luau).
 - **Icons and store art.** Every menu, currency, rank, reward and touch-button icon is painted by ChatGPT image
   generation (through the Codex CLI) from one style bible, [art/icons/STYLE.md](art/icons/STYLE.md): sumi-e ink outline
   plus flat cel shading in the crimson / bone / gold / jade palette. `art/icons/gen.sh <name> "<subject>"` makes one,
@@ -410,12 +533,14 @@ landing over 35% of kills. Tune numbers in `Config` and `Weapons`, then watch th
 ```
 src/
   shared/   Config, Weapons, Ranks, Types, Assets, Palette, Poses, Clips, BakedPoses, BakedClips, Round, Progression,
-            Bosses, Spacing, KannagiMoves (generated), BakedBoss (generated)
+            Bosses, Spacing, KannagiMoves (generated), BakedBoss (generated), Catalog, EconomyConfig, Season, Flair,
+            Clothing, Cosmetics/ (blade looks, finishers, wear, flair art)
   server/   init, CombatService, BotService, RoundService, StatsService, ProgressService, LobbyService, LobbyBuilder,
             LeaderboardService, Telemetry, MapBuilder, Outfit, Locomotion, SwordRig, DevHooks, DuelService,
-            BossService, BossAI
+            BossService, BossAI, Economy, Monetization, PassService, ShopService, CosmeticService, Ronin
   client/   init, Animator, CombatVisuals, CombatInput, LockOn, CombatHUD, RoundHUD, LobbyHUD, Panels, UI,
-            TrainerReadout, TitleScreen, Ambience, Coach, Toasts, Occlusion, DuelHUD, BossHUD, BossVisuals
+            TrainerReadout, TitleScreen, Ambience, Coach, Toasts, Occlusion, DuelHUD, BossHUD, BossVisuals,
+            StorePanel, StoreUI, LockerPanel, PassPanel, Reveal, CosmeticFX, CosmeticPreview, Podium, ChatTags
 ```
 
 ## Before publishing
@@ -423,5 +548,10 @@ src/
 - Save the place in Studio, then run `rojo syncback` so `Workspace.Props` and the `MaterialService` variants are tracked
   in git.
 - Game Settings: R15 only; Security → enable Studio access to API services to test DataStores.
+- Create the developer products and game passes and paste their ids into `Catalog.Products` (table above). Decide on
+  `EconomyConfig.PaidCapsule` (`"studio"` keeps the gem capsule off in live servers).
+- The place's `TextChatService.ChatVersion` is still `LegacyChatService`; switch it to `TextChatService` (both chat
+  tag paths are in place).
+- Fill in the maturity questionnaire (the default deathblow has blood; finishers like Ink Brush don't).
 - Store page: icon and thumbnails (real gameplay captures work best), description, genre "Fighting".
 - Rename anything that borrows FromSoftware terms ("Shinobi Execution", "Mikiri") if you want to avoid trouble.
