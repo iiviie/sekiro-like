@@ -302,29 +302,44 @@ local function header(body: Frame, width: number)
 	local premiumGems = premiumItem and premiumItem.price and premiumItem.price.gems
 	local gemButton = not premium and premiumGems ~= nil
 
-	-- Pass XP toward the next tier (value outside the bar), the countdown under it.
+	-- The middle column, three short lines: the Pass XP bar (its whole width is the track),
+	-- the XP toward the next tier, and the season's countdown on its own line, so neither is
+	-- cut off beside the premium button(s).
 	local right = if gemButton then 336 else 232 -- the premium button(s)
 	local barX = HEADER_H + 146
 	local barW = math.max(150, width - barX - right - 16)
 	local maxed = tier >= Season.Tiers
 	local into = xp - tier * Season.TierXP
+	local double = (ReplicatedStorage:GetAttribute("SeasonMultiplier") or 1) > 1
 	UI.progress({
 		Name = "XPBar",
-		Position = UDim2.fromOffset(barX, 4),
-		Size = UDim2.fromOffset(barW, 22),
+		Position = UDim2.fromOffset(barX, 2),
+		Size = UDim2.fromOffset(barW, 14),
 		height = 10,
-		textWidth = 112,
+		label = "none",
 		tone = "gold",
 		value = if maxed then 1 else into,
 		max = if maxed then 1 else Season.TierXP,
-		format = function(v: number, m: number): string
-			return if maxed then "Every tier" else `{UI.number(v)} / {UI.number(m)}`
-		end,
+	}, body)
+	UI.text({
+		Name = "XPLine",
+		Position = UDim2.fromOffset(barX, 20),
+		Size = UDim2.fromOffset(barW, 19),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		FontFace = UI.Fonts.Number,
+		TextSize = 15,
+		TextColor3 = if double then T.GoldHi else T.Bone,
+		Text = (if maxed
+			then "Every tier reached"
+			else `{UI.number(into)} / {UI.number(Season.TierXP)}  Pass XP to tier {tier + 1}`) .. (if double
+			then "  ·  DOUBLE"
+			else ""),
 	}, body)
 	local clock = UI.text({
 		Name = "Countdown",
-		Position = UDim2.fromOffset(barX, 30),
-		Size = UDim2.fromOffset(barW, 22),
+		Position = UDim2.fromOffset(barX, 40),
+		Size = UDim2.fromOffset(barW, 19),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		FontFace = UI.Fonts.Label,
@@ -336,19 +351,14 @@ local function header(body: Frame, width: number)
 		local state = ReplicatedStorage:GetAttribute("SeasonState")
 		local endsAt = ReplicatedStorage:GetAttribute("SeasonEndsAt") or 0
 		local left = endsAt - Season.now()
-		local double = (ReplicatedStorage:GetAttribute("SeasonMultiplier") or 1) > 1
-		local next = if maxed then "" else `Pass XP to tier {tier + 1}  ·  `
 		if state == "live" then
 			local ends = DateTime.fromUnixTimestamp(endsAt):FormatUniversalTime("MMM D", "en-us")
-			return `{next}season ends in {duration(left)} ({ends}){if double then "  ·  DOUBLE PASS XP" else ""}`
+			return `Season ends in {duration(left)}  ·  {ends}`
 		elseif state == "break" and endsAt > 0 then
-			return `Season over  ·  claims stay open  ·  next season in {duration(left)}`
+			return `Season over  ·  claims stay open  ·  next in {duration(left)}`
 		end
 		return "No season running"
 	end)
-	if (ReplicatedStorage:GetAttribute("SeasonMultiplier") or 1) > 1 then
-		clock.TextColor3 = T.GoldHi
-	end
 
 	-- Premium: owned chip, or the upgrade (a Robux purchase: the premium variant).
 	if premium then
