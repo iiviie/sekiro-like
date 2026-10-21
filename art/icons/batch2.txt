@@ -5,10 +5,10 @@ rank_jade|a heraldic rank crest: a jade green and gold kamon crest disc with cro
 rank_crimson|a heraldic rank crest: a crimson lacquer and gold kamon crest disc with crossed katana and flames licking around the rim, front view
 rank_shogun|a heraldic rank crest: a magnificent bone-white and gold kamon crest with crossed katana, a golden kabuto crescent crest above it and radiant gold rays, the most prestigious emblem, front view
 weapon_odachi|an extremely long two-handed odachi greatsword drawn diagonally from bottom-left to top-right, very long crimson-wrapped hilt, square dark iron tsuba, long gleaming curved blade
-icon_kill|a white oni demon mask cracked in half by a diagonal sword cut, with a small splash of crimson ink
-icon_deathblow|a crimson ink enso brush circle with a katana thrust straight through its centre, dramatic
+icon_kill|a white oni demon mask with gold horns, cracked cleanly in two along a diagonal line with the halves slightly apart, bright white light shining through the crack and a few gold sparks, no red on the crack and no splatter
+icon_deathblow|a bold black sumi-e ink enso circle with a katana passing diagonally through its centre, a sharp white four-point star glint and small gold sparks where the blade crosses the ring, dramatic, no red
 icon_resurrect|a crimson lotus flower blooming with a rising bone-white spirit flame from its centre, sacred and glowing
 icon_level|a round bronze medallion with a crimson three-comma tomoe swirl in the middle and a gold rim, front view
 icon_lock|a heavy old Japanese iron padlock with brass fittings and a short crimson tassel
-icon_streak|three crimson brush slash marks stacked diagonally, like claw marks of ink, with tiny gold sparks
+icon_streak|three bold diagonal black ink brush strokes stacked side by side like a tally of victories, each stroke tipped with gold leaf, a small flickering flame of gold sparks rising above them, no red
 icon_skin|a katana blade glowing with swirling crimson and gold aura, sakura petals around it, magical cosmetic look

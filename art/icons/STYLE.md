@@ -13,3 +13,7 @@ LIGHT: warm key light from the top left, cool shadow.
 BACKGROUND: perfectly flat, pure white (#FFFFFF), edge to edge, no shadow, no vignette, no ground plane.
 NEVER: text, letters, numbers, watermarks, logos, frames or borders, photorealism, gradients behind the
 object, multiple objects unless asked.
+NO BLOOD OR GORE, EVER (Roblox moderates uploads for gore): no blood, no red liquid of any kind, no red splatter,
+splashes, drips, droplets, pools or stains, no wounds, cuts in flesh or bodies, no blade stabbing into anything red.
+Crimson appears only as lacquer, cloth, a flat seal or UI colour, or clearly dry ink brushwork (no wet drips).
+Show impact and finisher energy with black ink brush arcs, white slash light, gold sparks, petals, feathers or lightning.
