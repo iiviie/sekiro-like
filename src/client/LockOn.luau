@@ -6,6 +6,7 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Types = require(ReplicatedStorage.Shared.Types)
@@ -16,6 +17,12 @@ local settings = Config.LockOn
 local LockOn = {}
 
 local target: Model? = nil
+local PROBE_RADIUS = 0.4
+local probeParams = RaycastParams.new()
+probeParams.FilterType = Enum.RaycastFilterType.Exclude
+probeParams.RespectCanCollide = true
+local eye: Vector3? = nil -- the lagged camera position and look direction (Kannagi's spring arm)
+local lookDir: Vector3? = nil
 local reticle: BillboardGui? = nil
 local listeners: { (Model?) -> () } = {}
 
@@ -95,6 +102,32 @@ function LockOn.findBest(maxDistance: number): Model?
 	return best
 end
 
+-- Nearest enemy by distance alone (touch auto lock-on), among those `accept` allows.
+function LockOn.nearest(maxDistance: number, accept: (Model) -> boolean): (Model?, number)
+	local character = player.Character
+	local mine = rootOf(character)
+	if not mine then
+		return nil, math.huge
+	end
+	local best: Model? = nil
+	local bestDistance = math.huge
+	for _, instance in CollectionService:GetTagged(Types.Tag) do
+		if instance ~= character and instance:IsA("Model") and isValid(instance, maxDistance) and accept(instance) then
+			local distance = ((rootOf(instance) :: BasePart).Position - mine.Position).Magnitude
+			if distance < bestDistance then
+				best, bestDistance = instance, distance
+			end
+		end
+	end
+	return best, bestDistance
+end
+
+-- Distance from us to `model` (math.huge when either body is missing).
+function LockOn.distanceTo(model: Model): number
+	local mine, theirs = rootOf(player.Character), rootOf(model)
+	return if mine and theirs then (theirs.Position - mine.Position).Magnitude else math.huge
+end
+
 function LockOn.target(): Model?
 	return target
 end
@@ -104,17 +137,46 @@ function LockOn.set(model: Model?)
 		reticle:Destroy()
 		reticle = nil
 	end
+	local was = target
 	target = model
 	local camera = workspace.CurrentCamera
 	if model then
 		reticle = makeReticle(model)
 		camera.CameraType = Enum.CameraType.Scriptable
+		if not was then
+			eye, lookDir = camera.CFrame.Position, camera.CFrame.LookVector -- swing over from here
+		end
 	else
 		camera.CameraType = Enum.CameraType.Custom
+	end
+	if (was == nil) ~= (model == nil) then
+		TweenService:Create(camera, TweenInfo.new(0.35, Enum.EasingStyle.Quad), { FieldOfView = LockOn.baseFov() })
+			:Play()
 	end
 	for _, listener in listeners do
 		task.spawn(listener, model)
 	end
+end
+
+-- Locks on to `model` as a fight starts (Kannagi locks on to the boss): once both bodies
+-- have arrived on their marks and are within lock range, or not at all after `timeout`.
+local engageToken = 0
+function LockOn.engage(model: Model, timeout: number?)
+	engageToken += 1
+	local token = engageToken
+	local deadline = os.clock() + (timeout or 4)
+	task.spawn(function()
+		while engageToken == token and os.clock() < deadline do
+			if target == model then
+				return
+			end
+			if isValid(model, settings.Range) then
+				LockOn.set(model)
+				return
+			end
+			task.wait(0.1)
+		end
+	end)
 end
 
 -- Calls `listener(target)` whenever the lock-on target changes (nil when released).
@@ -130,16 +192,24 @@ function LockOn.toggle()
 	end
 end
 
+-- The field of view the camera rests at right now (locked or free); FOV kicks (a dash, a
+-- deathblow punch-in) tween back to this.
+function LockOn.baseFov(): number
+	return if target then settings.FieldOfView else settings.FreeFieldOfView
+end
+
 local function updateCamera(dt: number)
 	if not target then
+		eye, lookDir = nil, nil
 		return
 	end
 	if not isValid(target, settings.BreakRange) then
 		LockOn.set(nil)
 		return
 	end
-	local mine, theirs = rootOf(player.Character), rootOf(target)
-	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	local character = player.Character
+	local mine, theirs = rootOf(character), rootOf(target)
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if not mine or not theirs or not humanoid or humanoid.Health <= 0 then
 		LockOn.set(nil) -- dead or gone: hand the camera back
 		return
@@ -147,17 +217,63 @@ local function updateCamera(dt: number)
 
 	local offset = theirs.Position - mine.Position
 	local flat = Vector3.new(offset.X, 0, offset.Z)
-	local forward = if flat.Magnitude > 0.1 then flat.Unit else mine.CFrame.LookVector
+	local distance = flat.Magnitude
+	local forward = if distance > 0.1 then flat.Unit else mine.CFrame.LookVector
 	local right = forward:Cross(Vector3.yAxis)
+	local scale = target:GetAttribute("BodyScale")
+	scale = if typeof(scale) == "number" and scale > 0 then scale else 1
 
-	local eye = mine.Position
-		- forward * settings.CameraDistance
-		+ Vector3.yAxis * settings.CameraHeight
-		+ right * settings.CameraShoulder
-	local focus = mine.Position:Lerp(theirs.Position, 0.55) + Vector3.yAxis * 1.2
-	local camera = workspace.CurrentCamera
-	local alpha = 1 - math.exp(-dt * settings.CameraSmoothing)
-	camera.CFrame = camera.CFrame:Lerp(CFrame.lookAt(eye, focus), alpha)
+	-- How close the pair stands: 0 at CloseRange and beyond, 1 at contact (~3 studs).
+	local close = math.clamp((settings.CloseRange - distance) / (settings.CloseRange - 3), 0, 1)
+	close = close * close * (3 - 2 * close) -- smoothstep, so the framing eases in
+	local pivot = mine.Position + Vector3.yAxis * settings.PivotHeight
+	local desiredEye = pivot
+		- forward * (settings.CameraDistance + settings.ClosePullBack * close)
+		+ Vector3.yAxis * (settings.CameraHeight + settings.CloseRaise * close * scale)
+		+ right * (settings.CameraShoulder + settings.CloseShoulder * close)
+	-- Look at the pair, sliding toward the target's chest as they close in (a taller boss's
+	-- chest sits higher).
+	local focus = mine.Position:Lerp(theirs.Position, 0.55 + 0.2 * close) + Vector3.yAxis * (1.2 + 0.6 * close * scale)
+
+	-- Kannagi's lag: the eye trails its arm at speed 7 (never more than MaxLag behind), and
+	-- the view turns toward the target at speed 5.
+	local current = eye or desiredEye
+	current = current:Lerp(desiredEye, 1 - math.exp(-dt * settings.PositionLag))
+	local lag = current - desiredEye
+	if lag.Magnitude > settings.MaxLag then
+		current = desiredEye + lag.Unit * settings.MaxLag
+	end
+	-- Kannagi's arm probes the world (ProbeChannel): a wall, rock or post between you and the
+	-- eye pulls the camera in front of it at once (fighters never do).
+	local reach = current - pivot
+	if reach.Magnitude > 0.5 then
+		local ignore: { Instance } = CollectionService:GetTagged(Types.Tag)
+		for _ = 1, 4 do
+			probeParams.FilterDescendantsInstances = ignore
+			local hit = workspace:Spherecast(pivot, PROBE_RADIUS, reach, probeParams)
+			if not hit then
+				break
+			end
+			local part = hit.Instance
+			if part:IsA("BasePart") and part.Transparency >= 0.9 then
+				table.insert(ignore, part) -- invisible fence walls keep players in, not the camera
+			else
+				current = pivot + reach.Unit * math.max(hit.Distance - 0.1, 1.5)
+				break
+			end
+		end
+	end
+	eye = current
+	local wantLook = (focus - current).Unit
+	local look = lookDir or wantLook
+	look = look:Lerp(wantLook, 1 - math.exp(-dt * settings.RotationLag))
+	look = if look.Magnitude > 1e-3 then look.Unit else wantLook
+	lookDir = look
+
+	-- Camera shake (CombatVisuals) writes Humanoid.CameraOffset in the root's space, which only
+	-- the default camera reads; apply it here too (it stays zero when shake is off in Settings).
+	local shake = mine.CFrame:VectorToWorldSpace(humanoid.CameraOffset)
+	workspace.CurrentCamera.CFrame = CFrame.lookAt(current + shake, current + shake + look)
 end
 
 function LockOn.start()

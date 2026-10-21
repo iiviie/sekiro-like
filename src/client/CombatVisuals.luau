@@ -20,6 +20,8 @@ local Motion = require(script.Parent.Motion)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Types = require(ReplicatedStorage.Shared.Types)
+local Bosses = require(ReplicatedStorage.Shared.Bosses)
+local Spacing = require(ReplicatedStorage.Shared.Spacing)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
 
 local combatEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent
@@ -35,6 +37,15 @@ local STEEL = Color3.fromRGB(200, 205, 215)
 local CombatVisuals = {
 	lastOwnHitAt = -math.huge, -- server time your latest swing lands (for dodge-cancel timing)
 }
+
+-- Bosses animate only from their own BossMove broadcasts (client/BossVisuals), so the
+-- generic reaction clips here never cut into a boss's string.
+local function playClip(model: Model, clip: string, windup: number?)
+	if model:GetAttribute("Boss") ~= nil then
+		return
+	end
+	Animator.play(model, clip, windup)
+end
 
 -- Your own swings start animating the moment you click (see predictAttack); the
 -- server's Windup for that swing then only needs to add sounds and telegraphs.
@@ -355,31 +366,52 @@ local function deathblowGrade()
 	Debris:AddItem(grade, 1)
 end
 
--- Pushes the local character forward during its own strike (players own their physics).
--- Fighters don't collide, so the lunge stops short of anyone already within reach
--- instead of carrying you through them.
-local LUNGE_STOP_DISTANCE = 3.5
-
-local function lunge(speed: number)
+-- Pushes the local character forward during its own strike (players own their physics),
+-- standing in for the clip's root motion (the Kannagi clips play in place). Bodies don't
+-- overlap (Shared/Spacing), so the lunge is shortened to stop just outside the body of
+-- anyone in front instead of carrying you into them.
+local function lunge(speed: number, duration: number)
 	local character = player.Character
 	local root = rootOf(character)
-	if not root or speed <= 0 then
+	if not character or not root or speed <= 0 or duration <= 0 then
 		return
 	end
 	local look = root.CFrame.LookVector
-	local forward = Vector3.new(look.X, 0, look.Z).Unit
-	for _, instance in CollectionService:GetTagged(Types.Tag) do
-		local other = if instance ~= character and instance:IsA("Model") then rootOf(instance) else nil
-		if other then
-			local offset = other.Position - root.Position
-			local flat = Vector3.new(offset.X, 0, offset.Z)
-			if flat.Magnitude < LUNGE_STOP_DISTANCE + 2 and flat.Unit:Dot(forward) > 0.5 then
-				return -- someone is right in front of us already
-			end
-		end
+	local forward = Vector3.new(look.X, 0, look.Z)
+	if forward.Magnitude < 1e-3 then
+		return
 	end
+	forward = forward.Unit
+	-- Motion.surge from 1.25x to 0.2x speed (quadratic ease) covers 0.55 x speed x duration.
+	local distance = 0.55 * speed * duration
+	local room = Spacing.room(character, root.Position, forward, distance)
+	if room <= 0.1 then
+		return -- someone is right in front of us already
+	end
+	local scale = room / distance
 	-- Burst then settle; the lunge never carries you more than a short step.
-	Motion.surge(forward, speed * 1.25, speed * 0.2, 0.16)
+	Motion.surge(forward, speed * 1.25 * scale, speed * 0.2 * scale, duration)
+end
+
+-- Slides the local character `distance` studs along `direction` over Knockback.Duration,
+-- easing out (Kannagi's knockback curve). Bots are slid by the server.
+local function knockLocal(direction: Vector3?, distance: number)
+	if not direction or distance <= 0.05 then
+		return
+	end
+	local duration = Config.Knockback.Duration
+	Motion.surge(direction, 3 * distance / duration, 0, duration)
+end
+
+-- The flat direction from one fighter to another.
+local function flatBetween(from: Model, to: Model): Vector3?
+	local a, b = rootOf(from), rootOf(to)
+	if not a or not b then
+		return nil
+	end
+	local offset = b.Position - a.Position
+	local flat = Vector3.new(offset.X, 0, offset.Z)
+	return if flat.Magnitude > 0.1 then flat.Unit else nil
 end
 
 local function hitstop(duration: number, ...: Model?)
@@ -400,7 +432,8 @@ function CombatVisuals.predictAttack(model: Model, kind: Config.AttackKind, wind
 	local duration = windup or spec.windup
 	predicted = { kind = kind, at = os.clock(), windup = duration }
 	LocalCombat.attackingUntil = os.clock() + duration + Config.Net.ResolveGrace + spec.recovery
-	Animator.play(model, kind, duration)
+	LocalCombat.swing = { kind = kind, startedAt = now(), hitAt = now() + duration, confirmed = false }
+	playClip(model, kind, duration)
 end
 
 -- A fading ghost copy of the body, left behind during a dash.
@@ -437,10 +470,38 @@ local function afterimage(model: Model)
 	Debris:AddItem(ghost, 0.35)
 end
 
+-- The dodge clip for a dash direction relative to the body (Kannagi's 4-way dodges).
+local function dodgeClip(model: Model, direction: Vector3?): string
+	local root = rootOf(model)
+	if not root or not direction or direction.Magnitude < 0.1 then
+		return "Dash"
+	end
+	local localDir = root.CFrame:VectorToObjectSpace(direction)
+	if math.abs(localDir.X) > math.abs(localDir.Z) then
+		return if localDir.X > 0 then "DodgeRight" else "DodgeLeft"
+	end
+	return if localDir.Z > 0 then "DodgeBack" else "Dash"
+end
+
 -- Dash pose, afterimages and whoosh. Called straight from input for your own character
--- so the dodge feels instant, and from the Dodge broadcast for everyone else.
-function CombatVisuals.dash(model: Model)
-	Animator.play(model, "Dash")
+-- (with the dash direction) so the dodge feels instant, and from the Dodge broadcast for
+-- everyone else (the direction is then read from their velocity a moment later).
+function CombatVisuals.dash(model: Model, direction: Vector3?)
+	if direction then
+		playClip(model, dodgeClip(model, direction))
+	else
+		playClip(model, "Dash")
+		task.delay(0.05, function()
+			local root = rootOf(model)
+			if root and Animator.current(model) == "Dash" then
+				local v = root.AssemblyLinearVelocity
+				local clip = dodgeClip(model, Vector3.new(v.X, 0, v.Z))
+				if clip ~= "Dash" then
+					playClip(model, clip)
+				end
+			end
+		end)
+	end
 	playSound(SOUNDS.Dodge, rootOf(model), 0.45)
 	for i = 0, 2 do
 		task.delay(i * 0.045, function()
@@ -452,6 +513,10 @@ function CombatVisuals.dash(model: Model)
 end
 
 local function telegraphPerilous(model: Model, duration: number)
+	if model:GetAttribute("Boss") ~= nil then
+		-- A boss's 危 can come well before its hit: keep the warning up to the impact.
+		duration = math.max(duration, 0.35)
+	end
 	local highlight = Instance.new("Highlight")
 	highlight.FillColor = Config.Visual.PerilousColor
 	highlight.FillTransparency = 0.9 -- a hint of red; the kanji and outline do the warning
@@ -471,6 +536,8 @@ local function telegraphPerilous(model: Model, duration: number)
 		CombatHUD.flashPeril()
 	end
 end
+
+CombatVisuals.telegraphPerilous = telegraphPerilous
 
 -- The parry cue: a white glint at the blade tip a fixed time before impact, on every
 -- swing coming at you. Pressing block as it flashes lands the deflect window at typical
@@ -537,10 +604,39 @@ local alreadyShown: (attacker: Model, defender: Model) -> boolean
 local chainAt: { [Model]: number } = {}
 local chainCount: { [Model]: number } = {}
 
-local function deflectEffects(attacker: Model, defender: Model, perfect: boolean)
-	Animator.play(defender, "GuardImpact")
-	Animator.play(attacker, "Recoil")
+local function specOf(attacker: Model, kind: any): Config.AttackSpec?
+	return Bosses.specFor(Weapons.of(attacker), kind) -- a weapon move, or a boss hit
+end
+
+-- `recoil`: the attacker is thrown back (an ender or a thrust); otherwise its blade is only
+-- knocked aside and its string goes on.
+-- The defender's deflect clip: thrown to the side the blade came from, the Middle version for
+-- a Middle or Large blow (Kannagi's HajikiReaction RightMiddle / LeftMiddle).
+local function deflectClip(spec: Config.AttackSpec?): string
+	local side = if spec then spec.deflectSide else "Right"
+	if side ~= "Back" and spec and spec.guardReaction ~= "Small" then
+		return "Deflect" .. side .. "Middle"
+	end
+	return "Deflect" .. side
+end
+
+-- The attacker's recoil: Kannagi's ReHajikiReaction is the mirror of the defender's side, so a
+-- cut deflected to the defender's right (Light2, Riposte2, DodgeSlash, MikiriSlash) recoils left.
+local function recoilClip(spec: Config.AttackSpec?, recoil: boolean): string
+	if not recoil then
+		return "Knocked"
+	end
+	return if spec and spec.deflectSide == "Right" then "RecoilLeft" else "Recoil"
+end
+
+local function deflectEffects(attacker: Model, defender: Model, perfect: boolean, kind: string?, recoil: boolean)
+	local spec = specOf(attacker, kind)
+	playClip(defender, deflectClip(spec))
+	playClip(attacker, recoilClip(spec, recoil))
 	hitstop(if perfect then Config.Visual.PerfectHitstop else Config.Visual.Hitstop, attacker, defender)
+	if isLocal(defender) and spec then
+		knockLocal(flatBetween(attacker, defender), spec.knockback * Config.Knockback.Deflect)
+	end
 
 	local t = os.clock()
 	local chain = if t - (chainAt[defender] or -math.huge) < Config.Deflect.ChainWindow
@@ -568,13 +664,27 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 	end
 	if isLocal(attacker) or isLocal(defender) then
 		shake(if perfect then 0.7 else 0.3, if perfect then 0.2 else 0.15)
+		-- A rally you can see: each chained deflect counts up and warms toward gold.
+		if chain >= 1 then
+			local heat = math.min(chain / 4, 1)
+			popText(
+				if isLocal(defender) then attacker else defender,
+				`{chain + 1} CLASHES`,
+				Color3.fromRGB(235, 235, 245):Lerp(GOLD, heat),
+				chain >= 3
+			)
+		end
 	end
 end
 
--- Holding guard is the dullest tier: a short freeze, a low knock, a few grey sparks.
-local function guardEffects(attacker: Model, defender: Model)
-	Animator.play(defender, "GuardImpact")
+-- Holding guard is the dullest tier: a short freeze, a knock sized by the blow, grey sparks.
+local function guardEffects(attacker: Model, defender: Model, kind: string?)
+	local spec = specOf(attacker, kind)
+	playClip(defender, "Guard" .. (if spec then spec.guardReaction else "Small"))
 	hitstop(Config.Visual.GuardHitstop, attacker, defender)
+	if isLocal(defender) and spec then
+		knockLocal(flatBetween(attacker, defender), spec.knockback * Config.Knockback.Guard)
+	end
 	local point = contactPoint(attacker, defender)
 	if point then
 		burst(point, STEEL, 8, 10, 1.2)
@@ -597,9 +707,9 @@ function alreadyShown(attacker: Model, defender: Model): boolean
 end
 
 local function predictIncoming(attacker: Model, kind: Config.AttackKind, hitAt: number)
-	local spec = Weapons.spec(Weapons.of(attacker), kind)
+	local spec = specOf(attacker, kind)
 	local mine, theirs = rootOf(player.Character), rootOf(attacker)
-	if spec.unblockable or not mine or not theirs then
+	if not spec or spec.unblockable or not mine or not theirs then
 		return
 	end
 	local offset = theirs.Position - mine.Position
@@ -621,11 +731,12 @@ local function predictIncoming(attacker: Model, kind: Config.AttackKind, hitAt: 
 		local defence = LocalCombat.predictDefence(hitAt)
 		if defence == "Perfect" or defence == "Deflect" then
 			predictedDefences[attacker] = os.clock()
-			LocalCombat.deflected()
-			deflectEffects(attacker, character :: Model, defence == "Perfect")
+			LocalCombat.defended(spec.recoilOnDeflect)
+			deflectEffects(attacker, character :: Model, defence == "Perfect", kind, spec.recoilOnDeflect)
 		elseif defence == "Guard" and not spec.noGuard then
 			predictedDefences[attacker] = os.clock()
-			guardEffects(attacker, character :: Model)
+			LocalCombat.defended(false)
+			guardEffects(attacker, character :: Model, kind)
 		end
 	end)
 end
@@ -651,6 +762,8 @@ local function refreshBase(model: Model)
 	local state = model:GetAttribute("CombatState")
 	if state == "Dead" then
 		Animator.setBase(model, nil)
+	elseif state == "Downed" then
+		Animator.setBase(model, "Executed")
 	elseif state == "Broken" then
 		Animator.setBase(model, "Broken")
 	elseif model:GetAttribute("Blocking") then
@@ -678,13 +791,16 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if isLocal(model) then
 			predicted = nil
 			CombatVisuals.lastOwnHitAt = data.hitAt
+			local swing = LocalCombat.swing
+			local startedAt = if alreadyPlaying and swing then swing.startedAt else now()
+			LocalCombat.swing = { kind = kind, startedAt = startedAt, hitAt = data.hitAt, confirmed = true }
 		end
-		if not alreadyPlaying then
-			Animator.play(model, kind, remaining)
+		if not alreadyPlaying and not data.boss then
+			playClip(model, kind, remaining)
 		end
 
 		local perilous = kind == "Perilous" or kind == "Sweep"
-		local heavy = kind == "Light3" or kind == "Overhead" or perilous
+		local heavy = kind == "Light3" or kind == "Overhead" or kind == "MikiriSlash" or kind == "Riposte2" or perilous
 		if perilous then
 			telegraphPerilous(model, remaining)
 		end
@@ -692,27 +808,47 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			predictIncoming(model, kind, data.hitAt)
 			glint(model, data.hitAt)
 		end
-		task.delay(math.max(remaining - 0.05, 0), function()
+		local swingSpec = specOf(model, kind)
+		task.delay(math.max(remaining + (if swingSpec then swingSpec.lungeAt else -0.05), 0), function()
 			if not model.Parent then
 				return
 			end
 			playSound(if heavy then SOUNDS.HeavySwing else SOUNDS.Swing, rootOf(model), if heavy then 0.7 else 0.55)
 			if isLocal(model) then
-				lunge(Weapons.spec(Weapons.of(model), kind).lunge)
+				local spec = Weapons.spec(Weapons.of(model), kind)
+				lunge(spec.lunge, spec.lungeTime)
 			end
 		end)
 	end,
 
 	Deflect = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
+		local recoil = data.recoil == true
 		if isLocal(attacker) then
 			popText(defender, if data.perfect then "PERFECT DEFLECT" else "DEFLECTED", Color3.fromRGB(255, 196, 90))
 		end
 		if isLocal(defender) then
-			LocalCombat.deflected() -- opens the riposte (also mirrored by prediction)
+			-- Opens the riposte after a recoil or a break (also mirrored by prediction).
+			LocalCombat.defended(recoil or data.broke == true)
+			local pull = data.pull
+			if data.broke then
+				playClip(defender, "DeflectBreak")
+			end
+			if data.broke and typeof(pull) == "number" and pull > 0.1 then
+				-- The deflect broke them: close in for the deathblow.
+				local direction = flatBetween(defender, attacker)
+				if direction then
+					Motion.surge(direction, 3 * pull / 0.35, 0, 0.35)
+				end
+			end
 		end
 		if not alreadyShown(attacker, defender) then
-			deflectEffects(attacker, defender, data.perfect)
+			deflectEffects(attacker, defender, data.perfect, data.kind, recoil)
+		elseif
+			isLocal(defender)
+			and recoil ~= (specOf(attacker, data.kind or "Light1") or { recoilOnDeflect = false }).recoilOnDeflect
+		then
+			playClip(attacker, recoilClip(specOf(attacker, data.kind), recoil))
 		end
 	end,
 
@@ -721,8 +857,11 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if isLocal(attacker) then
 			popText(defender, "GUARDED", Color3.fromRGB(190, 195, 205))
 		end
+		if isLocal(defender) then
+			LocalCombat.defended(false)
+		end
 		if not alreadyShown(attacker, defender) then
-			guardEffects(attacker, defender)
+			guardEffects(attacker, defender, data.kind)
 		end
 	end,
 
@@ -732,11 +871,30 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			LocalCombat.lastSlashLanded = true -- our next chained slash speeds up
 			popText(defender, `-{math.floor((data.damage or 0) + 0.5)}`, Color3.fromRGB(255, 250, 240))
 		end
-		Animator.play(defender, "HitReact")
+		-- The flinch is sized by the move (Kannagi's DamageReaction), with a knockback slide
+		-- and a snap to face the blow on your own screen (bots are moved by the server).
+		local kind = data.kind
+		local spec = specOf(attacker, kind)
+		local reaction = if spec then spec.reaction else "Small"
+		if data.flinch ~= false then
+			playClip(defender, "Hit" .. reaction)
+		end
+		if isLocal(defender) then
+			LocalCombat.contact()
+			local root = rootOf(defender)
+			local direction = flatBetween(attacker, defender)
+			if data.flinch ~= false and root and direction then
+				root.CFrame = CFrame.lookAt(root.Position, root.Position - direction)
+				local v = root.AssemblyLinearVelocity
+				if v.Y > 0 then
+					root.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z) -- no juggling
+				end
+				knockLocal(direction, (if spec then spec.knockback else 1) * Config.Knockback.Hit)
+			end
+		end
 		-- Hits escalate through a string: a longer freeze, a heavier sound and a camera
 		-- kick on enders and perilous attacks.
-		local kind = data.kind
-		local ender = kind == "Light3" or kind == "Overhead" or kind == "Perilous" or kind == "Sweep"
+		local ender = reaction ~= "Small"
 		hitstop(Config.Visual.HitHitstop[kind] or Config.Visual.Hitstop, attacker, defender)
 		local root = rootOf(defender)
 		if root then
@@ -756,7 +914,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	PostureBroken = function(data)
 		local model: Model = data.model
-		Animator.stop(model)
+		playClip(model, "GuardBreak") -- then the Broken stance holds underneath
 		local root = rootOf(model)
 		if root then
 			burst(root.Position + Vector3.new(0, 1.5, 0), GOLD, 40, 24, 5)
@@ -769,9 +927,9 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if isLocal(attacker) then
 			popText(defender, `DEATHBLOW  -{Config.DeathblowDamage}`, Color3.fromRGB(230, 50, 40), true)
 		end
-		Animator.play(attacker, "Deathblow")
+		playClip(attacker, "Deathblow")
 		-- A deathblow on an unwounded fighter knocks them down instead of killing.
-		Animator.play(defender, if data.lethal == false then "HitReact" else "Executed")
+		playClip(defender, if data.lethal == false then "HitReact" else "Executed")
 		hitstop(Config.Visual.DeathblowHitstop, attacker, defender)
 		local root = rootOf(defender)
 		if root then
@@ -792,12 +950,54 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			shake(0.9, 0.35, attacker, defender)
 			deathblowGrade()
 		end
+		if isLocal(attacker) and data.lethal ~= false then
+			-- Your killing deathblow: the lens punches in and eases back, a beat of cinema.
+			local camera = workspace.CurrentCamera
+			local base = camera.FieldOfView
+			TweenService:Create(camera, TweenInfo.new(0.09, Enum.EasingStyle.Quad), { FieldOfView = base - 16 }):Play()
+			task.delay(0.35, function()
+				TweenService:Create(
+					camera,
+					TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+					{ FieldOfView = LockOn.baseFov() } -- the lock may have let go meanwhile
+				):Play()
+			end)
+		end
+	end,
+
+	-- Cut down with a resurrection left: they sink to their knees, then rise in a burst of
+	-- red light.
+	CutDown = function(data)
+		local model: Model = data.model
+		playClip(model, "Executed")
+		local root = rootOf(model)
+		if root then
+			flare(root.Position, BLOOD, 8)
+		end
+		playSound(SOUNDS.PostureBreak, root, 0.7, 0.6)
+	end,
+
+	Resurrected = function(data)
+		local model: Model = data.model
+		playClip(model, "Revive")
+		local root = rootOf(model)
+		if root then
+			burst(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(255, 70, 60), 50, 30, 6)
+			flare(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(255, 90, 70), 14)
+		end
+		playSound(SOUNDS.PerfectDeflect, root, 0.9, 0.55)
+		if isLocal(model) then
+			shake(0.5, 0.3, model, model)
+		end
 	end,
 
 	Died = function(data)
 		local model: Model = data.model
-		if Animator.current(model) ~= "Executed" then
-			Animator.play(model, "Executed")
+		local current = Animator.current(model)
+		-- A boss already lies in its own death anim (BossVisuals holds it): don't kneel it back up.
+		local bossDeath = current ~= nil and string.find(current, "_Die", 1, true) ~= nil
+		if current ~= "Executed" and not bossDeath then
+			playClip(model, "Executed")
 		end
 	end,
 
@@ -815,16 +1015,34 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		end
 	end,
 
-	Jumped = function(data)
-		if data.kick then
-			-- Landed on the sweeper's head: a heavy posture hit.
-			local root = rootOf(data.attacker)
-			if root then
-				burst(root.Position + Vector3.new(0, 2.6, 0), GOLD, 26, 18, 4)
-			end
-			playSound(SOUNDS.Guard, root, 0.8, 0.8)
-			hitstop(Config.Visual.Hitstop, data.attacker, data.defender)
+	-- A second jump press over a sweeper: a stomp on their head.
+	Stomp = function(data)
+		local attacker: Model, defender: Model = data.attacker, data.defender
+		local root = rootOf(attacker)
+		if root then
+			burst(root.Position + Vector3.new(0, 2.6, 0), GOLD, 30, 20, 4.5)
 		end
+		playSound(SOUNDS.Guard, root, 0.85, 0.75)
+		playSound(SOUNDS.PostureBreak, root, 0.6, 1.3)
+		playClip(attacker, "HitLarge")
+		playClip(defender, "Mikiri")
+		hitstop(Config.Visual.Hitstop, attacker, defender)
+		if isLocal(defender) then
+			local mine = rootOf(defender)
+			if mine then
+				local v = mine.AssemblyLinearVelocity
+				mine.AssemblyLinearVelocity = Vector3.new(v.X, Config.Stomp.Launch, v.Z)
+			end
+		end
+		if isLocal(attacker) or isLocal(defender) then
+			shake(0.6, 0.25, defender, attacker)
+		end
+		if isLocal(defender) then
+			popText(attacker, "STOMP", GOLD, true)
+		end
+	end,
+
+	Jumped = function(data)
 		-- A clean evade: a soft puff of dust where the blow passed, no text.
 		local root = rootOf(data.defender)
 		if root then
@@ -834,8 +1052,18 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Mikiri = function(data)
 		local attacker: Model, defender: Model = data.attacker, data.defender
-		Animator.play(defender, "Mikiri")
-		Animator.play(attacker, "Recoil")
+		playClip(defender, "Mikiri")
+		playClip(attacker, "Recoil")
+		if isLocal(defender) then
+			-- The counter slides you onto the blade and opens the MikiriSlash follow-up.
+			LocalCombat.mikiriUntil = now() + Config.Mikiri.FollowWindow
+			LocalCombat.contact()
+			local direction = flatBetween(defender, attacker)
+			local distance = data.lunge
+			if direction and typeof(distance) == "number" and distance > 0.1 then
+				Motion.surge(direction, 3 * distance / 0.5, 0, 0.5)
+			end
+		end
 		hitstop(Config.Visual.PerfectHitstop, attacker, defender)
 		local root = rootOf(defender)
 		if root then
@@ -854,7 +1082,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Drink = function(data)
 		local model: Model = data.model
-		Animator.play(model, "Drink")
+		playClip(model, "Drink")
 		-- A small gourd in the off hand for the length of the sip.
 		local hand = model:FindFirstChild("LeftHand")
 		if hand and hand:IsA("BasePart") then
@@ -887,11 +1115,30 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Feint = function(data)
 		Animator.stop(data.model)
+		if isLocal(data.model) then
+			LocalCombat.attackingUntil = 0
+		end
 	end,
 
 	Interrupted = function(data)
 		Animator.stop(data.model)
+		if isLocal(data.model) then
+			LocalCombat.attackingUntil = 0
+		end
 	end,
+}
+
+-- Reaction clips that end with the stun or recoil they show.
+local STUN_CLIPS: { [string]: boolean } = {
+	HitSmall = true,
+	HitMiddle = true,
+	HitLarge = true,
+	HitGedan = true,
+	HitReact = true,
+	Recoil = true,
+	RecoilLeft = true,
+	Knocked = true,
+	GuardBreak = true,
 }
 
 local function watch(instance: Instance)
@@ -906,7 +1153,23 @@ local function watch(instance: Instance)
 	end)
 	model:GetAttributeChangedSignal("CombatState"):Connect(function()
 		refreshBase(model)
+		-- Kannagi's reaction clips run longer than our stuns (HitSmall 0.63 s vs 0.25 s): when the
+		-- stun or recoil ends, blend out so the reaction never hides that the fighter is free.
+		local state = model:GetAttribute("CombatState")
+		local clip = Animator.current(model)
+		if state == "Idle" and clip and STUN_CLIPS[clip] then
+			Animator.stop(model)
+		end
 	end)
+	-- Jumps play Kannagi's jump clip (on every client that sees the humanoid jump).
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.StateChanged:Connect(function(_, new)
+			if new == Enum.HumanoidStateType.Jumping and model:GetAttribute("CombatState") == "Idle" then
+				playClip(model, "Jump")
+			end
+		end)
+	end
 end
 
 function CombatVisuals.start()
@@ -922,14 +1185,14 @@ function CombatVisuals.start()
 				Animator.unfreeze(model)
 				Animator.play(model, clip, windup)
 				task.wait(at)
-				Animator.hitstop(model, 30)
+				Animator.freeze(model, 30)
 			elseif command == "pose" then
 				-- Hold a named pose as the stance until released (clip = pose name).
 				heldTestPose = clip
 				Animator.setBase(model, clip)
 			elseif command == "release" then
 				heldTestPose = nil
-				Animator.hitstop(model, 0)
+				Animator.unfreeze(model)
 				Animator.stop(model)
 			end
 			return true

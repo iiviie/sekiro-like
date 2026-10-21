@@ -96,13 +96,15 @@ local defs: { [string]: WeaponDef } = {
 		reach = 1.25,
 		stamina = 1.35,
 		moves = {
-			-- Strings don't speed up as much: an odachi string is two swings, not a flurry.
-			Light2 = { chainWindup = 0.54 },
-			Light3 = { chainWindup = 0.56 },
+			-- Strings scale with the 1.4x windup (Light2 0.64, chained 0.59: a smaller speed-up
+			-- than the katana's, so an odachi string is two heavy swings, not a flurry).
 			-- Its overhead has late-windup armour: trade into it and lose.
 			Overhead = { armorFrom = 0.25 },
-			-- The riposte is the one fast move it gets, so the parry still pays.
-			Riposte = { windup = 0.2, recovery = 0.4 },
+			-- The riposte is the one fast move it gets (it must land inside the 0.5 s recoil), so
+			-- the parry still pays. Its recovery still scales.
+			Riposte = { windup = 0.2 },
+			-- Likewise the Mikiri follow-up, which must land inside the 0.9 s Mikiri stagger.
+			MikiriSlash = { windup = 0.32 },
 		},
 	},
 }
@@ -119,10 +121,31 @@ for _, spec in Config.Attacks do
 		KNOWN_SPEC_FIELDS[field] = true
 	end
 end
+for field in Config.MoveDefaults do
+	KNOWN_SPEC_FIELDS[field] = true
+end
 for _, field in
-	{ "armorFrom", "chainWindup", "cooldownGroup", "riposte", "ender", "perilous", "noGuard", "thrust", "low" }
+	{
+		"armorFrom",
+		"chainWindup",
+		"cooldownGroup",
+		"riposte",
+		"ender",
+		"perilous",
+		"noGuard",
+		"thrust",
+		"low",
+		"follow",
+	}
 do
 	KNOWN_SPEC_FIELDS[field] = true
+end
+local KNOWN_CANCELS = { Attack = true, Block = true, Dodge = true, Jump = true, Heal = true }
+for kind, move in Config.Attacks do
+	for input in move.cancel or {} do
+		assert(KNOWN_CANCELS[input], `[Config] Attacks.{kind}.cancel: unknown input {input}`)
+	end
+	assert(move.follow == nil or Config.Attacks[move.follow], `[Config] Attacks.{kind}: unknown follow`)
 end
 
 -- Load-time validation: bad content fails in Studio, not mid-match.
@@ -145,24 +168,48 @@ local cache: { [string]: { [string]: AttackSpec } } = {}
 
 local function build(def: WeaponDef, kind: AttackKind): AttackSpec
 	local base = Config.Attacks[kind]
-	local spec = table.clone(base) :: any
+	-- Per-move timing hooks fall back to Config.MoveDefaults; cancel points merge per input.
+	local spec = table.clone(Config.MoveDefaults) :: any
+	for field, value in base do
+		spec[field] = value
+	end
+	local cancel = table.clone(Config.MoveDefaults.cancel)
+	for input, at in base.cancel or {} do
+		cancel[input] = at
+	end
+	spec.cancel = cancel
 	spec.windup = base.windup * def.windup
 	if base.chainWindup then
 		spec.chainWindup = base.chainWindup * def.windup
 	end
 	spec.recovery = base.recovery * def.recovery
+	-- Cancel points are part of recovery: a slower weapon's open later.
+	for input, at in cancel do
+		cancel[input] = at * def.recovery
+	end
 	spec.damage = base.damage * def.damage
 	spec.postureDamage = base.postureDamage * def.postureDamage
 	spec.range = base.range * def.reach
 	spec.lunge = base.lunge * def.reach
+	-- A slower blade also turns slower inside its swing (tracking scales with the windup ratio).
+	spec.trackRate = spec.trackRate / def.windup
+	spec.startTurnRate = spec.startTurnRate / def.windup
 	-- Perilous timing and armour are universal: the red warning means the same thing on
 	-- every weapon, so defenders learn one rhythm.
 	if base.perilous then
 		spec.windup = base.windup
 		spec.armorFrom = base.armorFrom
+		spec.trackRate = base.trackRate or Config.MoveDefaults.trackRate
+		spec.startTurnRate = base.startTurnRate or Config.MoveDefaults.startTurnRate
 	end
 	for field, value in (def.moves and def.moves[kind]) or {} do
-		spec[field] = value
+		if field == "cancel" then
+			for input, at in value do
+				cancel[input] = at
+			end
+		else
+			spec[field] = value
+		end
 	end
 	spec.kind = kind
 	spec.weapon = def.id
@@ -195,12 +242,31 @@ function Weapons.of(model: Instance?): string
 	return if typeof(id) == "string" and defs[id] then id else Weapons.Default
 end
 
+-- How a fighter may turn during its own swing (Kannagi turns once into an attack, then only
+-- inside authored tracking windows). `elapsed` is the time since the attack started and
+-- `untilImpact` the time left until hitAt (negative in recovery). Returns the allowed turn
+-- rate in degrees/s (always capped), and whether this is the attack's opening turn.
+-- Recovery never turns.
+function Weapons.turnRate(spec: AttackSpec, elapsed: number, untilImpact: number): (number, boolean)
+	if untilImpact <= 0 then
+		return 0, false
+	end
+	if elapsed < spec.startTurn then
+		return math.max(spec.startTurnRate, spec.trackRate), true
+	end
+	if elapsed >= spec.trackFrom and untilImpact > spec.trackUntil then
+		return spec.trackRate, false
+	end
+	return 0, false
+end
+
 function Weapons.staminaCost(id: string?, action: string): number?
 	local base = Config.Stamina.Costs[action]
 	if not base then
 		return nil
 	end
-	-- Dodges are a universal defensive verb; only attacks scale with the weapon.
+	-- Dodges are a universal defensive verb; only attacks (if any cost stamina) scale with
+	-- the weapon.
 	return if action == "Dodge" then base else base * Weapons.get(id).stamina
 end
 

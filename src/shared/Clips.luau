@@ -20,7 +20,14 @@ export type Clip = {
 	hold: number?, -- seconds to hold the last pose
 	fadeOut: number?, -- seconds to blend back to the base stance
 	twoHanded: boolean?, -- the left hand stays IK-locked to the hilt throughout
-	baked: boolean?, -- sampled from Blender: the impact is exactly the end of the windup segments
+	baked: boolean?, -- sampled from Blender: the windup segments end where the hit collider turns on
+	-- Baked clips only: how far past the end of the windup segments the blade is mid-cut. The
+	-- server's hit is instant at hitAt, but Kannagi's collider is live for a whole active window,
+	-- so the clip is shifted to put the middle of that window on hitAt.
+	impactLead: number?,
+	-- Seconds the clip holds its first frame while blending in (Kannagi's PauseBlendIn), before
+	-- the rest of the windup plays; Animator.play's `freeze` argument overrides it.
+	freeze: number?,
 }
 
 -- How far into the strike segment the blade actually connects.
@@ -119,10 +126,70 @@ local Clips: { [string]: Clip } = {
 		hold = 0.12,
 		fadeOut = 0.25,
 	},
+	-- Flinches by the attack's reaction size (Config.HitStun 0.2 / 0.3 / 0.45 / 0.4 s): they
+	-- snap in at once (Kannagi blends reactions in over 0-0.02 s) and hold for the stun.
+	HitSmall = {
+		segments = { { pose = "HitReact", duration = 0.03, ease = "out" } },
+		hold = 0.12,
+		fadeOut = 0.2,
+	},
+	HitMiddle = {
+		segments = { { pose = "HitMiddle", duration = 0.03, ease = "out" } },
+		hold = 0.2,
+		fadeOut = 0.25,
+	},
+	HitLarge = {
+		segments = { { pose = "HitLarge", duration = 0.03, ease = "out" } },
+		hold = 0.32,
+		fadeOut = 0.3,
+	},
+	HitGedan = {
+		segments = { { pose = "HitGedan", duration = 0.04, ease = "out" } },
+		hold = 0.28,
+		fadeOut = 0.3,
+	},
 	GuardImpact = {
 		segments = { { pose = "GuardImpact", duration = 0.05, ease = "out" } },
 		hold = 0.05,
 		fadeOut = 0.15,
+	},
+	-- Guard hits by size (GuardReaction); the large one lingers (Kannagi plays it at 0.7x).
+	GuardSmall = {
+		segments = { { pose = "GuardImpact", duration = 0.03, ease = "out" } },
+		hold = 0.05,
+		fadeOut = 0.15,
+	},
+	GuardMiddle = {
+		segments = { { pose = "GuardImpact", duration = 0.03, ease = "out" } },
+		hold = 0.1,
+		fadeOut = 0.2,
+	},
+	GuardLarge = {
+		segments = { { pose = "GuardImpactLarge", duration = 0.03, ease = "out" } },
+		hold = 0.18,
+		fadeOut = 0.3,
+	},
+	-- The defender's deflect, thrown to the side the blade came from (AttackSpec.deflectSide).
+	DeflectRight = {
+		segments = { { pose = "DeflectRight", duration = 0.02, ease = "out" } },
+		hold = 0.08,
+		fadeOut = 0.25,
+	},
+	DeflectLeft = {
+		segments = { { pose = "DeflectLeft", duration = 0.02, ease = "out" } },
+		hold = 0.08,
+		fadeOut = 0.25,
+	},
+	DeflectBack = {
+		segments = { { pose = "DeflectBack", duration = 0.02, ease = "out" } },
+		hold = 0.12,
+		fadeOut = 0.35,
+	},
+	-- A deflected opener: the blade is knocked aside for a beat and the string goes on.
+	Knocked = {
+		segments = { { pose = "Knocked", duration = 0.04, ease = "out" } },
+		hold = 0.06,
+		fadeOut = 0.12,
 	},
 	Deathblow = {
 		segments = {
@@ -149,6 +216,42 @@ local Clips: { [string]: Clip } = {
 for name, clip in require(script.Parent.BakedClips) do
 	clip.baked = true
 	Clips[name] = clip
+end
+
+-- The counter-string moves reuse the sword clips until they get their own: the second
+-- counter cut swings Light1's arc (the Riposte swings Light2's), the dodge attack is the
+-- thrust, and the Mikiri follow-up is the overhead cut down onto the pinned blade.
+-- How far past the end of the windup segments the blade meets a standing target (tip 3+ studs
+-- ahead at body height), so that moment lands on hitAt. Measured in Studio's Edit datamodel (QA,
+-- the same sampler as ~/re/kannagi-usagi/scripts/anim/boss_leads.luau): with no lead the cuts
+-- arrived 30-45 ms after the hit (Light3 and Sweep 10-15, Overhead and the thrust on time or
+-- early); these put every one 0-15 ms after it. (The earlier "half the active window" values,
+-- 0.03-0.08, were compensating for Animator's old 20 ms floor per windup segment, which stretched
+-- dense bakes past the hit.)
+local IMPACT_LEAD: { [string]: number } = {
+	Light1 = 0.025,
+	Light2 = 0.02,
+	Light3 = 0,
+	Overhead = 0,
+	Riposte = 0.025,
+	Riposte2 = 0.03,
+	DodgeSlash = 0.035,
+	MikiriSlash = 0.035,
+	Perilous = 0,
+	Sweep = 0,
+}
+for name, lead in IMPACT_LEAD do
+	local clip = Clips[name]
+	if clip and clip.baked and clip.impactLead == nil then
+		clip.impactLead = lead
+	end
+end
+
+local ALIASES = { Riposte2 = "Light1", DodgeSlash = "Perilous", MikiriSlash = "Overhead" }
+for name, source in ALIASES do
+	if not Clips[name] then
+		Clips[name] = Clips[source]
+	end
 end
 
 -- Stances held with both hands on the hilt (the left hand is IK-locked to it).

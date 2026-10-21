@@ -34,6 +34,12 @@ local deathblowKills = 0
 local matches = 0
 local lastBlow: { [Combatant]: string } = {}
 
+-- Only the royale's blows count: duels and boss trials (Bosses' scripted hits, and your
+-- swings against a boss) can run during a match and would skew its balance.
+local function inRoyale(c: Combatant?): boolean
+	return c ~= nil and Round.phase() == "Match" and c.model:GetAttribute("Arena") == "Royale"
+end
+
 local function bucket(c: Combatant): Tally
 	return if c.player then tallies.human else tallies.bot
 end
@@ -132,12 +138,12 @@ end
 
 function Telemetry.start()
 	CombatService.onWindup(function(attacker: Combatant, kind: string)
-		if Round.phase() == "Match" then
+		if inRoyale(attacker) then
 			bump(bucket(attacker), kind, "Started")
 		end
 	end)
 	CombatService.onOutcome(function(kind: string, outcome: string, attacker: Combatant, target: Combatant?)
-		if Round.phase() ~= "Match" then
+		if not inRoyale(attacker) or (target and not inRoyale(target)) then
 			return
 		end
 		bump(bucket(attacker), kind, outcome)
@@ -148,7 +154,8 @@ function Telemetry.start()
 		end
 	end)
 	CombatService.onDied(function(victim: Combatant)
-		if Round.phase() ~= "Match" then
+		if not inRoyale(victim) then
+			lastBlow[victim] = nil
 			return
 		end
 		deaths += 1

@@ -30,8 +30,9 @@ local function show(text: string, color: Color3)
 	}):Play()
 end
 
+-- How early the press was, from the press itself (not from a window a re-press opened late).
 local function early(hitAt: number): number
-	return math.floor((hitAt - LocalCombat.deflectStamp) * 1000 + 0.5)
+	return math.floor((hitAt - LocalCombat.pressStamp) * 1000 + 0.5)
 end
 
 local function outcome(kind: string, data: { [string]: any })
@@ -57,7 +58,9 @@ local function outcome(kind: string, data: { [string]: any })
 		end
 	elseif kind == "Guard" then
 		local grey = Color3.fromRGB(170, 175, 185)
-		if ms > 600 then
+		if LocalCombat.pressDelayed and ms <= window + 200 then
+			show(`GUARDED  ·  re-pressed too soon after lowering guard: the window opened late`, grey)
+		elseif ms > 600 then
 			show(`GUARDED  ·  tap block within {window} ms of impact to deflect`, grey)
 		else
 			show(`GUARDED  ·  {ms} ms early  (deflect window is {window} ms)`, grey)
@@ -65,6 +68,8 @@ local function outcome(kind: string, data: { [string]: any })
 	elseif kind == "Hit" then
 		if ms < 0 and ms > -400 then
 			show(`TOO LATE  ·  {-ms} ms after impact`, UI.Crimson)
+		elseif LocalCombat.pressDelayed and ms >= 0 and ms <= window + 200 then
+			show(`HIT  ·  re-pressed too soon after lowering guard: the window opened late`, UI.Crimson)
 		elseif ms >= 0 and ms < 1500 then
 			show(`TOO EARLY  ·  {ms} ms  (and guard wasn't held)`, UI.Crimson)
 		else

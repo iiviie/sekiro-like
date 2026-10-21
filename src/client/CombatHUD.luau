@@ -16,6 +16,7 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local LockOn = require(script.Parent.LockOn)
@@ -198,8 +199,8 @@ local function refreshStamina(model: Model)
 	end
 	setBar(stamina, ratio)
 	stamina.fill.ImageColor3 = if ratio < 0.2 then STAMINA_LOW else STAMINA
-	-- Quiet while full, brighter while it's being spent and recovering.
-	tween(staminaGroup, 0.3, { GroupTransparency = if ratio >= 0.999 then 0.45 else 0 })
+	-- Only dodges spend stamina now: hidden while full, shown while spent and recovering.
+	tween(staminaGroup, 0.3, { GroupTransparency = if ratio >= 0.999 then 1 else 0 })
 end
 
 local function trackCharacter(character: Model)
@@ -220,7 +221,7 @@ local function trackCharacter(character: Model)
 	setBar(posture, 0, true)
 	postureGroup.GroupTransparency = 1
 	ownGroup.GroupTransparency = 0
-	staminaGroup.GroupTransparency = 0.45
+	staminaGroup.GroupTransparency = 1
 	onHealth()
 	table.insert(characterConnections, humanoid.HealthChanged:Connect(onHealth))
 	table.insert(
@@ -288,7 +289,8 @@ function CombatHUD.splash(kanjiImage: string, subtitle: string, color: Color3, h
 	caption.Size = UDim2.fromOffset(700, 26)
 	caption.BackgroundTransparency = 1
 	caption.Font = FONT
-	caption.Text = (string.upper(subtitle):gsub("(.)", "%1 ")):sub(1, -2)
+	-- Letter-spaced, one UTF-8 character at a time (a byte-wise pattern splits "·").
+	caption.Text = (string.upper(subtitle):gsub(utf8.charpattern, "%0 ")):sub(1, -2)
 	caption.TextSize = 20
 	caption.TextColor3 = PARCHMENT
 	caption.TextTransparency = 0.1
@@ -318,6 +320,9 @@ function CombatHUD.setLobbyMode(on: boolean)
 	end
 	ownGroup.Visible = not on
 	staminaGroup.Visible = not on
+	-- The lobby's nav bar owns the bottom of the screen; the keyboard reminder is for fights,
+	-- and a phone has no keyboard.
+	controlsHint.Visible = not on and not (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
 	postureGroup.Position = if on then UDim2.new(0.5, 0, 1, -260) else UDim2.new(0.5, 0, 1, -100)
 end
 
@@ -424,6 +429,9 @@ local function showEnemy(model: Model, linger: number?)
 		})
 		local vitalityBar =
 			makeBar(gui, Vector2.new(120, 4), UDim2.fromOffset(100, 22), Vector2.new(0.5, 0), false, true, CRIMSON)
+		-- A boss has its own bar at the bottom of the screen (BossHUD): no floating bars over
+		-- it, but the deathblow marker on its body still shows.
+		gui.Enabled = model:GetAttribute("Boss") == nil
 		gui.Parent = player:WaitForChild("PlayerGui")
 
 		local created: EnemyEntry = {
@@ -460,7 +468,11 @@ local function showEnemy(model: Model, linger: number?)
 	local current = entry :: EnemyEntry
 	current.hideToken += 1
 	local token = current.hideToken
-	task.delay(linger or ENEMY_BAR_LINGER, function()
+	local hold = linger or ENEMY_BAR_LINGER
+	if hold == math.huge then
+		return -- the lock-on target: shown until the lock moves on (task.delay can't take inf)
+	end
+	task.delay(hold, function()
 		if enemies[model] == current and current.hideToken == token and LockOn.target() ~= model then
 			if model:GetAttribute("CombatState") ~= "Broken" then
 				removeEnemy(model)
@@ -527,7 +539,7 @@ local function buildScreen()
 	staminaGroup.AnchorPoint = Vector2.new(0, 1)
 	staminaGroup.Position = UDim2.new(0, 84, 1, -42)
 	staminaGroup.Size = UDim2.fromOffset(330, 26)
-	staminaGroup.GroupTransparency = 0.45
+	staminaGroup.GroupTransparency = 1
 	staminaGroup.Parent = screen
 	stamina =
 		makeBar(staminaGroup, Vector2.new(300, 4), UDim2.fromScale(0, 0.5), Vector2.new(0, 0.5), false, false, STAMINA)
@@ -599,9 +611,13 @@ local function onCombatEvent(kind: string, data: { [string]: any })
 			CombatHUD.splash(UI.KanjiExecution, "Shinobi Execution", DEATH_RED, 1.1)
 			removeEnemy(defender)
 		end
+	elseif kind == "CutDown" and data.model == character then
+		CombatHUD.splash(UI.KanjiDeath, "Cut down  ·  you will rise", DEATH_RED, 1.8)
+	elseif kind == "Resurrected" and data.model == character then
+		CombatHUD.splash(UI.KanjiResurrect, "Resurrection", Color3.fromRGB(235, 70, 60), 1.6)
 	elseif kind == "Died" and data.model == character then
 		CombatHUD.splash(UI.KanjiDeath, "Death", DEATH_RED, 2.6)
-	elseif kind == "Died" and data.model then
+	elseif (kind == "Died" or kind == "CutDown") and data.model then
 		removeEnemy(data.model)
 	elseif attacker and defender then
 		-- Any exchange involving you brings up the other fighter's bars.

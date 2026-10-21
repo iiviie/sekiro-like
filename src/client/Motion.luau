@@ -7,7 +7,10 @@
 -- safety net clamps any runaway upward velocity that sneaks in some other way.
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+
+local Spacing = require(ReplicatedStorage.Shared.Spacing)
 
 local player = Players.LocalPlayer
 
@@ -57,7 +60,8 @@ end
 
 -- A push whose speed eases out from `startSpeed` to `endSpeed` over `duration`
 -- (quadratic ease-out): a burst that settles into the run instead of stopping dead.
-function Motion.surge(direction: Vector3, startSpeed: number, endSpeed: number, duration: number)
+-- It stops at another fighter's body (Shared/Spacing) unless `passThrough` (a dodge).
+function Motion.surge(direction: Vector3, startSpeed: number, endSpeed: number, duration: number, passThrough: boolean?)
 	local flat = Vector3.new(direction.X, 0, direction.Z)
 	if flat.Magnitude < 1e-3 then
 		return
@@ -70,14 +74,20 @@ function Motion.surge(direction: Vector3, startSpeed: number, endSpeed: number, 
 	end
 	local startedAt = os.clock()
 	local connection: RBXScriptConnection
-	connection = RunService.PreSimulation:Connect(function()
+	connection = RunService.PreSimulation:Connect(function(dt: number)
 		if active ~= push then
 			connection:Disconnect()
 			return
 		end
 		local u = math.clamp((os.clock() - startedAt) / duration, 0, 1)
 		local speed = endSpeed + (startSpeed - endSpeed) * (1 - u) * (1 - u)
-		push.PlaneVelocity = Vector2.new(flat.X * speed, flat.Z * speed)
+		local velocity = flat * speed
+		local character = player.Character
+		local root = rootOf()
+		if not passThrough and character and root then
+			velocity = Spacing.limit(character, root.Position, velocity, dt)
+		end
+		push.PlaneVelocity = Vector2.new(velocity.X, velocity.Z)
 		if u >= 1 then
 			connection:Disconnect()
 		end

@@ -4,44 +4,86 @@
 -- anything a player can't.
 --
 -- Behaviour: pick a target (spreading out so one fighter isn't mobbed), circle it at
--- StrafeDistance, step in to swing a short combo, back off to recover posture, and
--- react to incoming windups with dice-rolled deflects, guards and dodges.
+-- StrafeDistance, step in to swing a short combo, back off to recover posture, and meet
+-- incoming swings with Kannagi's defence ladder (per attacker: reflex guard when idle,
+-- guard after a flinch, deflect after a guard, counter after a deflect), each rung
+-- followed with the tier's probability and reaction time. Only perilous answers are dice.
+-- Facing is a capped turn: free bots turn at TurnSpeed, a swinging bot only inside its
+-- move's tracking window, so side-stepping a committed bot swing works.
+--
+-- Royale fillers are a numbered roster (setCount) in Workspace.Bots. Duel bots
+-- (spawnDuelist) live outside it, in Workspace.DuelBots, fight only their one foe and keep
+-- to their terrace.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Progression = require(ReplicatedStorage.Shared.Progression)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
 local CombatService = require(script.Parent.CombatService)
 local Locomotion = require(script.Parent.Locomotion)
 local Outfit = require(script.Parent.Outfit)
 local Round = require(ReplicatedStorage.Shared.Round)
+local Spacing = require(ReplicatedStorage.Shared.Spacing)
 
 type Combatant = CombatService.Combatant
 type AttackKind = Config.AttackKind
 type AttackSpec = Config.AttackSpec
 
+type Tier = { [string]: any }
+
 type Brain = {
 	c: Combatant,
+	tier: Tier, -- skill multipliers, fixed when the bot spawns (Config.Bots.Tiers)
+	foe: Combatant?, -- a duel bot only ever fights this one
+	arena: { center: Vector3, radius: number }?, -- and stays inside this circle
 	align: AlignOrientation,
 	target: Combatant?,
 	nextAttackAt: number,
 	comboLeft: number,
 	lastOpeningAt: number,
-	readUntil: number, -- while set, the bot has read a spammer: hold guard, deflect, punish
+	readUntil: number, -- while set, the bot is on a deflect rung: hold ground, deflect, counter
+	backstepUntil: number, -- after a flinch: back off with guard up
 	strafeSign: number,
 	strafeSwitchAt: number,
 }
 
 local TARGET_SHARE_PENALTY = 30 -- studs added per other bot already on a target
+local NAMES = {
+	"Hayato",
+	"Genji",
+	"Ichiro",
+	"Kaito",
+	"Renjiro",
+	"Sora",
+	"Daichi",
+	"Haruki",
+	"Jinbei",
+	"Kenta",
+	"Masaru",
+	"Ryota",
+	"Shinji",
+	"Takeru",
+	"Yoshi",
+	"Botan",
+	"Kagero",
+	"Tetsu",
+	"Okami",
+	"Raiden",
+}
 
 local BotService = {}
 
 local brains: { [Combatant]: Brain } = {}
 local botFolder: Folder
+local duelFolder: Folder
 local slots: { [number]: Model } = {} -- bot index -> its current body
 local desiredCount = 0
 local respawnEnabled = true
+local tierName = "Adept"
+local tier = Config.Bots.Tiers.Adept
 
 local function now(): number
 	return workspace:GetServerTimeNow()
@@ -71,12 +113,20 @@ local function spawnPoint(): CFrame
 	return CFrame.lookAt(position, Vector3.new(0, 4, 0))
 end
 
-local function buildRig(index: number): Model
+local function buildRig(index: number, rigTier: string): Model
 	local description = Instance.new("HumanoidDescription")
 	Outfit.describe(description, index)
 
 	local model = Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R15)
-	model.Name = `Ronin {index}`
+	model.Name = `{Config.Bots.Tiers[rigTier].Title} {NAMES[math.random(#NAMES)]}`
+	model:SetAttribute("BotTier", rigTier)
+	-- Stronger bots show off rarer blades: players see what's worth earning.
+	local skins = Progression.Skins
+	local skinIndex = if rigTier == "Master"
+		then math.random(4, #skins)
+		elseif rigTier == "Adept" then math.random(1, 3)
+		else 1
+	model:SetAttribute("Skin", skins[skinIndex].id)
 	-- Mix the weapon roster so players meet every archetype.
 	model:SetAttribute("Weapon", Weapons.Order[(index - 1) % #Weapons.Order + 1])
 	Outfit.dress(model)
@@ -85,6 +135,10 @@ end
 
 local function chooseTarget(brain: Brain): Combatant?
 	local self = brain.c
+	local foe = brain.foe
+	if foe then
+		return if alive(foe) and not CombatService.isProtected(foe) then foe else nil
+	end
 	local best: Combatant? = nil
 	local bestScore = Config.Bots.AggroRange
 	for _, other in CombatService.all() do
@@ -93,10 +147,16 @@ local function chooseTarget(brain: Brain): Combatant?
 			if other.player then
 				score *= Config.Bots.PlayerBias
 			end
+			local hunters = 0
 			for otherBrain in brains do
 				if otherBrain ~= self and brains[otherBrain].target == other then
 					score += TARGET_SHARE_PENALTY
+					hunters += 1
 				end
+			end
+			-- Never gang up on a human: one bot at a time, the rest find someone else.
+			if other.player and hunters >= Config.Bots.MaxBotsPerPlayer then
+				score = math.huge
 			end
 			if score < bestScore then
 				best, bestScore = other, score
@@ -108,7 +168,8 @@ end
 
 local function startCombo(brain: Brain, t: number)
 	local c = brain.c
-	local perilous = math.random() < Config.Bots.PerilousChance
+	local skillTier = brain.tier
+	local perilous = math.random() < Config.Bots.PerilousChance * skillTier.Perilous
 	local action = if not perilous then "Attack" elseif math.random() < 0.5 then "Perilous" else "Sweep"
 	if CombatService.perform(c, action, t) then
 		brain.comboLeft = 0
@@ -117,7 +178,7 @@ local function startCombo(brain: Brain, t: number)
 				brain.comboLeft += 1
 			end
 		end
-		brain.nextAttackAt = t + randomRange(Config.Bots.AttackInterval)
+		brain.nextAttackAt = t + randomRange(Config.Bots.AttackInterval) * skillTier.AttackInterval
 	end
 end
 
@@ -146,10 +207,8 @@ local function think(brain: Brain)
 	local forward = if distance > 0.01 then toTarget.Unit else flat(root.CFrame.LookVector).Unit
 	local right = forward:Cross(Vector3.yAxis)
 
-	-- Face the target smoothly.
+	-- Facing is applied every frame by updateFacing (capped by the move's tracking).
 	humanoid.AutoRotate = false
-	brain.align.Enabled = true
-	brain.align.CFrame = CFrame.lookAt(Vector3.zero, forward)
 
 	-- Chain the next slash by buffering it in the last moments of recovery.
 	if c.state == "Staggered" or c.state == "Broken" then
@@ -175,7 +234,7 @@ local function think(brain: Brain)
 		if c.state == "Idle" then
 			CombatService.perform(c, "Heal", t)
 		end
-	elseif postureRatio > Config.Bots.RetreatPosture or hurt then
+	elseif postureRatio > Config.Bots.RetreatPosture or hurt or t < brain.backstepUntil then
 		move = -forward + right * brain.strafeSign * 0.6
 	elseif target.state == "Broken" and distance <= Config.Bots.AttackDistance + 2 then
 		-- A broken posture is the opening that matters most: go for the deathblow.
@@ -184,8 +243,8 @@ local function think(brain: Brain)
 			CombatService.perform(c, "Attack", t)
 		end
 	elseif t < brain.readUntil then
-		-- Read a spammer: stop swinging into their rhythm, hold ground and wait to deflect.
-		-- The punish comes from onDeflect.
+		-- On the deflect rung: stop swinging into their rhythm, hold ground and wait to
+		-- deflect. The counter comes from onOutcome.
 		move = right * brain.strafeSign * 0.25
 	elseif
 		(target.state == "Recovery" or target.state == "Staggered" or target.state == "Drinking")
@@ -196,7 +255,7 @@ local function think(brain: Brain)
 	then
 		-- The target is stuck in recovery, recoil or a sip: that's the opening.
 		brain.lastOpeningAt = t
-		if math.random() < Config.Bots.OpeningChance then
+		if math.random() < Config.Bots.OpeningChance * brain.tier.Opening then
 			startCombo(brain, t)
 		end
 	elseif t >= brain.nextAttackAt then
@@ -220,14 +279,23 @@ local function think(brain: Brain)
 			end
 		end
 	end
-	-- Stay inside the ring during a match, and inside the walls otherwise.
+	-- Stay inside the ring during a match, and inside the walls otherwise; duel bots stay on
+	-- their terrace.
 	local zoneCenter, zoneRadius = Round.zone(t)
-	local fromCentre = flat(root.Position - zoneCenter)
 	local limit = math.min(zoneRadius - 6, Config.Bots.ArenaRadius)
+	local arena = brain.arena
+	if arena then
+		zoneCenter, zoneRadius, limit = arena.center, arena.radius, arena.radius - 3
+	end
+	local fromCentre = flat(root.Position - zoneCenter)
 	if fromCentre.Magnitude > limit then
 		move -= fromCentre.Unit * (if fromCentre.Magnitude > zoneRadius then 3 else 1)
 	end
 
+	-- Bodies don't overlap (Shared/Spacing): stop walking into anyone already at contact.
+	if move.Magnitude > 0.05 then
+		move = Spacing.clip(c.model, root.Position, move.Unit)
+	end
 	humanoid:Move(if move.Magnitude > 0.05 then move.Unit else Vector3.zero)
 end
 
@@ -255,7 +323,22 @@ local function jumpOver(bot: Combatant)
 	CombatService.perform(bot, "Jump", now())
 end
 
-local function tapBlock(bot: Combatant, pressAt: number, releaseAt: number)
+-- Guard is pressed and released through these, so overlapping holds (a reflex guard, then a
+-- guard after a flinch) don't let go of each other early: the key comes up only once the
+-- latest hold has run out.
+local guardUntil: { [Combatant]: number } = {}
+
+local function holdBlock(bot: Combatant, pressAt: number, releaseAt: number, repress: boolean)
+	guardUntil[bot] = math.max(guardUntil[bot] or 0, releaseAt)
+	if repress then
+		-- A fresh press out of a held guard: let go early enough that the re-press isn't
+		-- caught by the anti-mash lockout (Config.Deflect.RepressLockout).
+		at(pressAt - Config.Deflect.RepressLockout - 0.02, function()
+			if alive(bot) and bot.blockHeld and now() < pressAt then
+				CombatService.perform(bot, "BlockUp", now())
+			end
+		end)
+	end
 	at(pressAt, function()
 		if not alive(bot) then
 			return
@@ -264,97 +347,140 @@ local function tapBlock(bot: Combatant, pressAt: number, releaseAt: number)
 		if bot.state == "Windup" and math.random() > Config.Bots.FeintChance then
 			return
 		end
+		if bot.blockHeld and not repress then
+			return -- already guarding
+		end
+		if bot.blockHeld then
+			CombatService.perform(bot, "BlockUp", now()) -- a fresh press for the deflect
+		end
 		CombatService.perform(bot, "BlockDown", now())
 	end)
 	at(releaseAt, function()
-		if alive(bot) then
+		if alive(bot) and now() >= (guardUntil[bot] or 0) - 0.01 then
 			CombatService.perform(bot, "BlockUp", now())
 		end
 	end)
 end
 
--- Bots are omniscient about hitAt, so their skill comes purely from these dice rolls.
--- Swings each bot has taken from each attacker in quick succession: mashing builds a
--- streak, and a bot that has read the rhythm deflects almost everything.
-local streaks: { [Combatant]: { [Combatant]: { count: number, last: number } } } = {}
+-- Kannagi's defence ladder, per bot and attacker: 0 nothing yet, 1 guard, 2 deflect.
+local GUARD, DEFLECT = 1, 2
+local ladders: { [Combatant]: { [Combatant]: { level: number, at: number } } } = {}
 
-local function streakOf(bot: Combatant, attacker: Combatant): number
-	local byAttacker = streaks[bot]
-	if not byAttacker then
-		byAttacker = {}
-		streaks[bot] = byAttacker
+local function rungOf(bot: Combatant, attacker: Combatant): number
+	local byAttacker = ladders[bot]
+	local rung = byAttacker and byAttacker[attacker]
+	if not rung or now() - rung.at > Config.Bots.Ladder.Memory then
+		return 0
 	end
-	local t = now()
-	local streak = byAttacker[attacker]
-	if streak and t - streak.last <= Config.Bots.StreakMemory then
-		streak.count += 1
-		streak.last = t
-	else
-		streak = { count = 1, last = t }
-		byAttacker[attacker] = streak
-	end
-	return streak.count
+	return rung.level
 end
 
--- Bots are omniscient about hitAt, so their skill comes purely from these dice rolls,
--- weighted up the more predictable (spammy) the attacker is being.
-local function react(bot: Combatant, attacker: Combatant, spec: AttackSpec, hitAt: number)
-	local skill = Config.Bots
-	local streak = streakOf(bot, attacker)
-	local read = math.max(0, streak - 1)
+local function setRung(bot: Combatant, attacker: Combatant, level: number)
+	local byAttacker = ladders[bot]
+	if not byAttacker then
+		byAttacker = {}
+		ladders[bot] = byAttacker
+	end
+	byAttacker[attacker] = { level = level, at = now() }
+end
+
+local function tierOf(bot: Combatant): Tier
 	local brain = brains[bot]
-	if brain and streak >= skill.ReadAfter then
-		brain.readUntil = now() + skill.StreakMemory
-		brain.comboLeft = 0
-	end
-	local perfectChance = math.min(skill.MaxPerfectChance, skill.PerfectChance + skill.StreakPerfectBonus * read)
-	local deflectChance = math.min(skill.MaxDeflectChance, skill.DeflectChance + skill.StreakDeflectBonus * read)
+	return if brain then brain.tier else tier
+end
+
+-- Perilous attacks are still answered by dice (scaled by the tier's Defense).
+local function reactPerilous(bot: Combatant, attacker: Combatant, spec: AttackSpec, hitAt: number, reactAt: number)
+	local skill = Config.Bots
+	local skillTier = tierOf(bot)
+	local d = skillTier.Defense
+	local dodgeChance = skill.DodgePerilousChance * d
 	local roll = math.random()
-	local perfect = Config.Deflect.PerfectWindow
-
-	local function deflectAt(lead: number, hold: number)
-		tapBlock(bot, hitAt - lead, hitAt + hold)
-	end
-
 	if spec.low then
-		-- Sweeps can only be jumped (or dodged).
-		if roll < skill.DodgePerilousChance then
-			at(hitAt - randomRange({ 0.15, 0.4 }), function()
+		-- Sweeps can only be jumped; a good bot then stomps on the sweeper's head.
+		if roll < dodgeChance then
+			local jumpAt = math.max(hitAt - randomRange({ 0.15, 0.4 }), reactAt)
+			at(jumpAt, function()
 				if alive(bot) then
 					jumpOver(bot)
 				end
 			end)
+			if math.random() < (skillTier.Stomp or 0) then
+				at(hitAt + randomRange({ 0.05, 0.2 }), function()
+					if alive(bot) then
+						CombatService.perform(bot, "Stomp", now())
+					end
+				end)
+			end
 		end
 		return
 	end
+	-- A thrust: Mikiri it, deflect it, or sidestep it. Guarding does nothing.
+	local window = Config.Mikiri.Window
+	if roll < dodgeChance * skill.MikiriChance then
+		at(math.max(hitAt - randomRange({ 0.06, window - 0.05 }), reactAt), function()
+			if alive(bot) then
+				dashInto(bot, attacker)
+			end
+		end)
+	elseif roll < dodgeChance then
+		local lead = randomRange(Config.Bots.Ladder.DeflectLead)
+		holdBlock(bot, math.max(hitAt - lead, reactAt), hitAt + 0.15, true)
+	elseif roll < dodgeChance + 0.2 * d then
+		at(math.max(hitAt - randomRange({ 0.08, Config.Dodge.IFrames - 0.05 }), reactAt), function()
+			if alive(bot) then
+				dodgeAway(bot)
+			end
+		end)
+	end
+end
 
-	if spec.thrust then
-		-- A thrust: Mikiri it, deflect it, or sidestep it. Guarding does nothing.
-		if roll < skill.DodgePerilousChance * skill.MikiriChance then
-			at(hitAt - randomRange({ 0.08, Config.Dodge.IFrames - 0.05 }), function()
-				if alive(bot) then
-					dashInto(bot, attacker)
-				end
-			end)
-		elseif roll < skill.DodgePerilousChance then
-			deflectAt(randomRange({ perfect + 0.01, Config.Deflect.Window - 0.03 }), 0.15)
-		elseif roll < skill.DodgePerilousChance + 0.2 then
-			at(hitAt - randomRange({ 0.08, Config.Dodge.IFrames - 0.05 }), function()
-				if alive(bot) then
-					dodgeAway(bot)
-				end
-			end)
-		end
+-- An incoming slash: climb the ladder. Bots know hitAt, so their limits are the tier's
+-- reaction time and the chance of following each rung.
+local function react(bot: Combatant, attacker: Combatant, spec: AttackSpec, hitAt: number)
+	local skillTier = tierOf(bot)
+	local ladder = Config.Bots.Ladder
+	local t = now()
+	local reactAt = t + skillTier.Reaction * (0.8 + math.random() * 0.4)
+	if spec.perilous then
+		reactPerilous(bot, attacker, spec, hitAt, reactAt)
 		return
 	end
-
-	if roll < perfectChance then
-		deflectAt(randomRange({ 0.015, perfect - 0.015 }), 0.15)
-	elseif roll < deflectChance then
-		deflectAt(randomRange({ perfect + 0.01, Config.Deflect.Window - 0.03 }), 0.15)
-	elseif roll < deflectChance + skill.GuardChance then
-		-- Raise guard well before the deflect window so it only guards.
-		deflectAt(0.5, 0.3)
+	local level = rungOf(bot, attacker)
+	if level == 0 and bot.state == "Idle" then
+		level = GUARD -- an idle bot that sees the swing coming raises guard
+	end
+	if level > 0 and math.random() > skillTier.Follow then
+		level -= 1 -- missed the rung
+	end
+	local brain = brains[bot]
+	if brain and level > 0 then
+		brain.comboLeft = 0 -- don't swing into it
+	end
+	if level >= DEFLECT then
+		if brain then
+			brain.readUntil = math.max(brain.readUntil, hitAt + 0.4)
+		end
+		local lead = randomRange(if math.random() < skillTier.Perfect then ladder.PerfectLead else ladder.DeflectLead)
+		local rules = Config.Deflect
+		local lockedOut = bot.blockHeld
+			and hitAt - lead - rules.RepressLockout < reactAt
+			and hitAt - bot.lastDefendAt > rules.ChainPress
+		if lockedOut then
+			lead += rules.RepressDelay -- too late to let go cleanly: press early for the late window
+		end
+		local pressAt = math.max(hitAt - lead, reactAt)
+		if pressAt < hitAt - 0.01 then
+			holdBlock(bot, pressAt, hitAt + 0.15, true)
+		end
+	elseif level == GUARD then
+		if bot.blockHeld then
+			guardUntil[bot] = math.max(guardUntil[bot] or 0, hitAt + ladder.GuardHold)
+			holdBlock(bot, t, hitAt + ladder.GuardHold, false)
+		elseif reactAt <= hitAt - ladder.GuardLead then
+			-- Up before the deflect window would open, so it is a guard, not a deflect.
+			holdBlock(bot, reactAt, hitAt + ladder.GuardHold, false)
+		end
 	end
 end
 
@@ -370,20 +496,59 @@ local function onWindup(attacker: Combatant, kind: AttackKind, hitAt: number)
 	end
 end
 
-local function onDeflect(_attacker: Combatant, defender: Combatant, perfect: boolean)
-	local brain = brains[defender]
-	if not brain then
+-- A counter-attack, if the tier takes it.
+local function counter(bot: Combatant, chance: number, delay: number)
+	local brain = brains[bot]
+	if not brain or math.random() >= chance * brain.tier.Punish then
 		return
 	end
-	-- A deflected attacker is open; Sekiro enemies make you pay for it.
-	local chance = if perfect then Config.Bots.PunishChance else Config.Bots.PunishChance * 0.65
-	if math.random() < chance then
-		task.delay(0.05, function()
-			if alive(defender) then
-				brain.nextAttackAt = 0
-				CombatService.perform(defender, "Attack", now())
-			end
-		end)
+	task.delay(delay, function()
+		if alive(bot) then
+			brain.nextAttackAt = 0
+			brain.readUntil = 0
+			CombatService.perform(bot, "Attack", now())
+		end
+	end)
+end
+
+-- Climbs the ladder from what actually happened to each swing at a bot.
+local function onOutcome(_kind: string, outcome: string, attacker: Combatant, target: Combatant?)
+	if not target or not brains[target] then
+		return
+	end
+	local bot = target
+	local brain = brains[bot]
+	local skillTier = brain.tier
+	if outcome == "Hit" then
+		setRung(bot, attacker, GUARD)
+		-- Hit in a flinch: guard comes up for the next one (held through the stun), and the
+		-- bot backs off.
+		if math.random() < skillTier.Follow then
+			local t = now()
+			holdBlock(bot, t, t + 0.9, false)
+			brain.backstepUntil = t + Config.Bots.Ladder.Backstep
+		end
+	elseif outcome == "Guarded" then
+		setRung(bot, attacker, DEFLECT)
+	elseif outcome == "Deflect" or outcome == "PerfectDeflect" then
+		setRung(bot, attacker, DEFLECT)
+		if attacker.state == "Staggered" or attacker.state == "Broken" then
+			-- The deflect stopped them: counter now (a Riposte, or the deathblow).
+			counter(
+				bot,
+				if outcome == "PerfectDeflect" then Config.Bots.PunishChance else Config.Bots.PunishChance * 0.65,
+				0.05
+			)
+		else
+			-- Knocked aside, the string goes on: counter once it stops.
+			task.delay(0.3, function()
+				if alive(bot) and alive(attacker) and attacker.state ~= "Windup" then
+					counter(bot, Config.Bots.PunishChance * 0.65, 0)
+				end
+			end)
+		end
+	elseif outcome == "Mikiri" then
+		counter(bot, Config.Bots.PunishChance, 0.05) -- the MikiriSlash follow-up
 	end
 end
 
@@ -405,33 +570,82 @@ local function makeAlign(root: BasePart): AlignOrientation
 	return align
 end
 
-local function spawnBot(index: number)
-	local model = buildRig(index)
-	model:PivotTo(spawnPoint())
-	model.Parent = botFolder
-	slots[index] = model
+-- Facing, every frame: free bots turn toward their target at TurnSpeed; a swinging bot
+-- turns once into the attack, then only inside its move's tracking window (Kannagi's
+-- notify windows), and never in recovery or a flinch.
+local function updateFacing()
+	local t = now()
+	for c, brain in brains do
+		local target = brain.target
+		local rate = Config.Bots.TurnSpeed
+		local state = c.state
+		if state == "Windup" or state == "Recovery" then
+			local kind = c.attackKind
+			if kind then
+				rate = Weapons.turnRate(Weapons.spec(c.weapon, kind), t - c.attackStartedAt, c.attackHitAt - t)
+			end
+		elseif state == "Staggered" or state == "Broken" or state == "Downed" or state == "Dead" then
+			rate = 0
+		end
+		local toTarget = if target then flat(target.root.Position - c.root.Position) else Vector3.zero
+		if rate > 0 and toTarget.Magnitude > 0.1 then
+			brain.align.CFrame = CFrame.lookAt(Vector3.zero, toTarget.Unit)
+			brain.align.MaxAngularVelocity = math.rad(rate)
+			brain.align.Enabled = true
+		else
+			brain.align.Enabled = false
+		end
+	end
+end
 
+-- Registers a built bot with the combat system and gives it a brain.
+local function animate(model: Model, rigTier: string): Brain?
 	local c = CombatService.register(model, nil)
 	if not c then
-		model:Destroy()
-		slots[index] = nil
-		return
+		return nil
 	end
 	c.root:SetNetworkOwner(nil)
 	Locomotion.animateBot(c.humanoid)
 
 	local brain: Brain = {
 		c = c,
+		tier = Config.Bots.Tiers[rigTier],
+		foe = nil,
+		arena = nil,
 		align = makeAlign(c.root),
 		target = nil,
 		nextAttackAt = now() + 1,
 		comboLeft = 0,
 		lastOpeningAt = 0,
 		readUntil = 0,
+		backstepUntil = 0,
 		strafeSign = 1,
 		strafeSwitchAt = 0,
 	}
 	brains[c] = brain
+	task.spawn(function()
+		while alive(c) do
+			think(brain)
+			task.wait(Config.Bots.ThinkInterval)
+		end
+		brains[c] = nil
+	end)
+	return brain
+end
+
+local function spawnBot(index: number)
+	local model = buildRig(index, tierName)
+	model:PivotTo(spawnPoint())
+	model.Parent = botFolder
+	slots[index] = model
+
+	local brain = animate(model, tierName)
+	if not brain then
+		model:Destroy()
+		slots[index] = nil
+		return
+	end
+	local c = brain.c
 
 	c.humanoid.Died:Once(function()
 		brain.align.Enabled = false
@@ -446,14 +660,50 @@ local function spawnBot(index: number)
 			end
 		end)
 	end)
+end
 
-	task.spawn(function()
-		while alive(c) do
-			think(brain)
-			task.wait(Config.Bots.ThinkInterval)
-		end
-		brains[c] = nil
+-- A duel opponent of skill `rigTier` at `cframe`, fighting only `foe` and staying within
+-- `radius` of `center`. `name` keeps the same bot across rounds; the body is cleared away a
+-- few seconds after it falls. Not part of the royale roster, so setCount never touches it.
+function BotService.spawnDuelist(
+	rigTier: string,
+	cframe: CFrame,
+	foe: Combatant,
+	center: Vector3,
+	radius: number,
+	name: string?
+): Combatant?
+	if not Config.Bots.Tiers[rigTier] then
+		rigTier = "Adept"
+	end
+	local model = buildRig(math.random(1, 12), rigTier)
+	if name then
+		model.Name = name
+	end
+	model:PivotTo(cframe)
+	model.Parent = duelFolder
+	local brain = animate(model, rigTier)
+	if not brain then
+		model:Destroy()
+		return nil
+	end
+	brain.foe = foe
+	brain.arena = { center = center, radius = radius }
+	brain.c.humanoid.Died:Once(function()
+		brain.align.Enabled = false
+		task.delay(Config.Bots.RespawnDelay, function()
+			model:Destroy()
+		end)
 	end)
+	return brain.c
+end
+
+-- Points a duel bot at its foe for this round (a player's body is new after each death).
+function BotService.setFoe(c: Combatant, foe: Combatant)
+	local brain = brains[c]
+	if brain then
+		brain.foe = foe
+	end
 end
 
 -- Grows or shrinks the bot roster to `count`, replacing dead bodies. Yields while new
@@ -479,6 +729,30 @@ function BotService.setCount(count: number)
 	end
 end
 
+-- Bot skill for the bots spawned from now on (Config.Bots.Tiers).
+function BotService.setTier(name: string)
+	local found = Config.Bots.Tiers[name]
+	if found then
+		tierName, tier = name, found
+	end
+end
+
+-- A match's tier follows its least experienced human: easy wins for the first matches,
+-- then fair fights, and masters only for proven players.
+function BotService.tierFor(players: { Player }): string
+	local name = "Master"
+	for _, player in players do
+		local played = player:GetAttribute("Played") or 0
+		local rating = player:GetAttribute("Rating") or Config.Rating.Start
+		if played < 3 then
+			return "Novice"
+		elseif played < 20 or rating < 800 then
+			name = "Adept"
+		end
+	end
+	return if #players == 0 then "Adept" else name
+end
+
 -- Whether dead bots come back on their own (off during a match).
 function BotService.setRespawn(enabled: boolean)
 	respawnEnabled = enabled
@@ -488,9 +762,13 @@ function BotService.start()
 	botFolder = Instance.new("Folder")
 	botFolder.Name = "Bots"
 	botFolder.Parent = workspace
+	duelFolder = Instance.new("Folder")
+	duelFolder.Name = "DuelBots"
+	duelFolder.Parent = workspace
 
 	CombatService.onWindup(onWindup)
-	CombatService.onDeflect(onDeflect)
+	CombatService.onOutcome(onOutcome)
+	RunService.Heartbeat:Connect(updateFacing)
 end
 
 return BotService

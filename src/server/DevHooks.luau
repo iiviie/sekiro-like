@@ -25,6 +25,9 @@ function DevHooks.start()
 	-- grant(field, amount): adds to the first player's data, e.g. grant("Coins", 500).
 	-- posture(name, value): sets a dummy's posture.
 	-- clear(): removes every dummy.
+	-- damage(name, amount): hurts a dummy, or the first player's character when name is "player".
+	-- resurrections(name, count): sets how many lethal blows a fighter will rise from.
+	-- pivot(name, cframe): moves a dummy.
 	hook.OnInvoke = function(command: string, ...: any): any
 		local args = { ... }
 		if command == "spawn" then
@@ -53,7 +56,9 @@ function DevHooks.start()
 			local offset = (args[3] :: number?) or 0
 			return CombatService.perform(c, args[2], workspace:GetServerTimeNow() + offset, args[4])
 		elseif command == "get" then
-			local model = dummies[args[1] :: string]
+			local model = if args[1] == "player"
+				then (Players:GetPlayers()[1] and Players:GetPlayers()[1].Character)
+				else dummies[args[1] :: string]
 			local c = model and CombatService.get(model)
 			if not c then
 				return nil
@@ -71,6 +76,14 @@ function DevHooks.start()
 				trickUsed = c.stringTrickUsed,
 				resolve = c.resolve,
 				brokenBy = c.brokenBy and c.brokenBy.model.Name,
+				blocking = c.blocking,
+				blockHeld = c.blockHeld,
+				deflectIn = c.deflectStamp - workspace:GetServerTimeNow(), -- negative: opened that long ago
+				buffered = c.buffered,
+				attackKind = c.attackKind,
+				postureRegenIn = math.max(c.postureRegenAt, c.postureFrozenUntil) - workspace:GetServerTimeNow(),
+				jumpAgo = workspace:GetServerTimeNow() - c.jumpStamp,
+				protectedIn = c.protectedUntil - workspace:GetServerTimeNow(),
 			}
 		elseif command == "grant" then
 			-- grant(field, amount): adds to the first player's saved data (coins, gems...).
@@ -87,6 +100,27 @@ function DevHooks.start()
 				c.posture = args[2] :: number
 			end
 			return c ~= nil
+		elseif command == "damage" or command == "resurrections" then
+			local model = if args[1] == "player"
+				then (Players:GetPlayers()[1] and Players:GetPlayers()[1].Character)
+				else dummies[args[1] :: string]
+			local c = model and CombatService.get(model)
+			if not c then
+				return false
+			end
+			if command == "damage" then
+				CombatService.damage(c, args[2] :: number)
+			else
+				CombatService.setResurrections(c, args[2] :: number)
+			end
+			return c.state
+		elseif command == "pivot" then
+			-- pivot(name, cframe): teleports a dummy (e.g. to step out of a swing mid-windup).
+			local model = dummies[args[1] :: string]
+			if model then
+				model:PivotTo(args[2] :: CFrame)
+			end
+			return model ~= nil
 		elseif command == "clear" then
 			for _, model in dummies do
 				model:Destroy()

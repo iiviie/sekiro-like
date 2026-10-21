@@ -13,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Poses = require(ReplicatedStorage.Shared.Poses)
+local Progression = require(ReplicatedStorage.Shared.Progression)
 local ClipLibrary = require(ReplicatedStorage.Shared.Clips)
 
 type Clip = ClipLibrary.Clip
@@ -29,6 +30,7 @@ type Action = {
 	hold: number,
 	fadeOut: number,
 	t: number,
+	impactAt: number, -- clip time the strike lands (0 for clips without a windup)
 }
 
 type State = {
@@ -41,8 +43,11 @@ type State = {
 	move: number, -- 0..1, how much the fighter is moving: legs follow the walk cycle
 	action: Action?,
 	freezeUntil: number,
+	frozenAction: Action?, -- the clip a hitstop froze; a clip started later plays on
+	pinned: boolean, -- tooling froze it unconditionally (Animator.freeze)
 	written: { [string]: CFrame },
 	source: { [string]: CFrame },
+	scale: number, -- BodyScale: pose offsets (a crouch's hip drop) are authored for a 1x body
 }
 
 local BASE_BLEND_RATE = 14
@@ -157,7 +162,12 @@ local function setTrail(model: Model, enabled: boolean, clipName: string?)
 	if trail and trail.Enabled ~= enabled then
 		if enabled then
 			local perilous = clipName == "Perilous" or clipName == "Sweep"
-			trail.Color = if perilous then PERIL_TRAIL else STEEL_TRAIL
+			local skinId = model:GetAttribute("Skin")
+			local skin = if typeof(skinId) == "string" and skinId ~= "Steel" then Progression.skin(skinId) else nil
+			trail.Color = if perilous
+				then PERIL_TRAIL
+				elseif skin then ColorSequence.new(skin.trail[1], skin.trail[2])
+				else STEEL_TRAIL
 		end
 		trail.Enabled = enabled
 	end
@@ -250,6 +260,11 @@ local function solveGrip(state: State, results: { [string]: CFrame }, w: number)
 	results.LeftWrist = results.LeftWrist:Lerp(tWrist, w)
 end
 
+-- A pose's joint offset on a body `scale` times our size (rotations are scale-free).
+local function scaled(cf: CFrame, scale: number): CFrame
+	return if scale == 1 then cf else cf.Rotation + cf.Position * scale
+end
+
 local function step(state: State, dt: number)
 	-- Base layer: ease every joint towards the target stance.
 	local k = 1 - math.exp(-dt * BASE_BLEND_RATE)
@@ -279,7 +294,11 @@ local function step(state: State, dt: number)
 	local trailOn = false
 	local action = state.action
 	if action then
-		if os.clock() >= state.freezeUntil then
+		-- Hitstop only holds the clip that was playing when it hit, and never a windup, so a
+		-- swing started during a freeze (a riposte off a deflect) still lands on hitAt.
+		local frozen = os.clock() < state.freezeUntil
+			and (state.pinned or (action == state.frozenAction and action.t >= action.impactAt))
+		if not frozen then
 			action.t += dt
 		end
 		actionPose, trailOn = sampleAction(action)
@@ -308,12 +327,12 @@ local function step(state: State, dt: number)
 		local result = current
 		local base = state.base[name]
 		if base then
-			result = result:Lerp(base.cf, base.w)
+			result = result:Lerp(scaled(base.cf, state.scale), base.w)
 		end
 		local layered = actionPose and actionPose[name]
 		if layered then
 			local w = if LOWER_BODY[name] then layered.w * legsKept else layered.w
-			result = result:Lerp(layered.cf, w)
+			result = result:Lerp(scaled(layered.cf, state.scale), w)
 		end
 		results[name] = result
 	end
@@ -353,10 +372,19 @@ function Animator.attach(model: Model)
 		move = 0,
 		action = nil,
 		freezeUntil = 0,
+		frozenAction = nil,
+		pinned = false,
 		written = {},
 		source = {},
+		scale = 1,
 	}
 	states[model] = state
+	local function readScale()
+		local scale = model:GetAttribute("BodyScale")
+		state.scale = if typeof(scale) == "number" and scale > 0 then scale else 1
+	end
+	readScale()
+	model:GetAttributeChangedSignal("BodyScale"):Connect(readScale)
 
 	local function markIfJoint(descendant: Instance)
 		if descendant:IsA("Motor6D") or descendant:IsA("AnimationConstraint") then
@@ -381,7 +409,12 @@ end
 
 -- Plays a clip from Clips.luau. `windup` is the time until impact, used to stretch
 -- the clip's "windup" segment so the strike lands on the server's hitAt.
-function Animator.play(model: Model, clipName: string, windup: number?)
+-- `freeze` is Kannagi's PauseBlendIn (KannagiMoves `hold`; a clip may carry it as `freeze`):
+-- the montage sits on its first frame for that long while it blends in from the stance,
+-- then plays. The first segment (the blend into the first frame) lasts the freeze and the
+-- remaining windup segments share what is left of the windup, so a boss's frozen tell holds
+-- still instead of the whole windup playing in slow motion; impact still lands on hitAt.
+function Animator.play(model: Model, clipName: string, windup: number?, freeze: number?)
 	local state = states[model]
 	local clip = ClipLibrary.Clips[clipName]
 	if not state or not clip then
@@ -398,16 +431,57 @@ function Animator.play(model: Model, clipName: string, windup: number?)
 			strikeLead = strike * ClipLibrary.ImpactFraction
 		end
 	end
+	if clip.baked then
+		strikeLead = clip.impactLead or 0 -- mid-cut lands on hitAt (see Clips.impactLead)
+	end
 	local windupTime = math.max((windup or 0.3) - strikeLead, 0.04)
 
+	-- The frozen first frame. With a windup it takes the first segment and the rest of the
+	-- windup segments stretch over what remains (never under 30% of the windup); without
+	-- one it simply delays the clip.
+	local hold = freeze or clip.freeze or 0
+	hold = if hold == hold and hold > 0 then hold else 0 -- (NaN guard)
+	local firstShare, totalShare, windups = 0, 0, 0
+	for _, segment in clip.segments do
+		if segment.duration == "windup" then
+			windups += 1
+			local share = segment.share or 1
+			totalShare += share
+			if windups == 1 then
+				firstShare = share
+			end
+		end
+	end
+	local firstWindup: number? = nil
+	local restScale = 1
+	if hold > 0 and windups >= 2 and totalShare > firstShare then
+		local first = math.max(math.min(hold, windupTime * 0.7), windupTime * firstShare)
+		firstWindup = first
+		restScale = (windupTime - first) / (windupTime * (totalShare - firstShare))
+	end
+
 	local keys: { Key } = {}
-	local at = 0
+	local at = if windups == 0 then hold else 0
+	local impactAt = 0
+	local seenWindup = false
 	for _, segment in clip.segments do
 		local duration = segment.duration
-		if duration == "windup" then
-			duration = math.max(windupTime * (segment.share or 1), 0.02)
+		local isWindup = duration == "windup"
+		if isWindup then
+			local share = segment.share or 1
+			if firstWindup and not seenWindup then
+				duration = firstWindup
+			else
+				-- No per-segment floor beyond a millisecond: a dense bake has many keys a few ms
+				-- apart, and a 20 ms floor used to stretch the windup past the server's hit.
+				duration = math.max(windupTime * share * (if firstWindup then restScale else 1), 0.001)
+			end
+			seenWindup = true
 		end
 		at += duration :: number
+		if isWindup then
+			impactAt = at + strikeLead
+		end
 		table.insert(keys, {
 			at = at,
 			pose = poseFrames[segment.pose],
@@ -423,6 +497,7 @@ function Animator.play(model: Model, clipName: string, windup: number?)
 		hold = clip.hold or 0,
 		fadeOut = clip.fadeOut or 0.2,
 		t = 0,
+		impactAt = impactAt,
 	}
 end
 
@@ -436,24 +511,47 @@ function Animator.stop(model: Model)
 	end
 end
 
+-- Holds the current clip's last pose for at least `seconds` (a boss's death anim stays down).
+function Animator.holdLast(model: Model, seconds: number)
+	local state = states[model]
+	local action = state and state.action
+	if action then
+		action.hold = math.max(action.hold, seconds)
+	end
+end
+
 function Animator.current(model: Model): string?
 	local state = states[model]
 	return state and state.action and state.action.name
 end
 
--- Freezes the clip for a moment so impacts read as heavy.
+-- Freezes the clip playing right now for a moment so impacts read as heavy. Clips started
+-- during the freeze, and windups, keep playing (see step).
 function Animator.hitstop(model: Model, duration: number)
 	local state = states[model]
 	if state then
+		if state.action ~= state.frozenAction or os.clock() >= state.freezeUntil then
+			state.frozenAction = state.action
+		end
 		state.freezeUntil = math.max(state.freezeUntil, os.clock() + duration)
 	end
 end
 
--- Ends any hitstop freeze immediately (tooling).
+-- Holds whatever is playing, windup or not, for `duration` (Studio review tooling).
+function Animator.freeze(model: Model, duration: number)
+	local state = states[model]
+	if state then
+		state.pinned = true
+		state.freezeUntil = os.clock() + duration
+	end
+end
+
+-- Ends any freeze immediately (tooling).
 function Animator.unfreeze(model: Model)
 	local state = states[model]
 	if state then
 		state.freezeUntil = 0
+		state.pinned = false
 	end
 end
 

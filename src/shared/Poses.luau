@@ -516,4 +516,79 @@ for name, pose in require(script.Parent.BakedPoses) do
 	Poses[name] = pose
 end
 
+-- Reaction poses by weight (Kannagi's Damage01-04, GuardSuccess01-03, Hajiki Right / Left /
+-- Back), composed from the poses above until authored ones arrive. `variant` adds extra
+-- joint rotations (degrees) and offsets (studs) on top of a pose; `mix` blends two poses.
+local function extra(value: { number }): CFrame
+	local rad = math.rad
+	return CFrame.new(value[4] or 0, value[5] or 0, value[6] or 0)
+		* CFrame.Angles(rad(value[1]), rad(value[2]), rad(value[3]))
+end
+
+local function variant(baseName: string, extras: { [string]: { number } }): Pose
+	local pose = table.clone(Poses[baseName])
+	for joint, value in extras do
+		pose[joint] = (pose[joint] or CFrame.identity) * extra(value)
+	end
+	return pose
+end
+
+local function mix(a: string, b: string, alpha: number): Pose
+	local from, to = Poses[a], Poses[b]
+	local pose: Pose = {}
+	for joint, cf in from do
+		pose[joint] = if to[joint] then cf:Lerp(to[joint], alpha) else cf
+	end
+	for joint, cf in to do
+		if not pose[joint] then
+			pose[joint] = cf
+		end
+	end
+	return pose
+end
+
+local derived: { [string]: () -> Pose } = {
+	-- Flinches: the small one is the plain HitReact; heavier ones fold further back and drop.
+	HitMiddle = function()
+		return variant("HitReact", { Waist = { 8, -6, 0 }, Neck = { 8, 0, 0 }, Root = { 4, 0, 0, 0, -0.15, 0 } })
+	end,
+	HitLarge = function()
+		return variant("HitReact", {
+			Waist = { 18, -10, 0 },
+			Neck = { 14, 0, 0 },
+			Root = { 10, 0, 0, 0, -0.35, 0.25 },
+			RightHip = { -12, 0, 0 },
+			LeftHip = { 20, 0, 0 },
+			LeftKnee = { -30, 0, 0 },
+		})
+	end,
+	-- Cut at the legs: the knees buckle toward the broken crouch.
+	HitGedan = function()
+		return mix("HitReact", "Broken", 0.55)
+	end,
+	-- Guard hits by size: the impact pose rocked further back for heavier blows.
+	GuardImpactLarge = function()
+		return variant("GuardImpact", { Waist = { 10, -6, 0 }, Root = { 6, 0, 0, 0, -0.2, 0.2 }, Neck = { 6, 0, 0 } })
+	end,
+	-- Deflects: the blade thrown to the side the blow came from, or straight back.
+	DeflectRight = function()
+		return variant("GuardImpact", { Waist = { 4, -14, 0 }, Neck = { 0, 8, 0 } })
+	end,
+	DeflectLeft = function()
+		return variant("GuardImpact", { Waist = { 4, 18, 0 }, Neck = { 0, -10, 0 } })
+	end,
+	DeflectBack = function()
+		return variant("GuardImpact", { Waist = { 12, 0, 0 }, Neck = { 8, 0, 0 }, Root = { 4, 0, 0, 0, -0.15, 0.15 } })
+	end,
+	-- The attacker's blade knocked aside by a deflect that doesn't recoil: half a recoil.
+	Knocked = function()
+		return mix("Ready", "Recoil", 0.5)
+	end,
+}
+for name, build in derived do
+	if not Poses[name] then -- an authored (baked) pose of the same name wins
+		Poses[name] = build()
+	end
+end
+
 return Poses
