@@ -142,6 +142,19 @@ local function guideEntries(): { { string } }
 			"Other fights",
 			"Duels: stand on a gold duel pad east or west of the spawn plaza for a first-to-3 duel; a bot steps up after 8 s. Boss trials: cross the rope bridge to the back islet and step on the shrine pad. Start with the Shikigami: it teaches perilous attacks step by step.",
 		},
+		{
+			"Earn and unlock",
+			table.concat({
+				"Coins: every fight, mission, level-up and daily reward. They buy blades, outfits, titles and banners in the Locker.",
+				"Gems: slowly by play (first boss clears, every 5th Mastery level, the day 7 reward, the Pass) or in gem packs. They buy finishers, blade lines and the Store's gem items.",
+				"Whetstones: earned only (missions, wins, boss clears). They level a blade line up to L4.",
+				"Shrine Draws: royale wins, your first duel win of the day and Pass tiers. Open them in the Store's Shrine for one reward; the odds are shown first.",
+				"Shards: a duplicate from a draw turns into Shards. Spend them on any Shrine item.",
+				"Mastery XP: every fight. Each level pays coins, and your weapon's own Mastery evolves the blade at 10, 25 and 50.",
+				"Pass XP: fights, wins, missions and bounties climb the Path of the Blade's tiers.",
+				"Gem items rotate through the Store; coin items are always in the Locker.",
+			}, "\n"),
+		},
 	}
 end
 
@@ -209,8 +222,10 @@ local function guidePanel()
 			UI.divider(card, { LayoutOrder = 3, Size = UDim2.new(1, 0, 0, 12), color = UI.Theme.Bronze })
 		end
 	end
+	-- Sized to its text, so a phone's narrower scroll (three lines) still reaches its end.
 	UI.text({
-		Size = UDim2.new(1, 0, 0, 44),
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
 		LayoutOrder = 99,
 		TextWrapped = true,
 		TextSize = 16,
@@ -445,15 +460,26 @@ local function rewardsPanel()
 	local claimedToday = attr("DailyClaimed", false) == true
 	local nextDay = attr("DailyNext", 1)
 	local daily = EconomyConfig.Daily
-	sectionTitle("Daily reward  ·  miss a day and your streak just waits", 0)
+	-- The row and Claim, centred in the window's body (no dead band under Claim).
+	local CELL_H = 132
+	local content = UI.new("Frame", {
+		Name = "Content",
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.fromScale(0, 0.5),
+		Size = UDim2.new(1, 0, 0, 34 + CELL_H + 18 + UI.Touch),
+		BackgroundTransparency = 1,
+	}, body)
+	sectionTitle("Daily reward  ·  miss a day and your streak just waits", 0, content)
+	-- Day 7 is a wider cell: it pays coins, gems and Whetstones, all three named.
+	local units = (#daily.Coins - 1) + 1.6
 	for day, coins in daily.Coins do
 		local done = day < nextDay or (claimedToday and day == nextDay)
 		local isNext = day == nextDay and not claimedToday
 		local last = day == #daily.Coins
 		local card = UI.panel({
 			Name = `Day{day}`,
-			Position = UDim2.new((day - 1) / 7, 3, 0, 34),
-			Size = UDim2.new(1 / 7, -6, 0, 114),
+			Position = UDim2.new((day - 1) / units, 3, 0, 34),
+			Size = UDim2.new((if last then 1.6 else 1) / units, -6, 0, CELL_H),
 			material = "inset",
 			tint = if isNext
 				then UI.Theme.JadeBtn
@@ -495,6 +521,13 @@ local function rewardsPanel()
 				TextColor3 = if done then UI.Theme.Ash else UI.Theme.JadeText,
 				Text = `+{daily.LastDayGems} gems`,
 			}, card)
+			UI.label("number", {
+				Position = UDim2.fromOffset(0, 106),
+				Size = UDim2.new(1, 0, 0, 20),
+				TextSize = 15,
+				TextColor3 = if done then UI.Theme.Ash else UI.Theme.Bone,
+				Text = `+{Text.currency(daily.LastDayWhetstones, "Whetstones")}`,
+			}, card)
 		end
 		if done then
 			UI.badge(card, "done", 26).Position = UDim2.new(1, -14, 0, 14)
@@ -504,13 +537,13 @@ local function rewardsPanel()
 		Name = "Claim",
 		variant = if claimedToday then "disabled" else "reward",
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 166),
+		Position = UDim2.new(0.5, 0, 0, 34 + CELL_H + 18),
 		Size = UDim2.fromOffset(260, UI.Touch),
 		FontFace = UI.Fonts.Display,
 		TextSize = 24,
 		Text = if claimedToday then "Come back tomorrow" else "Claim",
 		sound = if claimedToday then false else "Press",
-	}, body)
+	}, content)
 	if claimedToday then
 		claim:SetAttribute("Quiet", true)
 	end
