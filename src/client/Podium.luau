@@ -204,27 +204,34 @@ function Podium.hide()
 	if card and card.Parent then
 		UI.tween(card, 0.4, { GroupTransparency = 1 })
 		task.delay(0.45, function()
+			card.Visible = false
 			card:Destroy()
 		end)
 	end
+end
+
+-- Whether the podium is on screen (the lobby's offer card waits for it).
+function Podium.showing(): boolean
+	return shown ~= nil
 end
 
 function Podium.show(entries: { Entry }, hold: number?)
 	Podium.hide()
 	token += 1
 	local mine = token
+	-- At the top-centre, under the round banner and at about 70% size: the lobby (and your
+	-- own character in the middle of it) stays in view, and PLAY in its corner stays clear.
+	local view = UI.viewport()
+	local scale = math.clamp(math.min((view.X - 32) / CARD_W, (view.Y * 0.5) / CARD_H, 0.72), 0.4, 0.72)
 	local card = UI.new("CanvasGroup", {
 		Name = "Card",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.45),
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, math.floor(UI.Hud.StageTop * UI.hudScale(view))),
 		Size = UDim2.fromOffset(CARD_W, CARD_H),
 		BackgroundTransparency = 1,
 		GroupTransparency = 1,
 	}, layer())
-	local view = workspace.CurrentCamera.ViewportSize
-	UI.new("UIScale", {
-		Scale = math.clamp(math.min((view.X - 32) / CARD_W, (view.Y * 0.8) / CARD_H), 0.45, 1),
-	}, card)
+	UI.new("UIScale", { Scale = scale }, card)
 	local plate = UI.panel({ Name = "Plate", material = "lacquer", Size = UDim2.fromScale(1, 1) }, card)
 	UI.label("caption", {
 		Name = "Heading",
