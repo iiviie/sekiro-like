@@ -11,6 +11,10 @@
 -- No pop-ups, no fake timers, no paid refresh. Robux purchases go through the server's
 -- Monetization.prompt (LobbyAction "Purchase"); shop and shrine requests through the
 -- Shop RemoteFunction (server/ShopService). Everything shown is server-published state.
+-- What's for sale comes from Catalog (an item that isn't Catalog.isReady shows "Coming
+-- soon" and can't be bought). Blades, outfits and finishers can be tried on first
+-- (CosmeticPreview); every Robux purchase ends in a thank-you reveal of what it granted
+-- (Progress "Purchased" from server/Monetization).
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -19,6 +23,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Flair = require(ReplicatedStorage.Shared.Flair)
+local Season = require(ReplicatedStorage.Shared.Season)
+local CosmeticPreview = require(script.Parent.CosmeticPreview)
 local Panels = require(script.Parent.Panels)
 local Reveal = require(script.Parent.Reveal)
 local StoreUI = require(script.Parent.StoreUI)
@@ -89,13 +95,69 @@ local function shop(action: string, arg: any, onResult: ((result: { [string]: an
 	end)
 end
 
+-- While a draw's reveal plays, the balance pills hold what they showed before it, so the
+-- coin count doesn't give the slip away; they catch up when the reveal closes.
+local frozen: { [string]: number }? = nil
+
+local function balance(name: string): number
+	local held = frozen and frozen[name]
+	return if held ~= nil then held else StoreUI.attr(name, 0)
+end
+
+local function freeze()
+	frozen = { Coins = StoreUI.attr("Coins", 0), Gems = StoreUI.attr("Gems", 0), Shards = StoreUI.attr("Shards", 0) }
+end
+
+local function thaw()
+	frozen = nil
+	if Panels.current() == "Store" then
+		Panels.redraw()
+	end
+end
+
 local function header()
 	local strip = Panels.header()
-	UI.pill(strip, ICONS.Coin, StoreUI.attr("Coins", 0), UI.Gold, 1)
-	UI.pill(strip, ICONS.Gem, StoreUI.attr("Gems", 0), UI.Jade, 2)
+	UI.pill(strip, ICONS.Coin, balance("Coins"), UI.Gold, 1)
+	UI.pill(strip, ICONS.Gem, balance("Gems"), UI.Jade, 2)
 	if tab == "Shrine" then
-		UI.pill(strip, ICONS.Shard or ICONS.Gem, StoreUI.attr("Shards", 0), UI.Parchment, 3)
+		UI.pill(strip, ICONS.Shard or ICONS.Gem, balance("Shards"), UI.Parchment, 3)
 	end
+end
+
+-- Try `item` on (your own character, only you see it), then come back to this tab.
+local function tryOn(item: Catalog.Item)
+	UI.closeSheet()
+	Panels.closeAll()
+	local back = tab
+	CosmeticPreview.present(item, {
+		back = "Back to the Store",
+		onBack = function()
+			StorePanel.show(back)
+		end,
+	})
+end
+
+-- A "Try it on" link at the top left of the open sheet (the purchase confirm).
+local function tryOnLink(item: Catalog.Item)
+	if not StoreUI.previewable(item) then
+		return
+	end
+	local sheet = Panels.window():FindFirstChild("Sheet")
+	local card = sheet and sheet:FindFirstChild("Card")
+	if not card then
+		return
+	end
+	local link = UI.tertiary({
+		Name = "TryOn",
+		Position = UDim2.fromOffset(10, 10),
+		Size = UDim2.fromOffset(120, 40),
+		Text = "Try it on",
+		TextSize = 16,
+		ZIndex = 23,
+	}, card)
+	link.Activated:Connect(function()
+		tryOn(item)
+	end)
 end
 
 ---------------------------------------------------------------------------------------
@@ -135,6 +197,7 @@ local function confirmBuy(
 			end)
 		end,
 	})
+	tryOnLink(item)
 end
 
 local function categoryWord(item: Catalog.Item): string
@@ -150,6 +213,7 @@ local function shopCard(parent: Instance, id: string, order: number, have: { [st
 		return
 	end
 	local owns = have[id] == true
+	local wished = not owns and StoreUI.wished()[id] == true
 	local price = item.price or {}
 	local currency = if price.gems then "gems" else "coins"
 	local cost = price.gems or price.coins or 0
@@ -159,7 +223,8 @@ local function shopCard(parent: Instance, id: string, order: number, have: { [st
 		Size = UDim2.fromScale(1, 1),
 		name = item.name,
 		rarity = item.rarity,
-		caption = `{item.rarity} {categoryWord(item)}`,
+		caption = if wished then "on your wishlist" else `{item.rarity} {categoryWord(item)}`,
+		captionColor = if wished then UI.Theme.GoldHi else nil,
 		art = function(holder: Frame)
 			StoreUI.thumb(holder, item)
 		end,
@@ -454,14 +519,17 @@ local function offerCard(
 	order: number,
 	lines: { string },
 	owned: boolean,
-	extra: ((TextLabel) -> ())?
+	extra: ((TextLabel) -> ())?,
+	tryItem: Catalog.Item?
 )
 	local key = (item.price :: Catalog.Price).product :: string
 	local hero = item.category == "bundle"
+	-- Not on sale yet (Catalog status "soon" or its category not Ready): shown, not sold.
+	local soon = not owned and not Catalog.isReady(item)
 	local card = UI.panel({
 		Name = StoreUI.key(item.id),
 		LayoutOrder = order,
-		Size = UDim2.new(1, 0, 0, if hero then 132 else 116),
+		Size = UDim2.new(1, 0, 0, if tryItem then 160 elseif hero then 132 else 116),
 		material = "inset",
 		tint = if hero then UI.Theme.Plate:Lerp(UI.Theme.Gold, 0.14) else nil,
 	}, list)
@@ -500,15 +568,32 @@ local function offerCard(
 	local robux = StoreUI.robux(key)
 	local button = UI.button({
 		Name = "Buy",
-		variant = if owned then "disabled" else "premium",
+		variant = if owned or soon then "disabled" else "premium",
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -14, 0.5, if extra then 12 else 0),
 		Size = UDim2.fromOffset(180, UI.Touch),
-		Text = if owned then "Owned" elseif robux then `R$ {UI.number(robux)}` else "See price",
+		Text = if owned
+			then "Owned"
+			elseif soon then "Coming soon"
+			elseif robux then `R$ {UI.number(robux)}`
+			else "See price",
 		FontFace = UI.Fonts.Number,
-		TextSize = 20,
+		TextSize = if soon then 17 else 20,
 		ZIndex = 2,
 	}, card)
+	if tryItem then
+		local try = UI.tertiary({
+			Name = "TryOn",
+			Position = UDim2.fromOffset(114, 116),
+			Size = UDim2.fromOffset(200, 36),
+			Text = `Try {tryItem.name} on`,
+			TextSize = 16,
+			ZIndex = 2,
+		}, card)
+		try.Activated:Connect(function()
+			tryOn(tryItem)
+		end)
+	end
 	if extra then
 		local sub = UI.label("caption", {
 			AnchorPoint = Vector2.new(1, 0),
@@ -521,7 +606,7 @@ local function offerCard(
 		extra(sub)
 	end
 	button.Activated:Connect(function()
-		if not owned then
+		if not owned and not soon then
 			StoreUI.purchase(key)
 		end
 	end)
@@ -553,7 +638,8 @@ local function offersTab(list: ScrollingFrame)
 				StoreUI.countdown(label, endsAt, function(left)
 					return `Offer ends in {left}`
 				end)
-			end
+			end,
+			Catalog.get("skin.Initiate")
 		)
 	end
 
@@ -565,6 +651,7 @@ local function offersTab(list: ScrollingFrame)
 		}, StoreUI.attr("PassPremium", false) == true or StoreUI.attr("SeasonPremium", false) == true)
 	end
 
+	-- The game passes, as the Catalog lists them; what isn't ready yet says so and can't be bought.
 	-- The pre-fight intro bundle (once per account; the four are also sold one by one for gems).
 	local stagecraft = Catalog.get("bundle.Stagecraft")
 	if stagecraft then
@@ -580,17 +667,17 @@ local function offersTab(list: ScrollingFrame)
 	end
 
 	UI.heading(list, "Passes", nextOrder())
-	local PASS_LINES: { [string]: { string } } = {
-		["pass.VIP"] = { "A Ronin nameplate frame and chat tag, an exclusive sheath. No boosts." },
-		["pass.Loadouts"] = { "Save six loadout presets instead of three." },
-		["pass.TitleSlot"] = { "Show a second title on your nameplate and duel card." },
-		["pass.VictoryCry"] = { "A war cry when you win a royale or a duel." },
-	}
-	for _, key in { "pass.VIP", "pass.Loadouts", "pass.TitleSlot", "pass.VictoryCry" } do
-		local item = Catalog.get(key)
-		if item then
-			offerCard(list, item, nextOrder(), PASS_LINES[key], passes[key] == true)
+	for _, item in Catalog.list("pass") do
+		local product = Catalog.Products[item.id]
+		if not product or product.kind ~= "gamepass" then
+			continue -- the season pass products live above and in the Pass
 		end
+		local owned = passes[item.id] == true
+		local lines = { item.blurb or "" }
+		if not owned and not Catalog.isReady(item) then
+			table.insert(lines, "Coming soon: it goes on sale once it's ready.")
+		end
+		offerCard(list, item, nextOrder(), lines, owned)
 	end
 end
 
@@ -605,9 +692,50 @@ local function outcomeName(outcome: { [string]: any }): string
 	return outcome.label or `{UI.number(outcome.amount or 0)} {string.lower(tostring(outcome.kind))}`
 end
 
+-- The odds in one line, in words: "Coins 52% · Whetstones 18% · ... · a cosmetic 10% (epic
+-- 1%)" for the Shrine Draw; the rarity tiers (and long-run rates with pity) for the capsule.
+local KIND_WORD: { [string]: string } = { Coins = "Coins", Whetstones = "Whetstones", Gems = "Gems", Shards = "Shards" }
+local function oddsSummary(odds: { [string]: any }): string
+	local parts = {}
+	if odds.pool == "capsule" then
+		for _, t in odds.tiers or {} do
+			local pct = string.format("%.1f%%", t.pct or 0)
+			if t.effective then
+				pct ..= string.format(" (%.1f%% with pity)", t.effective)
+			end
+			table.insert(parts, `{StoreUI.rarityName(tostring(t.tier))} {pct}`)
+		end
+		return table.concat(parts, "   ·   ")
+	end
+	local sums: { [string]: number } = {}
+	local epic = 0
+	for _, outcome in odds.outcomes or {} do
+		local word = if outcome.kind == "item" then "A cosmetic" else KIND_WORD[outcome.kind] or tostring(outcome.kind)
+		sums[word] = (sums[word] or 0) + (outcome.pct or 0)
+		if outcome.kind == "item" and (outcome.tier == "epic" or outcome.rarity == "epic") then
+			epic += outcome.pct or 0
+		end
+	end
+	for _, word in { "Coins", "Whetstones", "Gems", "Shards", "A cosmetic" } do
+		if sums[word] then
+			local text = string.format("%s %.0f%%", word, sums[word])
+			if word == "A cosmetic" and epic > 0 then
+				text ..= string.format(" (epic %.0f%%)", epic)
+			end
+			table.insert(parts, text)
+		end
+	end
+	return table.concat(parts, "   ·   ")
+end
+
 -- The full odds table: every outcome with its percent, owned items marked with what a
 -- duplicate pays, the tier totals and (capsule) the pity rules.
-local function showOdds(odds: { [string]: any }, title: string, confirm: { label: string, run: () -> () }?)
+local function showOdds(
+	odds: { [string]: any },
+	title: string,
+	confirm: { label: string, run: () -> () }?,
+	footnote: string?
+)
 	local have = StoreUI.owned()
 	UI.sheet(Panels.window(), title, function(content)
 		local list = UI.scroll(content, 2)
@@ -627,17 +755,12 @@ local function showOdds(odds: { [string]: any }, title: string, confirm: { label
 				confirm.run()
 			end)
 		end
-		local tiers = {}
-		for _, t in odds.tiers or {} do
-			local pct = string.format("%.1f%%", t.pct or 0)
-			if t.effective then
-				pct ..= string.format(" (%.1f%% with pity)", t.effective)
-			end
-			table.insert(tiers, `{StoreUI.rarityName(tostring(t.tier))} {pct}`)
-		end
-		UI.note(list, table.concat(tiers, "   ·   "), 1, 34)
+		UI.note(list, oddsSummary(odds), 1, 34)
 		if odds.pity and odds.pity.text then
 			UI.note(list, odds.pity.text, 2, 34)
+		end
+		if footnote then
+			UI.note(list, footnote, 3, 24)
 		end
 		local dup = odds.dupShards or {}
 		for i, outcome in odds.outcomes or {} do
@@ -687,12 +810,17 @@ local drawNow: (number) -> ()
 local capsuleNow: (number, number) -> ()
 
 function drawNow(count: number)
+	freeze()
 	shop("Draw", count, function(result)
+		if not result.ok or typeof(result.results) ~= "table" then
+			thaw()
+		end
 		if result.ok and typeof(result.results) == "table" then
 			-- Draw again (same count, if enough draws are left) straight from the reveal.
 			local left = StoreUI.attr("Draws", 0)
 			local again = math.min(count, left)
 			Reveal.play(result.results, {
+				onDone = thaw,
 				again = if again > 0
 					then {
 						label = if again == 1 then "Open 1 more" else `Open {again} more`,
@@ -707,9 +835,14 @@ function drawNow(count: number)
 end
 
 function capsuleNow(count: number, cost: number)
+	freeze()
 	shop("Capsule", count, function(result)
+		if not result.ok or typeof(result.results) ~= "table" then
+			thaw()
+		end
 		if result.ok and typeof(result.results) == "table" then
 			Reveal.play(result.results, {
+				onDone = thaw,
 				again = if StoreUI.attr("Gems", 0) >= cost
 					then {
 						label = `Again  ·  {UI.number(cost)} gems`,
@@ -904,17 +1037,12 @@ local function shrineTab(list: ScrollingFrame)
 			TextSize = 14,
 			Text = "",
 		}, capBox)
-		local featuredName = if featured then featured.name else "the featured blade"
+		local featuredName = if featured then `the featured {featured.name}` else "the featured blade"
 		local epicLeft = math.max(1, (cap.epicAt or 10) - (cap.epicSince or 0))
 		local legLeft = math.max(1, (cap.legendaryAt or 40) - (cap.legendarySince or 0))
-		local pityText = `Epic or better within {epicLeft} · {featuredName} within {legLeft}`
-		if typeof(cap.bannerEndsAt) == "number" and cap.bannerEndsAt > 0 then
-			StoreUI.countdown(info, cap.bannerEndsAt, function(left)
-				return `{pityText}\nFeatured item changes in {left}`
-			end)
-		else
-			info.Text = pityText
-		end
+		-- The guarantees in plain words; the banner's end lives in the odds sheet, not here (no
+		-- countdown on a paid random item).
+		info.Text = `An epic or better within {epicLeft} draws, {featuredName} within {legLeft} draws.`
 		local row = UI.new("Frame", {
 			Name = "Buttons",
 			AnchorPoint = Vector2.new(0, 1),
@@ -929,8 +1057,11 @@ local function shrineTab(list: ScrollingFrame)
 		}, row)
 		local capOdds =
 			UI.tertiary({ Name = "Odds", LayoutOrder = 1, Size = half, Text = "View odds", TextSize = 17 }, row)
+		local bannerNote = if typeof(cap.bannerEndsAt) == "number" and cap.bannerEndsAt > 0
+			then `The featured item changes in {StoreUI.duration(cap.bannerEndsAt - StoreUI.now())}.`
+			else nil
 		capOdds.Activated:Connect(function()
-			showOdds(cap.odds or {}, "Shrine Capsule odds")
+			showOdds(cap.odds or {}, "Shrine Capsule odds", nil, bannerNote)
 		end)
 		local gems = StoreUI.attr("Gems", 0)
 		for i, count in { 1, 10 } do
@@ -953,7 +1084,7 @@ local function shrineTab(list: ScrollingFrame)
 					run = function()
 						capsuleNow(count, cost)
 					end,
-				})
+				}, bannerNote)
 			end)
 		end
 	end
@@ -1117,6 +1248,142 @@ function StorePanel.build(body: Frame)
 	BUILDERS[tab](list)
 end
 
+---------------------------------------------------------------------------------------
+-- The thank-you after a Robux purchase: what it granted, as a reveal (no box: nothing was
+-- random), with the one next step worth taking.
+
+local function itemOutcome(id: string, status: string?): { [string]: any }?
+	local item = Catalog.get(id)
+	return if item then { kind = "item", id = id, rarity = item.rarity, status = status } else nil
+end
+
+-- The next premium rewards on the track from `tier` on (items only, at most `n`).
+local function nextPremiumItems(tier: number, n: number): { { [string]: any } }
+	local def = Season.get(StoreUI.attr("PassSeason", "")) or Season.get(ReplicatedStorage:GetAttribute("SeasonId"))
+	local out = {}
+	if not def then
+		return out
+	end
+	for t = tier + 1, #def.tiers do
+		for _, reward in def.tiers[t].premium do
+			if reward.kind == "item" and reward.id and #out < n then
+				local outcome = itemOutcome(reward.id, `Tier {t}`)
+				if outcome then
+					table.insert(out, outcome)
+				end
+			end
+		end
+	end
+	return out
+end
+
+local function purchaseReveal(data: { [string]: any })
+	local key = data.key
+	local item = typeof(key) == "string" and Catalog.get(key) or nil
+	if not item then
+		return
+	end
+	local equipped = data.equipped or {}
+	local results = {}
+	for _, id in data.items or {} do
+		local outcome = itemOutcome(id, if table.find(equipped, id) then "Equipped" else "New")
+		if outcome then
+			table.insert(results, outcome)
+		end
+	end
+	if (data.gems or 0) > 0 then
+		table.insert(results, { kind = "Gems", amount = data.gems, rarity = "rare", caption = "ADDED TO YOUR GEMS" })
+	end
+	if (data.coins or 0) > 0 then
+		table.insert(
+			results,
+			{ kind = "Coins", amount = data.coins, rarity = "uncommon", caption = "ADDED TO YOUR COINS" }
+		)
+	end
+	local note: string? = nil
+	local primary: { label: string, run: () -> () }? = nil
+	local function openLocker(slot: string?)
+		return {
+			label = "Open the Locker",
+			run = function()
+				local locker = script.Parent:FindFirstChild("LockerPanel")
+				if locker and locker:IsA("ModuleScript") then
+					(require(locker) :: any).show(slot)
+				end
+			end,
+		}
+	end
+	local openPass = {
+		label = "Open the Pass",
+		run = function()
+			Panels.open("Pass")
+		end,
+	}
+	if item.category == "gemPack" then
+		note = "Gems buy blades, finishers, outfits and banners in the Store and the Locker."
+	elseif key == "pass.Premium" then
+		local tier = StoreUI.attr("PassTier", 0)
+		local claimable = StoreUI.attr("PassClaimable", 0)
+		table.insert(results, { kind = "item", id = key, rarity = item.rarity, status = "Unlocked" })
+		for _, outcome in nextPremiumItems(tier, 2) do
+			table.insert(results, outcome)
+		end
+		if claimable > 0 then
+			note = `{claimable} {if claimable == 1 then "reward is" else "rewards are"} ready to claim in the Pass.`
+		else
+			local next = nextPremiumItems(tier, 1)[1]
+			local nextItem = next and Catalog.get(next.id)
+			local away = (tier + 1) * Season.TierXP - StoreUI.attr("PassXP", 0)
+			note = if nextItem
+				then `Your first premium reward, {nextItem.name}, comes at tier {tier + 1}: {away} Pass XP away.`
+				else "Premium rewards arrive as you climb the tiers."
+		end
+		primary = openPass
+	elseif key == "pass.TierSkip" or key == "pass.Tiers10" then
+		table.insert(results, { kind = "item", id = key, rarity = "rare", status = "Applied" })
+		note = `You're on tier {StoreUI.attr("PassTier", 0)} of the Path of the Blade.`
+		primary = openPass
+	elseif item.category == "pass" then
+		table.insert(results, 1, { kind = "item", id = key, rarity = item.rarity, status = "Yours" })
+		note = ({
+			["pass.Loadouts"] = "Six loadout slots: Locker, then Loadouts at the top.",
+			["pass.TitleSlot"] = "Pick a second title in the Locker's Title tab.",
+			["pass.VIP"] = "The Ronin sheath and chat tag are on. The nameplate frame is in the Locker.",
+		} :: { [string]: string })[key] or item.blurb
+		primary = openLocker(if key == "pass.VIP" then "nameplate" elseif key == "pass.TitleSlot" then "title" else nil)
+	elseif item.category == "bundle" then
+		local on, off = {}, {}
+		for _, id in data.items or {} do
+			local granted = Catalog.get(id)
+			if granted then
+				table.insert(if table.find(equipped, id) then on else off, granted)
+			end
+		end
+		local names = {}
+		for _, granted in on do
+			table.insert(names, granted.name)
+		end
+		note = if #names > 0 then `{table.concat(names, " and ")}: on you now.` else "Everything is in your Locker."
+		-- A blade that didn't go on (you wear another): one tap to wear it.
+		for _, granted in off do
+			if granted.category == "bladeSkin" then
+				primary = {
+					label = `Wear {granted.name}`,
+					run = function()
+						StoreUI.fire("EquipItem", granted.id)
+					end,
+				}
+				break
+			end
+		end
+		primary = primary or openLocker("bladeSkin")
+	end
+	if #results == 0 then
+		return
+	end
+	Reveal.play(results, { gift = true, title = "Thank you", note = note, primary = primary })
+end
+
 -- Whether the Store has something waiting (a Shrine Draw to open).
 function StorePanel.badge(): boolean
 	return StoreUI.attr("Draws", 0) > 0
@@ -1124,6 +1391,15 @@ end
 
 function StorePanel.start()
 	Panels.register("Store", { title = "Store", build = StorePanel.build, large = true })
+	task.spawn(function()
+		local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Progress") :: RemoteEvent
+		remote.OnClientEvent:Connect(function(kind: string, data: any)
+			if kind == "Purchased" and typeof(data) == "table" then
+				-- After a beat, so the grant's attributes (tier, claimable) have arrived.
+				task.delay(0.4, purchaseReveal, data)
+			end
+		end)
+	end)
 	-- The shop rotation and odds live on ReplicatedStorage.
 	ReplicatedStorage.AttributeChanged:Connect(function(name)
 		if

@@ -411,53 +411,36 @@ function StoreUI.robux(key: string): number?
 	return robuxCache[key] or product.robux
 end
 
--- The attribute that changes when each kind of purchase is granted.
-local function grantSignal(key: string): string
-	local item = Catalog.get(key)
-	local product = Catalog.Products[key]
-	if product and product.kind == "gamepass" then
-		return "Passes"
-	elseif key == "pass.Premium" then
-		return "PassPremium" -- part S's PassService publishes the season's premium flag
-	elseif key == "pass.TierSkip" or key == "pass.Tiers10" then
-		return "PassTierSkips"
-	elseif item and item.category == "bundle" then
-		return "Inventory"
-	end
-	return "Gems"
-end
-
-local pending: { key: string, at: number, signal: string, gems: number }? = nil
-
--- Asks the server to prompt a Robux purchase; thanks the player once the grant lands.
+-- Asks the server to prompt a Robux purchase. The server tells this client what the purchase
+-- granted (Progress "Purchased"), and StorePanel plays the thank-you reveal from that.
 function StoreUI.purchase(key: string)
 	if StoreUI.attr("CanTransact", true) == false or StoreUI.attr("DataFailed", false) == true then
 		Toasts.notice("Purchases are off this session because your progress couldn't load.", UI.Parchment)
 		return
 	end
-	pending = { key = key, at = os.clock(), signal = grantSignal(key), gems = StoreUI.attr("Gems", 0) }
 	StoreUI.fire("Purchase", key)
 end
 
-player.AttributeChanged:Connect(function(name)
-	local p = pending
-	if not p or name ~= p.signal then
-		return
-	end
-	pending = nil
-	if os.clock() - p.at > 300 then
-		return -- a stale prompt the player walked away from
-	end
-	-- Wait a beat so the whole grant (gems + items) has replicated.
-	task.delay(0.3, function()
-		local item = Catalog.get(p.key)
-		local gems = StoreUI.attr("Gems", 0) - p.gems
-		local text = if item then `Thank you  ·  {item.name}` else "Thank you"
-		if gems > 0 then
-			text ..= `  ·  +{UI.number(gems)} gems`
-		end
-		Toasts.notice(text, UI.Gold)
-	end)
-end)
+-- Whether `item` can be tried on: blades, lines, outfits, finishers (CosmeticPreview.present)
+-- and pre-fight intros (IntroCinematic.preview).
+function StoreUI.previewable(item: Catalog.Item?): boolean
+	local category = item and item.category
+	return category == "bladeSkin"
+		or category == "bladeLine"
+		or category == "outfit"
+		or category == "finisher"
+		or category == "intro"
+end
+
+-- The wishlist (LobbyAction "Wish"): shop items the player wants to hear about.
+function StoreUI.wished(): { [string]: boolean }
+	return set(player:GetAttribute("Wishlist"))
+end
+
+-- Whether `item` is something the shop sells (coins or gems, no Robux) that can be wished for.
+function StoreUI.wishable(item: Catalog.Item): boolean
+	local price = item.price
+	return price ~= nil and price.product == nil and (price.coins ~= nil or price.gems ~= nil) and not item.default
+end
 
 return StoreUI
