@@ -309,6 +309,16 @@ add("bladeSkin", "Niten", {
 })
 -- The Initiate's Bundle exclusive.
 add("bladeSkin", "Initiate", { name = "Initiate's Vow", rarity = "rare", sources = { "bundle" } })
+-- Path of the Blade, season 1 (Shared/Season track): earned on the pass, never sold.
+add("bladeSkin", "S1Cedar", { name = "Pilgrim's Cedar", rarity = "uncommon", sources = { "pass" }, season = "S1" })
+add("bladeSkin", "S1Vermilion", { name = "Torii Vermilion", rarity = "rare", sources = { "pass" }, season = "S1" })
+add("bladeSkin", "S1Hanafubuki", {
+	name = "Hanafubuki",
+	blurb = "The season's blade: a storm of petals at the summit.",
+	rarity = "legendary",
+	sources = { "pass" },
+	season = "S1",
+})
 
 --------------------------------------------------------------------------------------------
 -- Premium blade lines: L1 for gems (or the line bundle), L2-L4 with earned Whetstones.
@@ -511,6 +521,7 @@ for _, tier in { "Gold", "Jade", "Crimson", "Shogun" } do
 		season = "S1",
 	})
 end
+add("nameplate", "S1Path", { name = "Path of the Blade · S1", rarity = "epic", sources = { "pass" }, season = "S1" })
 
 --------------------------------------------------------------------------------------------
 -- Gem packs (plain bonus curve, 0-25%).
