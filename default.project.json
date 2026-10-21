@@ -41,28 +41,33 @@
     "Lighting": {
       "$className": "Lighting",
       "$properties": {
-        "TimeOfDay": "16:48:00",
-        "GeographicLatitude": -40,
-        "Brightness": 2.6,
-        "ExposureCompensation": 0.3,
-        "EnvironmentDiffuseScale": 0.5,
-        "EnvironmentSpecularScale": 0.35,
+        "ClockTime": 14.2,
+        "GeographicLatitude": 28,
+        "Brightness": 2.4,
+        "ExposureCompensation": 0.05,
+        "EnvironmentDiffuseScale": 1,
+        "EnvironmentSpecularScale": 0.3,
         "GlobalShadows": true,
-        "ShadowSoftness": 0.25,
+        "ShadowSoftness": 0.6,
         "Ambient": [
-          0.227,
-          0.188,
-          0.275
+          0.549,
+          0.525,
+          0.502
         ],
         "OutdoorAmbient": [
-          0.48,
-          0.41,
-          0.52
+          0.722,
+          0.698,
+          0.667
         ],
         "ColorShift_Top": [
           1.0,
-          0.698,
-          0.471
+          0.973,
+          0.925
+        ],
+        "ColorShift_Bottom": [
+          0.0,
+          0.0,
+          0.0
         ],
         "LightingStyle": "Realistic",
         "PrioritizeLightingQuality": true
@@ -70,61 +75,62 @@
       "Sky": {
         "$className": "Sky",
         "$properties": {
-          "SkyboxBk": "http://www.roblox.com/asset/?id=5133008838",
-          "SkyboxDn": "http://www.roblox.com/asset/?id=5132998156",
-          "SkyboxFt": "http://www.roblox.com/asset/?id=5132998362",
-          "SkyboxLf": "http://www.roblox.com/asset/?id=5132998795",
-          "SkyboxRt": "http://www.roblox.com/asset/?id=5132998563",
-          "SkyboxUp": "http://www.roblox.com/asset/?id=5132999149",
-          "CelestialBodiesShown": false,
-          "StarCount": 0
+          "SkyboxBk": "rbxasset://textures/sky/sky512_bk.tex",
+          "SkyboxDn": "rbxasset://textures/sky/sky512_dn.tex",
+          "SkyboxFt": "rbxasset://textures/sky/sky512_ft.tex",
+          "SkyboxLf": "rbxasset://textures/sky/sky512_lf.tex",
+          "SkyboxRt": "rbxasset://textures/sky/sky512_rt.tex",
+          "SkyboxUp": "rbxasset://textures/sky/sky512_up.tex",
+          "CelestialBodiesShown": true,
+          "StarCount": 0,
+          "SunAngularSize": 14
         }
       },
       "Atmosphere": {
         "$className": "Atmosphere",
         "$properties": {
-          "Density": 0.4,
-          "Offset": 0.08,
+          "Density": 0.26,
+          "Offset": 0.25,
           "Color": [
-            0.659,
-            0.588,
-            0.62
+            0.863,
+            0.894,
+            0.933
           ],
           "Decay": [
-            0.408,
-            0.361,
-            0.455
+            0.816,
+            0.769,
+            0.824
           ],
-          "Glare": 0.45,
-          "Haze": 1.1
+          "Glare": 0.1,
+          "Haze": 0.6
         }
       },
       "Bloom": {
         "$className": "BloomEffect",
         "$properties": {
-          "Intensity": 0.6,
-          "Size": 28,
-          "Threshold": 1.6
+          "Intensity": 0.25,
+          "Size": 24,
+          "Threshold": 2.6
         }
       },
       "Grade": {
         "$className": "ColorCorrectionEffect",
         "$properties": {
-          "Brightness": 0.0,
-          "Contrast": 0.1,
-          "Saturation": 0.08,
+          "Brightness": 0.02,
+          "Contrast": 0.02,
+          "Saturation": 0.06,
           "TintColor": [
             1.0,
-            0.97,
-            0.94
+            0.988,
+            0.969
           ]
         }
       },
       "SunRays": {
         "$className": "SunRaysEffect",
         "$properties": {
-          "Intensity": 0.06,
-          "Spread": 0.7
+          "Intensity": 0.04,
+          "Spread": 0.55
         }
       }
     }

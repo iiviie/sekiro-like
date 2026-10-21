@@ -356,8 +356,8 @@ order: naginata (reach), then dual blades; kusarigama last.
   [LightingProfile.luau](src/shared/LightingProfile.luau): an early-afternoon sun, neutral-warm ambient high enough that
   faces and clothes read in shadow, soft shadows, a light far haze that leaves fighters clear, a gentle grade and bloom,
   and Roblox's stock day sky. `LightingStyle = Realistic` with `PrioritizeLightingQuality` stay in
-  `default.project.json` (scripts can't set them); that file's older golden-hour values still show in edit mode until
-  they're brought in line with the profile. Props in `Workspace.Props` came from the Creator Store and were
+  `default.project.json` (scripts can't set them), which also mirrors the profile's values so edit mode and thumbnails
+  match; change both together. Props in `Workspace.Props` came from the Creator Store and were
   stripped of every script.
 - **Fighters.** Bots and bosses are dressed by [Outfit.luau](src/server/Outfit.luau) in textured classic Shirt/Pants:
   a gi with crossed lapels and an obi over pleated hakama, six mid-tone colourways for bots and one set per boss
