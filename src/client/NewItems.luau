@@ -261,8 +261,19 @@ local function showCard(batch: { Unlock }, bought: boolean?)
 		end)
 	end
 
+	-- Over an open panel (a purchase) with no room beside the window (a 1223 px screen), the
+	-- card rests inside the window's right edge rather than straddling it.
+	local restX = -16
+	local gui = screen :: ScreenGui
+	if bought and Panels.isOpen() then
+		local window = Panels.window()
+		local room = gui.AbsolutePosition.X + gui.AbsoluteSize.X - (window.AbsolutePosition.X + window.AbsoluteSize.X)
+		if room < card.AbsoluteSize.X + 32 then
+			restX = -math.floor(room + 20)
+		end
+	end
 	card.Position = UDim2.new(1, 360, 0.42, 0)
-	UI.play(card, UI.Motion.Open, { Position = UDim2.new(1, -16, 0.42, 0) })
+	UI.play(card, UI.Motion.Open, { Position = UDim2.new(1, restX, 0.42, 0) })
 	UI.sound("Stamp")
 	task.delay(CARD_TIME, close)
 	-- Leaving the lobby (a match, a duel) or opening a panel puts it away.
