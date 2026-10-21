@@ -261,9 +261,30 @@ local function title(player: Player)
 	local name = plate:FindFirstChild("PlayerName") :: TextLabel
 	local edge = plate:FindFirstChild("Edge") :: UIStroke
 	local winsLabel = billboard:FindFirstChild("Wins") :: TextLabel
-	heading.Visible = titleItem ~= nil
-	heading.Text = if titleItem then titleItem.name else ""
+	-- The second title slot (pass.TitleSlot): "First · Second", each in its rarity colour.
+	local second = if (player:GetAttribute("TitleSlots") or 1) >= 2 then Catalog.get(loadout.title2) else nil
+	if second and (second.category ~= "title" or second == titleItem) then
+		second = nil
+	end
+	heading.Visible = titleItem ~= nil or second ~= nil
 	heading.TextColor3 = if titleItem then Flair.Rarity[titleItem.rarity] or Palette.Parchment else Palette.Parchment
+	if second then
+		local function hex(c: Color3): string
+			return string.format("#%02X%02X%02X", c.R * 255, c.G * 255, c.B * 255)
+		end
+		local parts = {}
+		for _, t in { titleItem, second } do
+			if t then
+				local color = Flair.Rarity[t.rarity] or Palette.Parchment
+				table.insert(parts, `<font color="{hex(color)}">{t.name}</font>`)
+			end
+		end
+		heading.RichText = true
+		heading.Text = table.concat(parts, "  ·  ")
+	else
+		heading.RichText = false
+		heading.Text = if titleItem then titleItem.name else ""
+	end
 	plate.BackgroundColor3 = plateLook.fill
 	edge.Color = plateLook.edge
 	local plateRef = Flair.ref(loadout.nameplate) or "Plain"
@@ -302,6 +323,9 @@ function LeaderboardService.start()
 	end)
 	local function onPlayer(player: Player)
 		player:GetAttributeChangedSignal("Loadout"):Connect(function()
+			title(player)
+		end)
+		player:GetAttributeChangedSignal("TitleSlots"):Connect(function()
 			title(player)
 		end)
 		-- Avatar loading replaces the head, so re-title whenever a new one appears.

@@ -7,6 +7,7 @@
 --   "Queue" boolean | "PvP" boolean | "ClaimDaily"
 --   "BuyItem" catalogId    buy with coins or gems (server/Economy.buy)
 --   "EquipItem" catalogId  put an owned item in its slot (a title: "title.X", or "title." for none)
+--   "EquipTitle2" catalogId  the second title slot (pass.TitleSlot): "title.X", or "title." for none
 --   "UpgradeLine" catalogId  raise an owned blade line one level with Whetstones
 --                 (or { id, gems = n }: n of the level's Whetstones paid in gems, capped)
 --   "Purchase" productKey  prompt a Robux purchase (server/Monetization.prompt)
@@ -205,6 +206,13 @@ local handlers: { [string]: (Player, unknown) -> () } = {
 		if slot and Economy.equip(player, slot, id) then
 			dressInLobby(player, slot)
 		end
+	end,
+	EquipTitle2 = function(player, id)
+		-- The second title slot: "title.X", or "title." to clear it. Needs pass.TitleSlot.
+		if typeof(id) ~= "string" then
+			return
+		end
+		Economy.equipTitle2(player, if id == "title." then "" else id, Monetization.ownsPass(player, "pass.TitleSlot"))
 	end,
 	BuyItem = function(player, id)
 		if typeof(id) ~= "string" then
