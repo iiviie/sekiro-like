@@ -1,7 +1,7 @@
 --!strict
 -- Rewards you can see: every payout from the server's ProgressService pops up the moment
 -- it happens. Small toasts stack on the right ("+15 coins  +30 XP  Cut down"), a level-up
--- gets a gold banner, a finished Trial a banner of its own, and every match ends with a
+-- gets a gold banner, a finished mission or pass tier one of its own, and every match ends with a
 -- report card: your place, what you did, and what it earned.
 
 local Players = game:GetService("Players")
@@ -470,6 +470,27 @@ function Toasts.start()
 			sound(Assets.Sounds.PerfectDeflect, 0.5, 1.1)
 		elseif kind == "Notice" then
 			Toasts.notice(data.text or "", UI.Parchment)
+		elseif kind == "Mission" then
+			-- Season pass missions (server/PassService): a daily mission or a weekly bounty.
+			local pass = if (data.pass or 0) > 0 then `+{data.pass} Pass XP  ·  ` else ""
+			banner(
+				ICONS.Trials,
+				if data.weekly then "Bounty complete" else "Mission complete",
+				`{data.text}  ·  {pass}+{data.coins} coins`,
+				UI.Jade,
+				0.16
+			)
+			sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
+		elseif kind == "PassTier" then
+			local crest = (ICONS :: any).SeasonPass or Assets.RankCrests.Gold
+			local ready = if (data.claimable or 0) > 0 then `  ·  {data.claimable} to claim` else ""
+			task.delay(0.6, banner, crest, `Tier {data.tier}`, `Path of the Blade{ready}`, UI.Gold, 0.3)
+			task.delay(0.6, sound, Assets.Sounds.PerfectDeflect, 0.6, 0.85)
+		elseif kind == "PassPremium" then
+			local crest = (ICONS :: any).SeasonPass or Assets.RankCrests.Gold
+			banner(crest, "Premium unlocked", `{data.claimable or 0} rewards ready to claim`, UI.Gold, 0.3)
+		elseif kind == "PassClaim" then
+			Toasts.notice(`Claimed  ·  {data.text or ""}`, UI.Gold)
 		end
 	end)
 end
