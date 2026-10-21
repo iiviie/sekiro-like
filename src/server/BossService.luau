@@ -624,6 +624,15 @@ local function cleanup(f: Fight)
 	player:SetAttribute("DuelState", nil)
 	if f.placed and player.Parent then
 		player:LoadCharacter()
+		-- Back beside the shrine pad (Sekiro's idol by the boss), not on the spawn plaza: one
+		-- step onto it opens the picker for another try.
+		local character = player.Character
+		local away = LobbyService.spawnCFrame().Position - pad
+		away = Vector3.new(away.X, 0, away.Z)
+		if character and pad ~= Vector3.zero and away.Magnitude > 1 then
+			local spot = pad + away.Unit * (padRadius + 3) + Vector3.new(0, 3, 0)
+			character:PivotTo(CFrame.lookAt(spot, Vector3.new(pad.X, spot.Y, pad.Z)))
+		end
 	end
 	if fight == f then
 		fight = nil
