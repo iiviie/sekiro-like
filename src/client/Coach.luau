@@ -229,8 +229,12 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		then
 			lockPending = true
 			task.delay(math.max(data.hitAt + 0.45 - now(), 0), function()
+				-- Wait (a few seconds at most) for a gap between prompts, never over one.
+				local deadline = os.clock() + 4
+				while prompt.Visible and os.clock() < deadline do
+					task.wait(0.1)
+				end
 				lockPending = false
-				-- Not over another prompt: the next exchange tries again.
 				if LockOn.target() == nil and character:GetAttribute("InMatch") == true and not prompt.Visible then
 					lockTaught = true
 					show(key("lock"), "LOCK ON", UI.Gold, 1.6)

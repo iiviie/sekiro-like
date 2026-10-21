@@ -102,7 +102,8 @@ local function guideEntries(): { { string } }
 		return if word == input then word else `{word}  ·  {input}`
 	end
 	local tap = if touch then "tap" else "press"
-	local feint = named("Deflect", k.block)
+	local jumpKey = if touch then "" else ` ({k.jump})`
+	local feint = if touch then "Tap Deflect" else `Press {k.block}`
 	local morphs = `{named("Thrust", k.thrust)} or {named("Sweep", k.sweep)}`
 	local lockKey = if scheme == "Gamepad" then "R3" else "R (or the middle mouse button)"
 	local lock = if touch
@@ -123,11 +124,11 @@ local function guideEntries(): { { string } }
 		},
 		{
 			"Red 危 = perilous",
-			`Can't be guarded. A thrust: deflect it, or dash INTO it with {named("Dodge", k.dodge)} for a Mikiri Counter. A sweep: jump over it ({k.jump}); dodging doesn't help. Either way, reading it wrecks the attacker's posture.`,
+			`Can't be guarded. A thrust: deflect it, or dash INTO it with {named("Dodge", k.dodge)} for a Mikiri Counter. A sweep: jump over it{jumpKey}; dodging doesn't help. Either way, reading it wrecks the attacker's posture.`,
 		},
 		{
 			head("Attacking", k.attack),
-			`Slash on the beat for a three-hit string; it speeds up while it keeps landing. Pause before the third for a slow overhead that beats early deflects. {morphs} late in a string turns the ender perilous. {feint} mid-swing feints.`,
+			`Slash on the beat for a three-hit string; it speeds up while it keeps landing. Pause before the third for a slow overhead that beats early deflects. {morphs} late in a string turns the ender perilous. {feint} mid-swing to feint.`,
 		},
 		{
 			"Survive",
