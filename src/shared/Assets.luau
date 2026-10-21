@@ -92,6 +92,34 @@ local Assets = {
 		Lock = "rbxassetid://113696248618534",
 		Streak = "rbxassetid://121273399733221", -- three ink slashes
 		Skin = "rbxassetid://96083641263939", -- glowing blade
+
+		-- Economy (batch4.txt)
+		Whetstone = "rbxassetid://102705465501821", -- earned upgrade currency: toishi on a stand
+		Shard = "rbxassetid://74611235619227", -- duplicate currency: spirit-glass shard, jade core
+		-- Gem packs, smallest to largest (Config gem pack tiers 1..6). Tiers 5 and 6 are not
+		-- generated yet (see research_notes/progression/part_A.md); fall back to GemPack4.
+		GemPacks = {
+			"rbxassetid://113268941765880", -- 3 magatama
+			"rbxassetid://70434890876514", -- a small heap
+			"rbxassetid://74743360936548", -- a spilling silk pouch
+			"rbxassetid://124864277479259", -- an overflowing masu box
+		} :: { string },
+
+		-- Rarity frames (art/icons/frames.py): 512x512, transparent centre, drawn over an
+		-- item card. Ornaments stay in the outer 96 px: SliceCenter Rect(96, 96, 416, 416).
+		RarityFrames = {
+			Common = "rbxassetid://75591611085355",
+			Rare = "rbxassetid://84041968321288",
+			Epic = "rbxassetid://98529384607353",
+			Legendary = "rbxassetid://118071288044032",
+			Mythic = "rbxassetid://107070208603815",
+		} :: { [string]: string },
+	},
+
+	-- Painted lobby boards (art/icons/gen_board.sh, boards.txt): 1024x512, no text.
+	Boards = {
+		Store = "rbxassetid://120289451019186", -- merchant stall, chest of jade gems
+		Season = "rbxassetid://110824746436682", -- torii stairway to a peak shrine (Path of the Blade)
 	},
 
 	-- Touch button glyphs (mobile), keyed by CombatInput action name.

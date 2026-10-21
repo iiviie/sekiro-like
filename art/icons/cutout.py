@@ -2,7 +2,7 @@
 
 Removes near-white regions connected to the border, plus enclosed pure-white holes (a
 coin's square hole), then feathers the edge so the ink outline anti-aliases cleanly.
-Writes art/icons/png/<name>.png at 512x512.
+Writes art/icons/png/<name>.png at 512x512 (board_* names: a 1024x512 crop, no cutout).
 
 Run: python art/icons/cutout.py [names...]
 """
@@ -50,11 +50,21 @@ def cut(src: Path) -> Image.Image:
     return canvas.resize((SIZE, SIZE), Image.LANCZOS)
 
 
+def board(src: Path) -> Image.Image:
+    """Lobby-board art (gen_board.sh): no cutout, centre-cropped to 2:1 at 1024x512."""
+    img = Image.open(src).convert("RGB")
+    h = min(img.height, img.width // 2)
+    w = h * 2
+    left, top = (img.width - w) // 2, (img.height - h) // 2
+    return img.crop((left, top, left + w, top + h)).resize((1024, 512), Image.LANCZOS)
+
+
 def main() -> None:
     names = sys.argv[1:] or [p.stem for p in sorted((HERE / "raw").glob("*.png"))]
     (HERE / "png").mkdir(exist_ok=True)
     for name in names:
-        cut(HERE / "raw" / f"{name}.png").save(HERE / "png" / f"{name}.png", optimize=True)
+        process = board if name.startswith("board_") else cut
+        process(HERE / "raw" / f"{name}.png").save(HERE / "png" / f"{name}.png", optimize=True)
         print(name)
 
 

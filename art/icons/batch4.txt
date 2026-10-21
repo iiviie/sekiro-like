@@ -1,0 +1,31 @@
+cur_whetstone|a single rectangular Japanese whetstone (toishi) block of blue-grey stone resting on a small dark wooden base, its top worn slightly concave and wet with a few water droplets, one bright gold spark glinting off the top edge
+cur_shard|a single tall angular crystal shard of pale bone-white spirit glass with a glowing jade core, sharp chipped facets, two tiny broken fragments floating beside it, gold glint on one facet
+gem_pack1|a tiny pinch of exactly three small glossy jade green magatama (comma-shaped jewels) lying together, modest and small in the frame, the smallest pack
+gem_pack2|a small heap of about eight glossy jade green magatama (comma-shaped jewels) piled together, a small pack
+gem_pack3|a small crimson silk drawstring pouch tipped over with about fifteen glossy jade green magatama jewels spilling out in front of it, a medium pack
+gem_pack4|a square wooden masu box filled to overflowing with glossy jade green magatama jewels, more jewels piled around its base, a large pack
+gem_pack5|a small crimson lacquer chest with gold corner fittings, lid open, overflowing with a heap of glossy jade green magatama jewels that spill down its front, soft jade glow, a very large pack
+gem_pack6|a big ornate crimson lacquer treasure chest with heavy gold fittings and a gold kamon on the lid, lid flung open, a towering mountain of glowing jade green magatama jewels bursting out and cascading over the sides, bright gold light rays fanning out behind it, the biggest and most lavish pack
+shrine_draw|an omamori shrine charm: a small flat rectangular crimson silk brocade pouch with gold embroidered wave pattern, a looped crimson-and-gold cord knot on top, standing upright and slightly tilted, a faint gold glow
+shrine_capsule|a round lacquered capsule sphere split into two halves, black lacquer top and crimson lacquer bottom joined by a gold band with a gold kamon crest, the halves slightly open with bright jade light and sparkles leaking from the seam, a mysterious prize capsule
+cur_passxp|a round flat token of crimson lacquer with a thick gold rim, a bold bone-white ink-brush upward chevron painted in the centre, a small gold sparkle at the top edge, seen at a slight angle
+offer_initiate|starter bundle key art, three objects grouped together: a plain katana in a simple black sheath lying diagonally behind, a small pile of glossy jade green magatama jewels in front on the left, and a rolled parchment scroll tied with crimson cord and stamped with a round red wax seal in front on the right
+pass_emblem_s1|a season-pass crest: a crimson lacquer shield-shaped emblem with a thick gold rim, a katana pointing straight up through its centre over a gold rising sun, a single gold sun disc crowning the top, two crimson ribbon tails below, grand and heraldic, front view
+offer_tierskip|two bold stacked upward chevrons made of gold leaf with jade glow between them, like a fast-forward rank-up glyph, a few gold sparks flying off the top, front view
+offer_vip|a prestigious crest: an ornate charcoal-and-gold hexagonal badge with a woven straw kasa ronin hat at its centre, two crossed katana behind the hat, crimson silk tassels hanging from the bottom corners, gold rays radiating behind
+offer_presets|three hanging wooden prayer tags (fuda) fanned out side by side on crimson cords, each painted with a different simple silhouette: a katana, a long odachi, and a samurai kabuto helmet
+offer_victorycry|a large conch-shell war horn (horagai) with crimson lacquer and gold fittings and a crimson tassel, being blown, three bold bone-white ink-brush sound-wave arcs bursting out of its mouth
+fin_default|a katana planted point-down into the ground with a crisp ring of crimson ink splash around its tip, simple and classic
+fin_inkbrush|a giant sweeping black sumi-e ink brush stroke shaped like a sword slash arc, a calligraphy brush with a bamboo handle at the end of the stroke, crimson ink droplets flying off it
+fin_sakura|a crimson crescent sword-slash arc bursting into a swirling cloud of soft pink sakura petals and two small sakura blossoms
+fin_crow|a bone-white sword-slash arc with a burst of glossy black crow feathers exploding outward from it, and one black crow silhouette taking flight at the top
+fin_lightning|a katana being slid into a black lacquer sheath, crackling gold-white lightning bolts arcing out of the sheath mouth where blade meets sheath
+fin_moon|a huge bone-white crescent moon formed by a katana slash arc, a katana tip at the end of the arc, a crimson accent glow and one small wisp of cloud
+line_sakura|a katana drawn diagonally from bottom-left to top-right, pink-tinted steel blade etched with a sakura blossom hamon pattern, pink-white sakura petals swirling around the blade, crimson-wrapped hilt, gold tsuba shaped like a five-petal sakura flower
+line_raijin|a katana drawn diagonally from bottom-left to top-right, steel blade crackling with gold lightning bolts, round tsuba shaped like a ring of small taiko drums like the thunder god Raijin, dark navy-wrapped hilt, gold sparks
+line_crow|a katana drawn diagonally from bottom-left to top-right, black-lacquered blade with a bone-white cutting edge, tsuba shaped like a pair of spread black crow wings, glossy black crow feathers trailing from the hilt
+tab_outfits|a neatly folded samurai outfit: a charcoal gi jacket and dark hakama folded in a stack with a crimson obi sash wrapped across it and a small woven straw kasa hat resting on top
+tab_finishers|a katana thrusting straight down through the centre of a big crimson ink splash starburst, dramatic
+tab_titles|a hanging vertical calligraphy scroll (kakejiku) with abstract bold black brush strokes (no readable characters), crimson silk border and gold roller ends, a small crimson hanko seal stamp near the bottom
+tab_banners|a tall rectangular crimson sashimono banner flag with a bone-white tomoe crest in the middle, mounted on a black lacquered pole with a crossbar at the top and gold end caps, gently rippling
+tab_season|a round gold-framed seasonal medallion split diagonally: one half a crimson rising sun, the other half a bone-white crescent moon on charcoal, a slim katana dividing the two halves
