@@ -593,13 +593,27 @@ add("pass", "VIP", {
 	contents = { items = { "plate.Ronin" } },
 	sources = { "robux" },
 })
-add(
-	"pass",
-	"Loadouts",
-	{ name = "Loadout presets (3 → 6)", price = { product = "pass.Loadouts" }, sources = { "robux" } }
-)
-add("pass", "TitleSlot", { name = "Second title slot", price = { product = "pass.TitleSlot" }, sources = { "robux" } })
-add("pass", "VictoryCry", { name = "Victory cry", price = { product = "pass.VictoryCry" }, sources = { "robux" } })
+add("pass", "Loadouts", {
+	name = "Loadout presets (3 → 6)",
+	blurb = "Save six loadout presets in the Locker instead of three.",
+	price = { product = "pass.Loadouts" },
+	sources = { "robux" },
+})
+add("pass", "TitleSlot", {
+	name = "Second title slot",
+	blurb = "Show a second title on your nameplate and duel card.",
+	price = { product = "pass.TitleSlot" },
+	sources = { "robux" },
+})
+-- Not on sale until the war cries are recorded (the sound-design pass): Monetization refuses
+-- "soon" items and the Store shows it as coming soon.
+add("pass", "VictoryCry", {
+	name = "Victory cry",
+	blurb = "A war cry when you win a royale or a duel.",
+	price = { product = "pass.VictoryCry" },
+	sources = { "robux" },
+	status = "soon",
+})
 
 --------------------------------------------------------------------------------------------
 
