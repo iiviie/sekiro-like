@@ -20,10 +20,14 @@ local ShopService = require(script.ShopService)
 local StatsService = require(script.StatsService)
 local Telemetry = require(script.Telemetry)
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 LightingProfile.apply()
 BossService.stash() -- boss clips stay server-side until a fight needs them
+local buildStarted = os.clock()
 MapBuilder.build()
 LobbyBuilder.build()
+ReplicatedStorage:SetAttribute("WorldBuildSeconds", math.round((os.clock() - buildStarted) * 100) / 100)
 CombatService.start()
 BotService.start()
 StatsService.start()
@@ -41,3 +45,9 @@ DuelService.start()
 BossService.start()
 Telemetry.start()
 DevHooks.start()
+
+-- The world is built and every service is up: the title card (client/WorldGate) holds its
+-- "press any key" until this arrives, with the lobby's size so it can tell when it has it all.
+local lobby = workspace:FindFirstChild("Lobby")
+ReplicatedStorage:SetAttribute("WorldParts", if lobby then #lobby:GetDescendants() else 0)
+ReplicatedStorage:SetAttribute("WorldReady", true)
