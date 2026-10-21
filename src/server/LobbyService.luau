@@ -11,12 +11,22 @@
 --   "UpgradeLine" catalogId  raise an owned blade line one level with Whetstones
 --                 (or { id, gems = n }: n of the level's Whetstones paid in gems, capped)
 --   "Purchase" productKey  prompt a Robux purchase (server/Monetization.prompt)
+--   "Preset" { op = "save" | "wear" | "rename" | "clear", slot = 1..6, name? }
+--                 loadout presets: 3 slots, 6 with pass.Loadouts; a preset is every equipped
+--                 slot (and the second title); wearing one skips anything no longer owned
+--   "Wish" catalogId       add or remove a shop item on the wishlist (told when it's in the
+--                 daily shop: server/ShopService)
 -- Everything is validated here; the client only ever asks. Requests are rate-limited per
 -- player (a token bucket), so spamming equips can't flood the rig or the attributes.
+--
+-- Published per player: LoadoutPresets (JSON { { slot, name, slots = { slot: id } } }; the
+-- count allowed is Monetization's LoadoutSlots) and Wishlist (comma-separated ids).
 
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TextService = game:GetService("TextService")
 
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -35,6 +45,10 @@ local TRAINER_INTERVAL = { 1.1, 1.9 }
 -- LobbyAction rate limit: a bucket of BURST requests refilling at RATE per second.
 local BURST = 8
 local RATE = 3
+-- Loadout presets: slots without and with the pass, the longest name, the wishlist's size.
+local PRESETS, PRESETS_PASS = 3, 6
+local PRESET_NAME_MAX = 20
+local WISHLIST_MAX = 24
 
 local LobbyService = {}
 
@@ -170,6 +184,182 @@ local function dressInLobby(player: Player, slot: string)
 	end
 end
 
+local function tell(player: Player, text: string)
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local progress = remotes and remotes:FindFirstChild("Progress")
+	if progress and progress:IsA("RemoteEvent") then
+		progress:FireClient(player, "Notice", { text = text })
+	end
+end
+
+---------------------------------------------------------------------------------------------
+-- Loadout presets (profile Ext.Loadouts = { ["1"] = { name, slots = { slot: id } } }).
+
+local function presetSlots(player: Player): number
+	return if Monetization.ownsPass(player, "pass.Loadouts") then PRESETS_PASS else PRESETS
+end
+
+local function presets(d: StatsService.Data): { [string]: { name: string, slots: { [string]: string } } }
+	local raw = d.Ext.Loadouts
+	if typeof(raw) ~= "table" then
+		raw = {}
+		d.Ext.Loadouts = raw
+	end
+	return raw :: any
+end
+
+-- What a preset holds: every loadout slot, plus the second title when it's worn.
+local function snapshot(d: StatsService.Data): { [string]: string }
+	local out = {}
+	for _, slot in Catalog.Slots do
+		out[slot] = d.Loadout[slot] or Catalog.Defaults[slot]
+	end
+	if typeof(d.Loadout.title2) == "string" then
+		out.title2 = d.Loadout.title2
+	end
+	return out
+end
+
+-- A name the player typed, filtered for them (only they see it); nil when it can't be checked.
+local function filteredName(player: Player, raw: string): string?
+	local name = string.gsub(raw, "%c", "")
+	name = string.match(name, "^%s*(.-)%s*$") or ""
+	local length = utf8.len(name)
+	if not length or name == "" then
+		return nil
+	end
+	if length > PRESET_NAME_MAX then
+		local cut = utf8.offset(name, PRESET_NAME_MAX + 1)
+		name = string.sub(name, 1, (cut or #name + 1) - 1)
+	end
+	local ok, result = pcall(function()
+		local filter = TextService:FilterStringAsync(name, player.UserId, Enum.TextFilterContext.PrivateChat)
+		return filter:GetNonChatStringForUserAsync(player.UserId)
+	end)
+	return if ok and typeof(result) == "string" and result ~= "" then result else nil
+end
+
+local function wearPreset(player: Player, d: StatsService.Data, slots: { [string]: string }): number
+	local skipped = 0
+	for _, slot in Catalog.Slots do
+		local id = slots[slot]
+		local current = d.Loadout[slot] or Catalog.Defaults[slot]
+		if typeof(id) ~= "string" or id == current then
+			continue
+		end
+		if slot == "title" and id == "" then
+			Economy.equip(player, "title", "")
+		elseif d.Inventory[id] ~= nil and Economy.equip(player, slot, id) then
+			dressInLobby(player, slot)
+		else
+			skipped += 1 -- no longer owned (a pass lapsed, an item was removed)
+		end
+	end
+	if slots.title2 ~= nil and Monetization.ownsPass(player, "pass.TitleSlot") then
+		local id = slots.title2
+		if id ~= (d.Loadout.title2 or "") and (id == "" or d.Inventory[id] ~= nil) then
+			Economy.equipTitle2(player, id, true)
+		end
+	end
+	return skipped
+end
+
+local function preset(player: Player, arg: unknown)
+	local d = StatsService.get(player)
+	if not d or typeof(arg) ~= "table" then
+		return
+	end
+	local request = arg :: { [string]: any }
+	local n = request.slot
+	if typeof(n) ~= "number" or n % 1 ~= 0 or n < 1 or n > presetSlots(player) then
+		return
+	end
+	local list = presets(d)
+	local key = tostring(n)
+	local entry = list[key]
+	if request.op == "save" then
+		list[key] = { name = if entry then entry.name else `Loadout {n}`, slots = snapshot(d) }
+		tell(player, `Saved  ·  {list[key].name}`)
+	elseif request.op == "wear" and entry then
+		local skipped = wearPreset(player, d, entry.slots)
+		tell(
+			player,
+			if skipped > 0
+				then `Wearing {entry.name}  ·  {skipped} item{if skipped == 1 then "" else "s"} you no longer own left as is`
+				else `Wearing {entry.name}`
+		)
+	elseif request.op == "rename" and entry and typeof(request.name) == "string" then
+		local name = filteredName(player, string.sub(request.name, 1, 200))
+		if not name then
+			tell(player, "That name can't be used.")
+			return
+		end
+		entry.name = name
+	elseif request.op == "clear" and entry then
+		list[key] = nil
+	else
+		return
+	end
+	StatsService.commit(player)
+end
+
+-- The wishlist (Ext.Wishlist = { [id] = true }): shop items you'd like, told when they rotate in.
+local function wish(player: Player, id: unknown)
+	local d = StatsService.get(player)
+	local item = typeof(id) == "string" and Catalog.get(id) or nil
+	if not d or not item then
+		return
+	end
+	local list = d.Ext.Wishlist
+	if typeof(list) ~= "table" then
+		list = {}
+		d.Ext.Wishlist = list
+	end
+	local wishes = list :: { [string]: boolean }
+	if wishes[item.id] then
+		wishes[item.id] = nil
+	else
+		local price = item.price
+		if not price or price.product or not (price.coins or price.gems) or d.Inventory[item.id] ~= nil then
+			return -- only things the shop sells, that you don't own
+		end
+		local count = 0
+		for _ in wishes do
+			count += 1
+		end
+		if count >= WISHLIST_MAX then
+			tell(player, `Your wishlist is full ({WISHLIST_MAX}).`)
+			return
+		end
+		wishes[item.id] = true
+	end
+	StatsService.commit(player)
+end
+
+local function publishExtras(player: Player, d: StatsService.Data)
+	local out = {}
+	for key, entry in presets(d) do
+		local n = tonumber(key)
+		if n and typeof(entry) == "table" and typeof(entry.slots) == "table" then
+			table.insert(out, { slot = n, name = entry.name, slots = entry.slots })
+		end
+	end
+	table.sort(out, function(a, b)
+		return a.slot < b.slot
+	end)
+	player:SetAttribute("LoadoutPresets", HttpService:JSONEncode(out))
+	local wishes = {}
+	if typeof(d.Ext.Wishlist) == "table" then
+		for id, on in d.Ext.Wishlist do
+			if on == true and d.Inventory[id] == nil then
+				table.insert(wishes, id)
+			end
+		end
+	end
+	table.sort(wishes)
+	player:SetAttribute("Wishlist", table.concat(wishes, ","))
+end
+
 local handlers: { [string]: (Player, unknown) -> () } = {
 	Queue = function(player, value)
 		player:SetAttribute("Queued", value == true)
@@ -243,6 +433,8 @@ local handlers: { [string]: (Player, unknown) -> () } = {
 	ClaimDaily = function(player)
 		claimDaily(player)
 	end,
+	Preset = preset,
+	Wish = wish,
 }
 
 -- The deflect trainer: a training dummy that faces whoever stands in its ring and swings
@@ -316,6 +508,15 @@ function LobbyService.start()
 		end
 	end)
 
+	StatsService.onPublish(publishExtras)
+	-- An earned title or blade put on by itself (Economy.equipIfDefault): dress the lobby body.
+	Economy.onEquipped(function(player, slot)
+		local character = player.Character
+		if character and not inMatch[character] then
+			dressInLobby(player, slot)
+		end
+	end)
+
 	-- A profile can finish loading after the character spawned: put its weapon and blade on.
 	StatsService.onLoaded(function(player)
 		task.defer(function()
@@ -327,6 +528,12 @@ function LobbyService.start()
 	local function onPlayerAdded(player: Player)
 		player:SetAttribute("Queued", LOBBY.AutoQueue)
 		player:SetAttribute("LobbyPvP", false)
+		-- Past the title card: republish, so day-start notices (the wishlist) reach them.
+		player:GetAttributeChangedSignal("Entered"):Connect(function()
+			if StatsService.get(player) then
+				StatsService.commit(player)
+			end
+		end)
 		player.CharacterAdded:Connect(function(character)
 			inMatch[character] = nil
 			refreshSafe(player)
