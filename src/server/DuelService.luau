@@ -185,7 +185,8 @@ end
 local function pairKey(sides: { Side }): string
 	local keys = {}
 	for _, side in sides do
-		table.insert(keys, if side.player then tostring((side.player :: Player).UserId) else "bot")
+		-- a bot by its name: another bot is another opponent (the full intro again)
+		table.insert(keys, if side.player then tostring((side.player :: Player).UserId) else `bot:{side.name}`)
 	end
 	table.sort(keys)
 	return table.concat(keys, ":")
