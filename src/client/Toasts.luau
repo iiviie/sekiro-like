@@ -119,6 +119,49 @@ local function toast(xp: number, coins: number, reason: string)
 	end)
 end
 
+-- A plain line of feedback in the same stack ("A trial is underway: you're next"), for
+-- requests the server turned down or the client couldn't do. Wraps; lingers a little longer.
+function Toasts.notice(text: string, color: Color3?)
+	if not stack then
+		return
+	end
+	local row = UI.new("Frame", {
+		Size = UDim2.fromOffset(360, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = UI.Ink,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		LayoutOrder = -math.floor(os.clock() * 1000),
+	}, stack)
+	UI.corner(row)
+	UI.new("UIPadding", {
+		PaddingLeft = UDim.new(0, 12),
+		PaddingRight = UDim.new(0, 12),
+		PaddingTop = UDim.new(0, 6),
+		PaddingBottom = UDim.new(0, 6),
+	}, row)
+	local label = UI.text({
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		Font = UI.Bold,
+		TextSize = 18,
+		TextColor3 = color or UI.Parchment,
+		TextStrokeTransparency = 0.4,
+		TextTransparency = 1,
+		Text = text,
+	}, row)
+	UI.tween(row, 0.2, { BackgroundTransparency = 0.25 })
+	UI.tween(label, 0.2, { TextTransparency = 0 })
+	task.delay(3.6, function()
+		UI.tween(row, 0.4, { BackgroundTransparency = 1 })
+		UI.tween(label, 0.4, { TextTransparency = 1, TextStrokeTransparency = 1 })
+		task.wait(0.45)
+		row:Destroy()
+	end)
+end
+
 -- A centred banner with an icon: level-ups and finished trials.
 local function banner(image: string, title: string, subtitle: string, color: Color3, y: number)
 	local frame = UI.new("Frame", {

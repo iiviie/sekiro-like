@@ -12,6 +12,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Ranks = require(ReplicatedStorage.Shared.Ranks)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
+local Toasts = require(script.Parent.Toasts)
 local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
@@ -241,6 +242,8 @@ local function weaponsPanel()
 				lobbyAction:FireServer("Equip", id)
 			elseif not isOwned and coins >= def.price then
 				lobbyAction:FireServer("Buy", id)
+			elseif not isOwned then
+				Toasts.notice(`{UI.number(def.price - coins)} more coins to unlock the {def.name}`, UI.Gold)
 			end
 		end)
 	end
@@ -344,6 +347,10 @@ local function weaponsPanel()
 				lobbyAction:FireServer("EquipSkin", skin.id)
 			elseif canBuy then
 				lobbyAction:FireServer("BuySkin", skin.id)
+			elseif not isOwned and not unlocked and rule then
+				Toasts.notice(`Locked  ·  {rule.text}`, UI.Parchment)
+			elseif not isOwned then
+				Toasts.notice(`{UI.number(skin.price - coins)} more coins for {skin.name}`, UI.Gold)
 			end
 		end)
 	end
@@ -630,6 +637,7 @@ local function rewardsPanel()
 		end
 	end
 	local claim = UI.button({
+		Name = "Claim",
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 160),
 		Size = UDim2.fromOffset(220, 50),
@@ -641,6 +649,11 @@ local function rewardsPanel()
 	UI.stroke(claim)
 	claim.Activated:Connect(function()
 		if not claimedToday then
+			-- Say what it paid once the server has granted it.
+			local nextCoins = Config.Economy.Daily[nextDay] or 0
+			player:GetAttributeChangedSignal("LastDaily"):Once(function()
+				Toasts.notice(`Day {nextDay} reward claimed  ·  +{nextCoins} coins`, UI.Gold)
+			end)
 			lobbyAction:FireServer("ClaimDaily")
 		end
 	end)
@@ -663,6 +676,7 @@ local function settingsPanel()
 			Text = option.label,
 		}, body)
 		local toggle = UI.button({
+			Name = option.key,
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.new(1, 0, 0, 10 + i * 52),
 			Size = UDim2.fromOffset(110, 40),
@@ -687,23 +701,56 @@ local builders: { [string]: () -> () } = {
 	Settings = settingsPanel,
 }
 
+local drawn: string? = nil -- the panel body currently holds
+
 function Panels.redraw()
 	if not current then
 		return
 	end
+	-- Panels redraw on every attribute change (coins, XP, queue...): keep a scrolled list
+	-- (Arsenal's blades) where it was instead of jumping back to the top.
+	local scroll = Vector2.zero
+	local old = body:FindFirstChildOfClass("ScrollingFrame")
+	if old and drawn == current then
+		scroll = old.CanvasPosition
+	end
 	clear()
+	drawn = current
 	titleLabel.Text = if current == "Guide"
 		then "How to fight"
 		elseif current == "Weapons" then "Arsenal"
 		elseif current == "Trials" then "Daily Trials"
 		else current :: string
 	builders[current :: string]()
+	local list = body:FindFirstChildOfClass("ScrollingFrame")
+	if list and scroll ~= Vector2.zero then
+		task.defer(function()
+			if list.Parent then
+				list.CanvasPosition = scroll
+			end
+		end)
+	end
+end
+
+local openedCallbacks: { () -> () } = {}
+
+-- Runs `callback` whenever a panel opens (the boss picker closes itself so the two never
+-- stack).
+function Panels.onOpen(callback: () -> ())
+	table.insert(openedCallbacks, callback)
+end
+
+function Panels.isOpen(): boolean
+	return current ~= nil
 end
 
 function Panels.open(id: string)
 	current = id
 	window.Visible = true
 	Panels.redraw()
+	for _, callback in openedCallbacks do
+		task.spawn(callback)
+	end
 end
 
 function Panels.closeAll()
@@ -729,22 +776,15 @@ function Panels.start(remote: RemoteEvent)
 		DisplayOrder = 6,
 		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
 	})
-	-- Sits above the PLAY button and nav bar, never over them.
+	-- Sits above the PLAY button and nav bar, never over them, and shrinks on short screens
+	-- (a phone in landscape) so its top stays on screen.
 	window = UI.panel({
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -200),
+		Name = "Window",
 		Size = UDim2.fromOffset(660, 372),
 		Visible = false,
 	}, screen)
 	UI.new("UISizeConstraint", { MaxSize = Vector2.new(660, 372) }, window)
-	-- Short screens: shrink so the window never covers the Mastery bar or currencies up top.
-	local fit = UI.new("UIScale", {}, window)
-	local function refit()
-		local height = workspace.CurrentCamera.ViewportSize.Y
-		fit.Scale = math.clamp((height - 290) / 372, 0.6, 1)
-	end
-	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
-	refit()
+	UI.fitAboveNav(window, 372)
 	titleLabel = UI.text({
 		Position = UDim2.fromOffset(24, 14),
 		Size = UDim2.new(1, -90, 0, 36),

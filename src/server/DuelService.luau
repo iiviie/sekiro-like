@@ -46,6 +46,7 @@ type Ground = {
 	pads: { Vector3 },
 	arena: Vector3,
 	status: TextLabel?,
+	holder: Instance?, -- Workspace.Lobby.DuelGrounds.GroundN: carries Busy for the pads' HUD line
 	waiting: { [number]: Player }, -- pad index -> who stands on it
 	loneSince: number?,
 	busy: boolean,
@@ -149,8 +150,15 @@ local function present(side: Side): boolean
 	return side.player == nil or (side.player :: Player).Parent ~= nil
 end
 
+local function setBusy(ground: Ground, busy: boolean)
+	ground.busy = busy
+	if ground.holder then
+		ground.holder:SetAttribute("Busy", busy) -- DuelHUD: "a duel is under way here"
+	end
+end
+
 local function runDuel(ground: Ground, players: { Player })
-	ground.busy = true
+	setBusy(ground, true)
 	table.clear(ground.waiting)
 	ground.loneSince = nil
 
@@ -385,7 +393,7 @@ local function runDuel(ground: Ground, players: { Player })
 			c.model:Destroy()
 		end
 	end
-	ground.busy = false
+	setBusy(ground, false)
 end
 
 -- Pads: who is standing where, and whether that starts a duel.
@@ -452,6 +460,7 @@ function DuelService.start()
 				pads = { holder:GetAttribute("PadA") :: Vector3, holder:GetAttribute("PadB") :: Vector3 },
 				arena = holder:GetAttribute("Arena") :: Vector3,
 				status = if status and status:IsA("TextLabel") then status else nil,
+				holder = holder,
 				waiting = {},
 				loneSince = nil,
 				busy = false,

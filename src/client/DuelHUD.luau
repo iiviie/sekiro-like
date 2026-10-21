@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
+local Config = require(ReplicatedStorage.Shared.Config)
 local CombatHUD = require(script.Parent.CombatHUD)
 local LockOn = require(script.Parent.LockOn)
 local UI = require(script.Parent.UI)
@@ -94,6 +95,34 @@ local function onDuel(kind: string, data: { [string]: any })
 	end
 end
 
+-- Standing on a pad of a terrace that's mid-duel: the pads ignore you until it ends, so say so.
+local function onBusyPad(): boolean
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local lobby = workspace:FindFirstChild("Lobby")
+	local folder = lobby and lobby:FindFirstChild("DuelGrounds")
+	if not root or not root:IsA("BasePart") or not folder then
+		return false
+	end
+	for _, holder in folder:GetChildren() do
+		if holder:GetAttribute("Busy") == true then
+			for _, key in { "PadA", "PadB" } do
+				local pad = holder:GetAttribute(key)
+				if typeof(pad) == "Vector3" then
+					local offset = root.Position - pad
+					if
+						Vector3.new(offset.X, 0, offset.Z).Magnitude <= Config.Duel.PadRadius
+						and math.abs(offset.Y) < 6
+					then
+						return true
+					end
+				end
+			end
+		end
+	end
+	return false
+end
+
 -- Banner and pad line, once a frame: both are cheap text updates.
 local function step()
 	local state = player:GetAttribute("DuelState")
@@ -106,8 +135,11 @@ local function step()
 			else `First to {firstTo}{if rated then "  ·  ranked" else ""}`
 	end
 	local botAt = player:GetAttribute("DuelBotAt")
-	waitLabel.Visible = state == "Waiting"
-	if state == "Waiting" then
+	local blocked = state == nil and onBusyPad()
+	waitLabel.Visible = state == "Waiting" or blocked
+	if blocked then
+		waitLabel.Text = "A duel is under way on this terrace  ·  the pads open when it ends"
+	elseif state == "Waiting" then
 		local left = if typeof(botAt) == "number" then math.max(0, math.ceil(botAt - now())) else nil
 		waitLabel.Text = if left
 			then `Waiting for a challenger on the other pad  ·  a bot steps in in {left}`

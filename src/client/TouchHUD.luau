@@ -91,12 +91,16 @@ function TouchHUD.layout(frame: Frame, size: Vector2)
 	end
 end
 
--- Which fight a body is in: the royale, a duel terrace, or none (the lobby).
+-- Which fight a body is in: the royale, one duel terrace ("Duel1"), the boss arena, or
+-- none (the lobby). The server publishes it as the Arena attribute (LobbyService.setArena).
 local function arenaOf(model: Model): string?
-	if model:GetAttribute("InMatch") == true then
+	local arena = model:GetAttribute("Arena")
+	if typeof(arena) == "string" then
+		return arena
+	elseif model:GetAttribute("InMatch") == true then
 		return "Royale"
 	elseif model:GetAttribute("InDuel") == true then
-		return "Duel" -- terraces are far apart, so range keeps two duels separate
+		return "Duel"
 	end
 	return nil
 end
@@ -341,6 +345,12 @@ local function updateAutoLock(touch: boolean)
 end
 
 local function panelOpen(): boolean
+	-- The boss picker counts as a panel: the cluster never covers its list or CLOSE.
+	local boss = player.PlayerGui:FindFirstChild("BossHUD")
+	local picker = boss and boss:FindFirstChild("Picker")
+	if picker and picker:IsA("GuiObject") and picker.Visible then
+		return true
+	end
 	local panels = player.PlayerGui:FindFirstChild("LobbyPanels")
 	if not panels or not panels:IsA("ScreenGui") or not panels.Enabled then
 		return false

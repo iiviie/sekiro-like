@@ -314,16 +314,22 @@ end
 -- In the lobby the bottom of the screen belongs to PLAY and the nav bar: hide your own
 -- vitality and stamina (nothing there can hurt you unless you opt into sparring) and lift
 -- the posture bar above PLAY, where it still teaches the trainer's rhythm.
+local lobbyMode: boolean? = nil
 function CombatHUD.setLobbyMode(on: boolean)
 	if not ownGroup then
 		return
 	end
+	local entering = lobbyMode == true and not on -- lobby -> a fight (royale, duel or boss)
+	lobbyMode = on
 	ownGroup.Visible = not on
 	staminaGroup.Visible = not on
 	-- The lobby's nav bar owns the bottom of the screen; the keyboard reminder is for fights,
 	-- and a phone has no keyboard.
 	controlsHint.Visible = not on and not (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
 	postureGroup.Position = if on then UDim2.new(0.5, 0, 1, -260) else UDim2.new(0.5, 0, 1, -100)
+	if entering then
+		CombatHUD.showControls()
+	end
 end
 
 -- A brief white flash at the screen's edges: you landed a perfect deflect.
@@ -336,14 +342,20 @@ function CombatHUD.flashPerfect()
 	tween(perfectFlash, 0.35, { ImageTransparency = 1 }, Enum.EasingStyle.Quad)
 end
 
--- Shows the controls reminder for a while, then fades it (called once you enter).
+-- Shows the controls reminder for a while, then fades it: at the start of every fight
+-- (royale, duel, boss), unless Settings turned it off. A later call restarts the clock.
+local hintToken = 0
 function CombatHUD.showControls()
-	if Players.LocalPlayer:GetAttribute("SettingControlsHint") == false then
+	if not controlsHint or Players.LocalPlayer:GetAttribute("SettingControlsHint") == false then
 		return
 	end
+	hintToken += 1
+	local mine = hintToken
 	controlsHint.TextTransparency = 0.25
 	task.delay(CONTROLS_HINT_TIME, function()
-		tween(controlsHint, 2, { TextTransparency = 1 })
+		if hintToken == mine then
+			tween(controlsHint, 2, { TextTransparency = 1 })
+		end
 	end)
 end
 
@@ -634,6 +646,13 @@ end
 
 function CombatHUD.start()
 	buildScreen()
+	-- Settings: turning the reminder off hides it at once.
+	player:GetAttributeChangedSignal("SettingControlsHint"):Connect(function()
+		if player:GetAttribute("SettingControlsHint") == false then
+			hintToken += 1
+			controlsHint.TextTransparency = 1
+		end
+	end)
 
 	player.CharacterAdded:Connect(trackCharacter)
 	if player.Character then

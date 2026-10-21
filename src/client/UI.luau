@@ -74,24 +74,52 @@ function UI.button(props: { [string]: any }, parent: Instance?): TextButton
 	props.TextSize = props.TextSize or 18
 	local button = UI.new("TextButton", props, parent)
 	UI.corner(button)
-	local base = button.BackgroundColor3
+	-- The resting colour lives in an attribute, so a button recoloured later (PLAY turning
+	-- QUEUED) keeps its new colour when the mouse leaves; see UI.setButtonColor.
+	button:SetAttribute("RestColor", button.BackgroundColor3)
+	local function rest(): Color3
+		local color = button:GetAttribute("RestColor")
+		return if typeof(color) == "Color3" then color else button.BackgroundColor3
+	end
 	button.MouseEnter:Connect(function()
-		TweenService:Create(button, TweenInfo.new(0.12), { BackgroundColor3 = base:Lerp(Color3.new(1, 1, 1), 0.12) })
+		TweenService:Create(button, TweenInfo.new(0.12), { BackgroundColor3 = rest():Lerp(Color3.new(1, 1, 1), 0.12) })
 			:Play()
 	end)
 	button.MouseLeave:Connect(function()
-		TweenService:Create(button, TweenInfo.new(0.12), { BackgroundColor3 = base }):Play()
+		TweenService:Create(button, TweenInfo.new(0.12), { BackgroundColor3 = rest() }):Play()
 	end)
 	return button
 end
 
 -- Recolour a button and remember the new colour as its resting state for hover.
 function UI.setButtonColor(button: TextButton, color: Color3)
+	button:SetAttribute("RestColor", color)
 	button.BackgroundColor3 = color
 end
 
 function UI.tween(instance: Instance, time: number, goal: { [string]: any })
 	TweenService:Create(instance, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), goal):Play()
+end
+
+-- The lobby HUD's own scale on a screen this size (LobbyHUD's "Fit" UIScale).
+function UI.lobbyScale(viewport: Vector2): number
+	return math.clamp(viewport.X / 1100, 0.6, 1)
+end
+
+-- Keeps a lobby window (`height` px tall at scale 1) above the PLAY button and nav bar on
+-- any screen: its bottom sits just over them and it shrinks to the height that's left.
+function UI.fitAboveNav(window: GuiObject, height: number)
+	local scale = UI.new("UIScale", { Name = "FitAboveNav" }, window)
+	local camera = workspace.CurrentCamera
+	local function refit()
+		local size = camera.ViewportSize
+		local reserve = math.floor(200 * UI.lobbyScale(size))
+		window.AnchorPoint = Vector2.new(0.5, 1)
+		window.Position = UDim2.new(0.5, 0, 1, -reserve)
+		scale.Scale = math.clamp((size.Y - reserve - 44) / height, 0.45, 1)
+	end
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	refit()
 end
 
 -- 1,234,567

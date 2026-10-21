@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CombatHUD = require(script.Parent.CombatHUD)
 local Panels = require(script.Parent.Panels)
+local Toasts = require(script.Parent.Toasts)
 local UI = require(script.Parent.UI)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Round = require(ReplicatedStorage.Shared.Round)
@@ -33,6 +34,7 @@ local xpFill: Frame
 local xpText: TextLabel
 
 local inviteButton: TextButton
+local bottom: Frame
 local trialsSeen = false -- the Trials badge shows until the panel is opened once
 
 local ICONS = Assets.Icons
@@ -190,7 +192,7 @@ local function build()
 	end)
 
 	-- Bottom: PLAY over the nav bar.
-	local bottom = UI.new("Frame", {
+	bottom = UI.new("Frame", {
 		Name = "Bottom",
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -14),
@@ -243,8 +245,14 @@ local function build()
 	invite.Activated:Connect(function()
 		local ok, can = pcall(SocialService.CanSendGameInviteAsync, SocialService, player)
 		if ok and can then
-			pcall(SocialService.PromptGameInvite, SocialService, player)
+			local shown = pcall(SocialService.PromptGameInvite, SocialService, player)
+			if shown then
+				return
+			end
 		end
+		-- Studio, a private test server, or an account that can't invite: say so instead of
+		-- doing nothing.
+		Toasts.notice("Invites aren't available here. Share the game's link with a friend.", UI.Parchment)
 	end)
 	inviteButton = invite
 
@@ -320,9 +328,12 @@ function refresh()
 
 	local queued = player:GetAttribute("Queued") == true
 	playButton.Text = if queued then "QUEUED" else "PLAY"
-	playButton.BackgroundColor3 = if queued then UI.PanelLight else UI.Crimson
+	UI.setButtonColor(playButton, if queued then UI.PanelLight else UI.Crimson)
 	local state = Round.state()
-	if queued then
+	local duelState = player:GetAttribute("DuelState")
+	if duelState == "Waiting" then
+		playSub.Text = "On a duel pad  ·  the royale skips you until you step off"
+	elseif queued then
 		playSub.Text = if state:GetAttribute("Waiting") == false and Round.phase() == "Intermission"
 			then "The royale is about to begin  ·  click to leave the queue"
 			else "Waiting for the next royale  ·  click to leave the queue"
