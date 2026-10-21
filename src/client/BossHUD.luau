@@ -304,9 +304,29 @@ local function unwatch()
 	watched = nil
 end
 
+-- Takes the boss bar and its banners down (the fight is over, or broke off).
+local function clearFight()
+	fightToken += 1
+	counting = false
+	bar.Visible = false
+	banner.Visible = false
+	lesson.Visible = false
+	unwatch()
+end
+
 local function watch(model: Model)
 	unwatch()
 	watched = model
+	-- The server destroys the boss however the fight ends, so its body leaving is the last word:
+	-- a missed or late End can't leave the bar up in the lobby or the next royale.
+	table.insert(
+		connections,
+		model.AncestryChanged:Connect(function()
+			if not model:IsDescendantOf(game) and watched == model then
+				clearFight()
+			end
+		end)
+	)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		table.insert(connections, humanoid.HealthChanged:Connect(refresh))
@@ -442,12 +462,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		end
 		if kind == "Failed" then
 			-- The trial broke off mid-fight: take its HUD down with it.
-			fightToken += 1
-			counting = false
-			bar.Visible = false
-			banner.Visible = false
-			lesson.Visible = false
-			unwatch()
+			clearFight()
 		end
 		local color = if kind == "Refused" or kind == "Failed" then Color3.fromRGB(240, 120, 100) else UI.Gold
 		if picker.Visible then
@@ -486,6 +501,10 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	end,
 	End = function(data)
 		lesson.Visible = false
+		if data.left then
+			clearFight() -- stopped or abandoned: no result to show
+			return
+		end
 		local minutes = math.floor((data.time or 0) / 60)
 		local seconds = math.floor((data.time or 0) % 60)
 		if data.won then

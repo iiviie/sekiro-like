@@ -21,7 +21,8 @@
 --                              busy = { player, boss }?, line = position? }
 --                     "Start" { boss, name, nameJP, stars, model, fightAt, lives }
 --                     "Phase" { phase, lives, stage?, lesson? }
---                     "End" { won, boss, name, time, firstClear }
+--                     "End" { won, boss, name, time, firstClear }  (or { left = true, ... } when a
+--                              fight ends without a result: BossTest "stop", the player leaving)
 --                     "Notice" { text, kind, line? }   kind: "Refused" | "Line" | "Turn" | "Failed"
 --                              (every Choose gets a Start or a Notice; a "Line" notice carries
 --                              your place in line, none when you're out of it)
@@ -494,6 +495,9 @@ local function fightBody(f: Fight)
 			time = time,
 		})
 		send(player, "End", { won = won, boss = id, name = def.name, time = time, firstClear = first })
+	else
+		-- Ended without a result (BossTest "stop", or the player left): still take the boss HUD down.
+		send(player, "End", { left = true, boss = id, name = def.name, time = time })
 	end
 	setStatus(if won then `{player.DisplayName} defeated the {def.name}` else `The {def.name} stands`)
 	task.wait(RULES.Results)
