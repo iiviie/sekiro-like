@@ -1,11 +1,18 @@
 --!strict
 -- The Locker: everything you can wear, by slot (weapon, blade, finisher, outfit, title,
--- banner, nameplate). Owned items equip; anything else says plainly how to get it (its
+-- banner, nameplate, pre-fight intro). Owned items equip; anything else says plainly how to get it (its
 -- unlock rule with your progress, its price, or where it drops). Blade lines level up
 -- here, L1 -> L4, with Whetstones (gems can cover up to half a level). Names, prices and
 -- rules come from Shared/Catalog; ownership, loadout, levels and progress from the
 -- server's attributes. Every change is a LobbyAction request the server checks.
+--
+-- Also here: loadout presets (the Loadouts button in the title bar: 3 slots, 6 with the
+-- pass; save what you wear, put a preset on in one tap, rename it), a 新 seal on things
+-- you got this session and haven't looked at yet, a wishlist toggle for shop items (the
+-- server says when one is in the daily shop), and Preview, which puts the item on you
+-- (CosmeticPreview.present) with the camera in front.
 
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -13,6 +20,8 @@ local Assets = require(ReplicatedStorage.Shared.Assets)
 local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Flair = require(ReplicatedStorage.Shared.Flair)
+local CosmeticPreview = require(script.Parent.CosmeticPreview)
+local NewItems = require(script.Parent.NewItems)
 local Panels = require(script.Parent.Panels)
 local StorePanel = require(script.Parent.StorePanel)
 local StoreUI = require(script.Parent.StoreUI)
@@ -41,20 +50,11 @@ local NO_TITLE = "title." -- equipping this clears the title
 local tab: Catalog.Slot = "bladeSkin"
 local selected: { [string]: string } = {} -- slot -> the item shown in the preview
 
--- Optional preview hooks (part C's CombatVisuals preview functions, wired in start()).
-local previewers: { [string]: (item: Catalog.Item) -> () } = {}
-
 function LockerPanel.show(slot: Catalog.Slot?)
 	if slot then
 		tab = slot
 	end
 	Panels.open("Locker")
-end
-
--- Registers a preview function for a category (called with the item when Preview is
--- pressed).
-function LockerPanel.setPreview(category: string, fn: (item: Catalog.Item) -> ())
-	previewers[category] = fn
 end
 
 local function tabOf(slot: string): Tab
@@ -83,13 +83,8 @@ local function itemsFor(t: Tab, have: { [string]: boolean }): { Catalog.Item }
 		end
 		table.insert(out, item)
 	end
-	-- Owned first (equipped at the very top), then by catalogue order.
-	local worn = StoreUI.loadout()
+	-- Owned first, then by catalogue order: equipping something never moves its card.
 	table.sort(out, function(a, b)
-		local ae, be = worn[t.id] == a.id, worn[t.id] == b.id
-		if ae ~= be then
-			return ae
-		end
 		local ao = have[a.id] == true or a.default == true
 		local bo = have[b.id] == true or b.default == true
 		if ao ~= bo then
@@ -140,7 +135,7 @@ local function card(parent: Instance, item: Catalog.Item, order: number, state: 
 		and (price.coins ~= nil or price.gems ~= nil)
 		and Catalog.isReady(item)
 	local text = if second then "2nd title" else status(item, owns, equipped, state.progress)
-	UI.card({
+	local made = UI.card({
 		Name = StoreUI.key(item.id),
 		LayoutOrder = order,
 		Size = UDim2.fromScale(1, 1),
@@ -156,11 +151,19 @@ local function card(parent: Instance, item: Catalog.Item, order: number, state: 
 			else nil,
 		status = if priced then nil else text,
 		statusColor = if equipped or second then UI.Theme.GoldHi elseif owns then UI.Theme.JadeText else UI.Theme.Dim,
+		isNew = owns and NewItems.isNew(item.id),
 		onActivated = function()
 			selected[tab] = item.id
+			NewItems.seen(item.id)
 			Panels.redraw()
 		end,
 	}, parent)
+	-- Long names shrink to fit the card instead of trailing off ("Crimson Lacquer").
+	local label = made:FindFirstChild("ItemName")
+	if label and label:IsA("TextLabel") then
+		label.TextScaled = true
+		UI.new("UITextSizeConstraint", { MaxTextSize = label.TextSize, MinTextSize = 11 }, label)
+	end
 end
 
 -- Blade line levels L1-L4 as gold diamonds (filled up to the current level).
@@ -197,6 +200,8 @@ local function levelPips(parent: Instance, item: Catalog.Item, level: number, y:
 		Text = `L{level}`,
 	}, row)
 end
+
+local inShopToday: (id: string) -> boolean
 
 -- The big preview on the left: art, name, what it is, how to get it, and the one action.
 local function preview(parent: Instance, item: Catalog.Item, state: { [string]: any })
@@ -252,8 +257,18 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 			text = if nextLevel then `Next: {nextLevel.text}` else "Fully upgraded: every level unlocked."
 		end
 	else
-		text = howToGet(item, state.progress)
-		if item.blurb then
+		local entry = state.progress[item.id]
+		local ruleMet = not item.rule or not (typeof(entry) == "table" and entry[1] < entry[2])
+		local pricePill = item.price ~= nil
+			and not item.price.product
+			and ruleMet
+			and Catalog.isReady(item)
+			and (item.price.coins ~= nil or item.price.gems ~= nil)
+		-- The price pill over the button says the price; the text says what it is.
+		text = if pricePill
+			then (item.blurb or "Unlock it once, wear it whenever you like.")
+			else howToGet(item, state.progress)
+		if item.blurb and not pricePill then
 			text = `{item.blurb}\n{text}`
 		end
 	end
@@ -496,9 +511,9 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		end)
 	end
 
-	-- Preview (part C's hooks) for the categories that have one.
-	local previewer = previewers[item.category]
-	if previewer then
+	-- Preview: the item on you, the camera in front (part C's CosmeticPreview).
+	local topY = 10
+	if StoreUI.previewable(item) then
 		local look = UI.button({
 			Name = "Preview",
 			variant = "secondary",
@@ -511,9 +526,71 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 		}, box)
 		look.Activated:Connect(function()
 			Panels.closeAll()
-			previewer(item)
+			if item.category == "intro" then
+				-- Your pre-fight intro on your own character (client/IntroCinematic).
+				local intro = require(script.Parent.IntroCinematic) :: any
+				intro.preview(item.ref, function()
+					LockerPanel.show("intro" :: Catalog.Slot)
+				end)
+				return
+			end
+			CosmeticPreview.present(item, {
+				level = math.max(level, 1),
+				back = "Back to the Locker",
+				onBack = function()
+					LockerPanel.show()
+				end,
+			})
+		end)
+		topY = 66
+	end
+
+	-- A shop item you don't own: in today's shop (a link there), or a wishlist toggle (the
+	-- server tells you the day it rotates in).
+	if not owns and StoreUI.wishable(item) and Catalog.isReady(item) then
+		local today = inShopToday(item.id)
+		local wished = StoreUI.wished()[item.id] == true
+		local link = UI.tertiary({
+			Name = "Wishlist",
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -10, 0, topY),
+			Size = UDim2.fromOffset(110, 32),
+			Text = if today then "In the Store today" elseif wished then "On your wishlist" else "Add to wishlist",
+			TextColor3 = if today or wished then UI.Theme.GoldHi else nil,
+			TextSize = 14,
+			TextWrapped = true,
+			ZIndex = 6,
+		}, box)
+		link.Activated:Connect(function()
+			if today then
+				StorePanel.show("Featured")
+				return
+			end
+			UI.sound("Press")
+			StoreUI.fire("Wish", item.id)
+			if not wished then
+				Toasts.notice(`{item.name} is on your wishlist: you'll hear when it's in the Store`, UI.Gold)
+			end
 		end)
 	end
+end
+
+-- Whether `id` is in today's shop (the daily slots or the week's set).
+function inShopToday(id: string): boolean
+	local raw = ReplicatedStorage:GetAttribute("ShopRotation")
+	if typeof(raw) ~= "string" then
+		return false
+	end
+	local ok, rotation = pcall(HttpService.JSONDecode, HttpService, raw)
+	if not ok or typeof(rotation) ~= "table" then
+		return false
+	end
+	for _, list in { rotation.coin or {}, rotation.gem or {}, (rotation.featured or {}).items or {} } do
+		if table.find(list, id) then
+			return true
+		end
+	end
+	return false
 end
 
 -- A "no title" card for the title slot.
@@ -554,6 +631,17 @@ local TAB_ICONS: { [string]: string? } = {
 
 function LockerPanel.build(body: Frame)
 	local header = Panels.header()
+	local presetsButton = UI.button({
+		Name = "Loadouts",
+		variant = "secondary",
+		LayoutOrder = 0,
+		Size = UDim2.fromOffset(128, 44),
+		TextSize = 16,
+		Text = "Loadouts",
+	}, header)
+	presetsButton.Activated:Connect(function()
+		LockerPanel.presets()
+	end)
 	UI.pill(header, ICONS.Coin, StoreUI.attr("Coins", 0), UI.Gold, 1)
 	UI.pill(header, ICONS.Gem, StoreUI.attr("Gems", 0), UI.Jade, 2)
 	UI.pill(header, ICONS.Whetstone or ICONS.Skin, StoreUI.attr("Whetstones", 0), UI.Parchment, 3)
@@ -564,9 +652,23 @@ function LockerPanel.build(body: Frame)
 	local t = tabOf(tab)
 	local items = itemsFor(t, have)
 
+	-- Icon tabs, the open one with its name (so every tab fits across the window), with a 新
+	-- seal where something new waits.
 	local tabs = {}
 	for _, entry in TABS do
-		table.insert(tabs, { id = entry.id, label = entry.label, icon = TAB_ICONS[entry.id] })
+		local fresh = false
+		for _, item in Catalog.Items do
+			if table.find(entry.categories, item.category) and have[item.id] and NewItems.isNew(item.id) then
+				fresh = true
+				break
+			end
+		end
+		table.insert(tabs, {
+			id = entry.id,
+			label = if entry.id == t.id then entry.label else "",
+			icon = TAB_ICONS[entry.id],
+			dot = fresh and entry.id ~= t.id,
+		})
 	end
 	UI.tabs(body, tabs, t.id, function(id)
 		tab = id :: Catalog.Slot
@@ -598,6 +700,7 @@ function LockerPanel.build(body: Frame)
 		selected = pick,
 	}
 	if pickItem then
+		NewItems.seen(pickItem.id)
 		preview(area, pickItem, state)
 	else
 		local box = UI.panel({ Name = "Preview", Size = UDim2.new(0, 250, 1, 0), material = "inset" }, area)
@@ -651,99 +754,228 @@ function LockerPanel.build(body: Frame)
 	end
 end
 
--- Part C's previews (client/CosmeticPreview): the look goes on your own character (and a
--- local practice rig for finishers), so the Locker steps aside while it plays and a "Back to
--- the Locker" button undoes it.
-type CosmeticModule = {
-	finisher: (string) -> (),
-	blade: (string, number?, number?) -> (),
-	swing: () -> (),
-	outfit: (string) -> (),
-	clear: () -> (),
-}
-local backGui: ScreenGui? = nil
+---------------------------------------------------------------------------------------
+-- Loadout presets: a sheet over the Locker, one row per slot (3, or 6 with the pass).
 
-local function endPreview(cosmetic: CosmeticModule, reopen: boolean)
-	if backGui then
-		backGui:Destroy()
-		backGui = nil
+type Preset = { slot: number, name: string, slots: { [string]: string } }
+local presetSheet: Frame? = nil
+local renaming: number? = nil
+
+local function presetList(): { [number]: Preset }
+	local out = {}
+	local raw = player:GetAttribute("LoadoutPresets")
+	if typeof(raw) == "string" and raw ~= "" then
+		local ok, list = pcall(HttpService.JSONDecode, HttpService, raw)
+		if ok and typeof(list) == "table" then
+			for _, entry in list do
+				if typeof(entry) == "table" and typeof(entry.slot) == "number" then
+					out[entry.slot] = entry
+				end
+			end
+		end
 	end
-	pcall(cosmetic.clear)
-	if reopen then
-		LockerPanel.show()
+	return out
+end
+
+local function nameOf(id: string?, fallback: string): string
+	local item = Catalog.get(id)
+	return if item then item.name else fallback
+end
+
+-- "Crimson Lacquer · Slate Gi · Novice": the blade, the outfit and the title.
+local function summary(slots: { [string]: string }): string
+	local title = slots.title
+	return `{nameOf(slots.bladeSkin, "Tamahagane")}  ·  {nameOf(slots.outfit, "Your avatar")}  ·  {if title
+			and title ~= ""
+		then nameOf(title, "no title")
+		else "no title"}`
+end
+
+local function presetRow(list: ScrollingFrame, n: number, entry: Preset?, locked: boolean)
+	local row = UI.panel({
+		Name = `Preset{n}`,
+		LayoutOrder = n,
+		Size = UDim2.new(1, 0, 0, 66),
+		material = "inset",
+	}, list)
+	local textW = UDim2.new(1, -330, 0, 26)
+	if renaming == n and entry then
+		local box = UI.new("TextBox", {
+			Name = "NameBox",
+			Position = UDim2.fromOffset(12, 6),
+			Size = textW,
+			BackgroundColor3 = UI.Theme.Ink,
+			BackgroundTransparency = 0.3,
+			ClearTextOnFocus = false,
+			FontFace = UI.Fonts.Display,
+			TextSize = 18,
+			TextColor3 = UI.Theme.Bone,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			PlaceholderText = "Name this loadout",
+			Text = entry.name,
+		}, row)
+		UI.new("UISizeConstraint", { MaxSize = Vector2.new(400, 26) }, box)
+		task.defer(function()
+			if box.Parent then
+				box:CaptureFocus()
+			end
+		end)
+		box.FocusLost:Connect(function(enter)
+			renaming = nil
+			if enter and box.Text ~= "" and box.Text ~= entry.name then
+				StoreUI.fire("Preset", { op = "rename", slot = n, name = string.sub(box.Text, 1, 40) })
+			end
+			LockerPanel.refreshPresets()
+		end)
+	else
+		UI.text({
+			Name = "PresetName",
+			Position = UDim2.fromOffset(12, 6),
+			Size = textW,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			FontFace = UI.Fonts.Display,
+			TextSize = 18,
+			TextColor3 = if entry then UI.Theme.Bone else UI.Theme.Dim,
+			Text = if entry then entry.name elseif locked then `Slot {n}` else `Slot {n}  ·  empty`,
+		}, row)
+	end
+	UI.text({
+		Name = "Summary",
+		Position = UDim2.fromOffset(12, 34),
+		Size = UDim2.new(1, -330, 0, 22),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextSize = 14,
+		TextColor3 = UI.Theme.Dim,
+		Text = if locked
+			then "With the Loadout presets pass"
+			elseif entry then summary(entry.slots)
+			else "Save what you're wearing now",
+	}, row)
+	local buttons = UI.new("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -8, 0.5, 0),
+		Size = UDim2.fromOffset(312, 52),
+		BackgroundTransparency = 1,
+	}, row)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, buttons)
+	if locked then
+		local see = UI.button({
+			Name = "SeePass",
+			variant = "premium",
+			LayoutOrder = 1,
+			Size = UDim2.fromOffset(160, 50),
+			TextSize = 15,
+			Text = "See it in the Store",
+		}, buttons)
+		see.Activated:Connect(function()
+			UI.closeSheet()
+			StorePanel.show("Offers")
+		end)
+		return
+	end
+	if entry then
+		local rename = UI.tertiary({
+			Name = "Rename",
+			LayoutOrder = 1,
+			Size = UDim2.fromOffset(78, 50),
+			Text = "Rename",
+			TextSize = 15,
+		}, buttons)
+		rename.Activated:Connect(function()
+			renaming = n
+			LockerPanel.refreshPresets()
+		end)
+	end
+	local save = UI.button({
+		Name = "Save",
+		variant = "secondary",
+		LayoutOrder = 2,
+		Size = UDim2.fromOffset(110, 50),
+		TextSize = 15,
+		Text = if entry then "Save over" else "Save here",
+	}, buttons)
+	save.Activated:Connect(function()
+		UI.sound("Confirm")
+		StoreUI.fire("Preset", { op = "save", slot = n })
+	end)
+	if entry then
+		local wear = UI.button({
+			Name = "Wear",
+			variant = "primary",
+			LayoutOrder = 3,
+			Size = UDim2.fromOffset(110, 50),
+			TextSize = 16,
+			Text = "Wear",
+		}, buttons)
+		wear.Activated:Connect(function()
+			UI.sound("Equip")
+			StoreUI.fire("Preset", { op = "wear", slot = n })
+		end)
 	end
 end
 
-local function startPreview(cosmetic: CosmeticModule, run: () -> ())
-	if backGui then
-		backGui:Destroy()
+local function fillPresets(content: Frame)
+	for _, child in content:GetChildren() do
+		child:Destroy()
 	end
-	local gui = UI.new("ScreenGui", {
-		Name = "LockerPreview",
-		ResetOnSpawn = false,
-		DisplayOrder = 7,
-		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
-	})
-	local back = UI.button({
-		Name = "Back",
-		variant = "primary",
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 132),
-		Size = UDim2.fromOffset(260, UI.Touch),
-		Text = "Back to the Locker",
-		TextSize = 20,
-		sound = "Cancel",
-	}, gui)
-	back.Activated:Connect(function()
-		endPreview(cosmetic, true)
-	end)
-	gui.Parent = player:WaitForChild("PlayerGui")
-	backGui = gui
-	local ok, err = pcall(run)
-	if not ok then
-		warn("[LockerPanel] preview failed:", err)
+	local list = UI.scroll(content, 6)
+	local max = StoreUI.attr("LoadoutSlots", 3)
+	local presets = presetList()
+	for n = 1, 6 do
+		presetRow(list, n, presets[n], n > max)
 	end
+end
+
+-- Rebuilds the open presets sheet (after a save, a rename, a new pass).
+function LockerPanel.refreshPresets()
+	local content = presetSheet
+	if content and content.Parent then
+		fillPresets(content)
+		for _, child in content:GetDescendants() do
+			if child:IsA("GuiObject") then
+				child.ZIndex = math.max(child.ZIndex, 22)
+			end
+		end
+	end
+end
+
+-- Opens the presets sheet over the Locker.
+function LockerPanel.presets()
+	renaming = nil
+	presetSheet = UI.sheet(Panels.window(), "Loadouts", function(content)
+		fillPresets(content)
+	end, Vector2.new(680, 400), { material = "lacquer" })
 end
 
 function LockerPanel.start()
 	Panels.register("Locker", { title = "Locker", build = LockerPanel.build, large = true })
-	local module = script.Parent:FindFirstChild("CosmeticPreview")
-	if module and module:IsA("ModuleScript") then
-		local ok, loaded = pcall(require, module)
-		if ok and typeof(loaded) == "table" then
-			local cosmetic = loaded :: CosmeticModule
-			LockerPanel.setPreview("finisher", function(item)
-				startPreview(cosmetic, function()
-					cosmetic.finisher(item.ref)
-				end)
-			end)
-			local function blade(item: Catalog.Item)
-				local level = if StoreUI.owned()[item.id] then StoreUI.lineLevel(item.id) else 1
-				startPreview(cosmetic, function()
-					cosmetic.blade(item.id, if item.category == "bladeLine" then level else nil)
-					cosmetic.swing()
-				end)
-			end
-			LockerPanel.setPreview("bladeSkin", blade)
-			LockerPanel.setPreview("bladeLine", blade)
-			LockerPanel.setPreview("outfit", function(item)
-				startPreview(cosmetic, function()
-					cosmetic.outfit(item.ref)
-				end)
-			end)
-			-- Opening any panel, or leaving the lobby, ends a preview.
-			Panels.onChange(function(id)
-				if id and backGui then
-					endPreview(cosmetic, false)
-				end
-			end)
-			player.CharacterAdded:Connect(function()
-				if backGui then
-					endPreview(cosmetic, false)
-				end
-			end)
+	NewItems.start(function(slot, id)
+		if slot and id then
+			selected[slot] = id
 		end
+		LockerPanel.show(slot :: Catalog.Slot?)
+	end)
+	for _, name in { "LoadoutPresets", "LoadoutSlots", "Loadout", "Inventory" } do
+		player:GetAttributeChangedSignal(name):Connect(function()
+			if renaming == nil then
+				LockerPanel.refreshPresets()
+			end
+		end)
 	end
+	-- Opening any panel ends a preview.
+	Panels.onChange(function(id)
+		if id and CosmeticPreview.active() then
+			CosmeticPreview.stop(false)
+		end
+	end)
 end
 
 return LockerPanel
