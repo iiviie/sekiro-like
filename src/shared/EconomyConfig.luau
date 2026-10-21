@@ -99,6 +99,52 @@ local N = {
 
 	-- The Initiate's Bundle is on offer for this long after a player's first join.
 	InitiateWindowHours = 72,
+
+	-- Shrine Draw (earned, server/ShopService): one open rolls one outcome by weight (percent).
+	-- `item` outcomes pick evenly among the pool cosmetics of that tier (common = common and
+	-- uncommon items); an owned item pays Shards.Dup instead.
+	Shrine = {
+		Outcomes = {
+			{ key = "coins100", kind = "Coins", amount = 100, weight = 32 },
+			{ key = "coins250", kind = "Coins", amount = 250, weight = 14 },
+			{ key = "stones2", kind = "Whetstones", amount = 2, weight = 18 },
+			{ key = "stones5", kind = "Whetstones", amount = 5, weight = 6 },
+			{ key = "gems10", kind = "Gems", amount = 10, weight = 10 },
+			{ key = "gems25", kind = "Gems", amount = 25, weight = 4 },
+			{ key = "shards10", kind = "Shards", amount = 10, weight = 6 },
+			{ key = "common", kind = "item", weight = 6 },
+			{ key = "rare", kind = "item", weight = 3 },
+			{ key = "epic", kind = "item", weight = 1 },
+		},
+		MaxPerOpen = 10,
+	},
+
+	-- Shrine Capsule (gems; behind EconomyConfig.PaidCapsule and PolicyService). Tier odds in
+	-- percent; legendary is the banner's featured item only. Pity: an epic or better at the
+	-- latest on draw EpicPity, the featured legendary at the latest on draw LegendaryPity,
+	-- counters carried across banners. A banner lasts BannerDays.
+	Capsule = {
+		Price1 = 100,
+		Price10 = 900,
+		Tiers = { legendary = 2, epic = 10, rare = 28, common = 60 },
+		EpicPity = 10,
+		LegendaryPity = 40,
+		BannerDays = 14,
+		HistoryMax = 100,
+	},
+
+	-- Shards: an owned item rolled again pays Dup; any pool item costs Price (by Catalog rarity).
+	Shards = {
+		Dup = { common = 5, uncommon = 10, rare = 25, epic = 60, legendary = 150 },
+		Price = { common = 25, uncommon = 50, rare = 125, epic = 300, legendary = 750 },
+	},
+
+	-- Daily shop: CoinSlots + GemSlots a day, a weekly featured set of FeaturedSize gem items at
+	-- FeaturedDiscount off (rounded to 50 gems). Every item returns within ReturnWithinDays.
+	Shop = { CoinSlots = 2, GemSlots = 2, FeaturedSize = 3, FeaturedDiscount = 0.2, ReturnWithinDays = 56 },
+
+	-- Ranked season end: rewards need at least MinGames rated games in the season.
+	Ranked = { MinGames = 5 },
 }
 -- END NUMBERS
 
@@ -118,8 +164,22 @@ EconomyConfig.LineUpgrade = N.LineUpgrade
 EconomyConfig.Milestone = N.Milestone
 EconomyConfig.InitiateWindow = N.InitiateWindowHours * 3600
 
+EconomyConfig.Shrine = N.Shrine
+EconomyConfig.Capsule = N.Capsule
+EconomyConfig.Shards = N.Shards :: { Dup: { [string]: number }, Price: { [string]: number } }
+EconomyConfig.Shop = N.Shop
+EconomyConfig.Ranked = N.Ranked
+
 -- The current season (pass premium and ranked rewards are keyed by it).
 EconomyConfig.Season = "S1"
+
+-- When each ranked season ends (epoch, UTC). server/ShopService pays the season-end rewards
+-- once per player after this (on next login when offline). S1 ends 2026-12-02 00:00 UTC.
+EconomyConfig.SeasonEnds = { S1 = 1796169600 } :: { [string]: number }
+
+-- The gem Shrine Capsule switch: "studio" = on in Studio only (default), "on" = everywhere,
+-- "off" = nowhere. PolicyService's ArePaidRandomItemsRestricted is enforced on top of it.
+EconomyConfig.PaidCapsule = "studio" :: "off" | "studio" | "on"
 
 local SECONDS_PER_DAY = 86400
 
