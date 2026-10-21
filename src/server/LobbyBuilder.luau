@@ -23,6 +23,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Palette = require(ReplicatedStorage.Shared.Palette)
+local Torii = require(script.Parent.Torii)
 
 local LOBBY = Config.Lobby
 local O = LOBBY.Origin -- fill top of the lower tier
@@ -116,13 +117,46 @@ local function path(from: Vector3, to: Vector3, width: number, top: number, mate
 	end
 end
 
-local function rimRocks(center: Vector3, radius: number, top: number, count: number, gaps: { number }, seed: number)
+-- Flatten a rectangular landing so a stair or bridge meets flush ground at walk height
+-- `walk`: clear everything above it and fill solid ground below, topped with `material`.
+-- Smooth terrain rounds a plateau's rim down and rim boulders spill over it, so without
+-- this a stair can end in a rock and a bridge in a dip. `frame` is a yaw-only CFrame;
+-- `size` is its width (local X) by length (local Z).
+local function landing(frame: CFrame, size: Vector2, walk: number, material: Enum.Material)
+	local flat = CFrame.new(frame.Position.X, walk - 2, frame.Position.Z) * frame.Rotation
+	terrain:FillBlock(flat * CFrame.new(0, 12, 0), Vector3.new(size.X, 24, size.Y), Enum.Material.Air)
+	terrain:FillBlock(flat * CFrame.new(0, -5, 0), Vector3.new(size.X, 10, size.Y), Enum.Material.Rock)
+	terrain:FillBlock(flat * CFrame.new(0, -2, 0), Vector3.new(size.X, 4, size.Y), material)
+end
+
+-- Ground height under (x, z): the first collidable surface (terrain or part) a ray finds
+-- going down from `from`, ignoring `ignore`, or nil over a void.
+local groundParams = RaycastParams.new()
+groundParams.RespectCanCollide = true
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+local function groundAt(x: number, z: number, from: number, ignore: Instance): number?
+	groundParams.FilterDescendantsInstances = { ignore }
+	local hit = workspace:Raycast(Vector3.new(x, from, z), Vector3.new(0, -30, 0), groundParams)
+	return if hit then hit.Position.Y else nil
+end
+
+-- Terrain filled this frame isn't hit by raycasts until the next one, so props are placed
+-- at their nominal height first and seated on the ground once the build has yielded a
+-- frame (see LobbyBuilder.build).
+local pendingSeats: { () -> () } = {}
+
+-- A lumpy rock rim, open at each gap: a direction (radians) and the half-width in studs
+-- that must stay clear there (a path, stair or bridge landing). A boulder is skipped when
+-- any part of it would reach into that clearance, not just when its centre is in the gap.
+type Gap = { angle: number, clear: number }
+
+local function rimRocks(center: Vector3, radius: number, top: number, count: number, gaps: { Gap }, seed: number)
 	local random = Random.new(seed)
 	for i = 1, count do
 		local angle = (i / count) * math.pi * 2 + random:NextNumber(-0.08, 0.08)
 		local open = false
 		for _, gap in gaps do
-			local diff = math.abs((angle - gap + math.pi) % (math.pi * 2) - math.pi)
+			local diff = math.abs((angle - gap.angle + math.pi) % (math.pi * 2) - math.pi)
 			if diff < 0.28 then
 				open = true
 			end
@@ -130,15 +164,21 @@ local function rimRocks(center: Vector3, radius: number, top: number, count: num
 		if not open then
 			local r = radius - random:NextNumber(1, 4)
 			local size = random:NextNumber(5, 9)
-			terrain:FillBall(
-				Vector3.new(
-					center.X + math.cos(angle) * r,
-					top - random:NextNumber(1, 4),
-					center.Z + math.sin(angle) * r
-				),
-				size,
-				Enum.Material.Rock
-			)
+			local y = top - random:NextNumber(1, 4)
+			for _, gap in gaps do
+				local diff = math.abs((angle - gap.angle + math.pi) % (math.pi * 2) - math.pi)
+				-- Distance from the boulder's centre to the line the gap's path runs in on.
+				if math.sin(math.min(diff, math.pi / 2)) * r - size < gap.clear then
+					open = true
+				end
+			end
+			if not open then
+				terrain:FillBall(
+					Vector3.new(center.X + math.cos(angle) * r, y, center.Z + math.sin(angle) * r),
+					size,
+					Enum.Material.Rock
+				)
+			end
 		end
 	end
 end
@@ -187,7 +227,32 @@ local function underside(center: Vector3, radius: number, bottom: number, depth:
 	ball(Vector3.new(center.X, bottom - depth, center.Z), math.max(radius * 0.1, 3), Enum.Material.Slate)
 end
 
--- Clone a prop from Workspace.Props, standing on height `ground`.
+-- Where a footprint should stand: the lowest ground under its centre and corners (so no
+-- corner hangs far over a slope or a rounded rim), but never more than 0.75 stud below
+-- the ground at its centre, nor more than a stud above the height asked for (a prop at the
+-- foot of a rim boulder stays at its foot rather than climbing on top). Falls back to `y`
+-- where there is no ground.
+local function seat(boxCFrame: CFrame, boxSize: Vector3, y: number, ignore: Instance): number
+	local from = y + 6
+	local centre = groundAt(boxCFrame.Position.X, boxCFrame.Position.Z, from, ignore)
+	if not centre then
+		return y
+	end
+	local lowest = centre
+	for _, sx in { -0.4, 0.4 } do
+		for _, sz in { -0.4, 0.4 } do
+			local corner = boxCFrame * Vector3.new(sx * boxSize.X, 0, sz * boxSize.Z)
+			local g = groundAt(corner.X, corner.Z, from, ignore)
+			if g then
+				lowest = math.min(lowest, g)
+			end
+		end
+	end
+	return math.min(math.max(lowest, centre - 0.75), y + 1)
+end
+
+-- Clone a prop from Workspace.Props, standing on the ground found under `cframe` (a ray
+-- at build time, so it stays seated whatever the terrain does there; see pendingSeats).
 local function prop(name: string, cframe: CFrame, parent: Instance, scale: number?): Model?
 	local props = workspace:FindFirstChild("Props")
 	local source = props and props:FindFirstChild(name, true)
@@ -202,6 +267,10 @@ local function prop(name: string, cframe: CFrame, parent: Instance, scale: numbe
 	local boxCFrame, boxSize = copy:GetBoundingBox()
 	local bottom = boxCFrame.Position.Y - boxSize.Y / 2
 	copy:PivotTo(copy:GetPivot() + Vector3.new(0, cframe.Position.Y - bottom, 0))
+	table.insert(pendingSeats, function()
+		local ground = seat(boxCFrame, boxSize, cframe.Position.Y, copy)
+		copy:PivotTo(copy:GetPivot() + Vector3.new(0, ground - cframe.Position.Y, 0))
+	end)
 	for _, d in copy:GetDescendants() do
 		if d:IsA("BasePart") then
 			d.Anchored = true
@@ -234,6 +303,13 @@ local function tree(position: Vector3, parent: Instance, scale: number?)
 		CFrame.new(position + Vector3.new(0, pivotToBottom - 0.5, 0)) * CFrame.Angles(0, math.rad(treeIndex * 47), 0)
 	)
 	copy.Parent = parent
+	-- The trunk stands on the ground under it (sunk half a stud so its foot never shows a gap).
+	table.insert(pendingSeats, function()
+		local ground = groundAt(position.X, position.Z, position.Y + 6, copy)
+		if ground then
+			copy:PivotTo(copy:GetPivot() + Vector3.new(0, ground - position.Y, 0))
+		end
+	end)
 end
 
 local function lantern(position: Vector3, parent: Instance)
@@ -277,21 +353,45 @@ local BRIDGE_LEFT =
 	{ from = Vector2.new(-62, 31), to = Vector2.new(-86, 40), islet = Vector2.new(-102, 46), radius = 18 }
 local BRIDGE_BACK = { from = Vector2.new(16, 66), to = Vector2.new(23, 93), islet = Vector2.new(27, 109), radius = 17 }
 
+local DUEL = Config.Duel
+local DUEL_GROUNDS = {
+	-- Pad pair centre (lower tier) and terrace centre, as offsets from the lobby origin.
+	-- The terraces sit in gaps between the far islets (see farIslets' seed).
+	{ pads = Vector2.new(44, 28), arena = Vector2.new(106, -14) },
+	{ pads = Vector2.new(-38, 24), arena = Vector2.new(-108, -16) },
+}
+local BOSS = Config.Bosses
+local BOSS_ARENA = Vector2.new(-60, 135) -- offset from the lobby origin; far islets keep clear (reservedZones)
+local BOSS_PAD = Vector2.new(-6, 3) -- offset from the back islet's centre
+-- The boss shrine's torii stands this far behind its pad, on the side away from the arena.
+local BOSS_TORII_BACK = 5
+
+local function bossToriiSpot(): Vector2
+	local pad = BRIDGE_BACK.islet + BOSS_PAD
+	local away = (pad - BOSS_ARENA).Unit
+	return pad - away * BOSS_TORII_BACK
+end
+
 local function landforms()
 	-- Main island (lower tier) with a lumpy rock rim, open where bridges and falls leave.
 	plateau(at(0, 0, 0), MAIN_RADIUS, O.Y, 26)
 	local gaps = {
-		math.atan2(BRIDGE_LEFT.from.Y, BRIDGE_LEFT.from.X),
-		math.atan2(BRIDGE_BACK.from.Y, BRIDGE_BACK.from.X),
-		math.atan2(-36, 60), -- right waterfall
-		math.atan2(-42, -56), -- left waterfall
+		{ angle = math.atan2(BRIDGE_LEFT.from.Y, BRIDGE_LEFT.from.X), clear = 5 },
+		{ angle = math.atan2(BRIDGE_BACK.from.Y, BRIDGE_BACK.from.X), clear = 5 },
+		{ angle = math.atan2(-36, 60), clear = 4 }, -- right waterfall
+		{ angle = math.atan2(-42, -56), clear = 4 }, -- left waterfall
 	}
 	rimRocks(at(0, 0, 0), MAIN_RADIUS, O.Y + 2, 44, gaps, 3)
 	underside(at(0, 0, 0), MAIN_RADIUS, O.Y - 26, 44, 5)
 
 	-- Upper tier: the torii terrace, and two wings.
 	plateau(at(0, 0, -40), 34, O.Y + 8, 14)
-	rimRocks(at(0, 0, -40), 34, O.Y + 10, 26, { math.rad(90), math.rad(-90), math.rad(-60), math.rad(-120) }, 7)
+	rimRocks(at(0, 0, -40), 34, O.Y + 10, 26, {
+		{ angle = math.rad(90), clear = 11 }, -- the grand stair (18 wide, posts outside)
+		{ angle = math.rad(-90), clear = 7 }, -- the path through the great torii
+		{ angle = math.rad(-60), clear = 4 }, -- the towering stone lanterns
+		{ angle = math.rad(-120), clear = 4 },
+	}, 7)
 	plateau(at(-48, 0, -2), 20, O.Y + 4, 10)
 	plateau(at(48, 0, -2), 20, O.Y + 4, 10)
 
@@ -329,16 +429,52 @@ local function landforms()
 		local center = Vector3.new(O.X + bridge.islet.X, 0, O.Z + bridge.islet.Y)
 		plateau(center, bridge.radius, O.Y, 12)
 		underside(center, bridge.radius, O.Y - 12, bridge.radius * 1.5, 20 + i)
-		rimRocks(center, bridge.radius, O.Y + 2, 12, {
-			math.atan2(bridge.to.Y - bridge.islet.Y, bridge.to.X - bridge.islet.X),
-		}, 30 + i)
+		local landingGaps =
+			{ { angle = math.atan2(bridge.to.Y - bridge.islet.Y, bridge.to.X - bridge.islet.X), clear = 5 } }
+		if bridge == BRIDGE_BACK then
+			-- Keep the boss shrine's torii and its view of the arena clear of boulders.
+			local torii = bossToriiSpot() - bridge.islet
+			table.insert(landingGaps, { angle = math.atan2(torii.Y, torii.X), clear = 8 })
+		end
+		rimRocks(center, bridge.radius, O.Y + 2, 12, landingGaps, 30 + i)
 	end
+
+	-- Flush landings where stairs and bridges meet the ground, so no rim boulder or rounded
+	-- plateau edge stands in the way (see landing()).
+	landing(CFrame.new(at(0, 0, -13.5)), Vector2.new(22, 13), UPPER, Enum.Material.Cobblestone)
+	for _, side in { -1, 1 } do
+		landing(CFrame.new(at(side * 33.5, 0, -2)), Vector2.new(10, 12), WING, Enum.Material.Grass)
+	end
+	for _, bridge in { BRIDGE_LEFT, BRIDGE_BACK } do
+		local from = Vector3.new(O.X + bridge.from.X, 0, O.Z + bridge.from.Y)
+		local to = Vector3.new(O.X + bridge.to.X, 0, O.Z + bridge.to.Y)
+		local dir = flatUnit(to - from)
+		landing(CFrame.lookAt(from - dir * 3.5, from), Vector2.new(8, 9), LOWER, Enum.Material.Ground)
+		landing(CFrame.lookAt(to + dir * 3.5, to + dir * 5), Vector2.new(8, 9), LOWER, Enum.Material.Grass)
+	end
+end
+
+-- Footprints (offset from the lobby origin, radius) the far islets must keep clear of: the
+-- island, its bridged islets and the duel and boss terraces.
+local function reservedZones(): { { at: Vector2, radius: number } }
+	local zones = {
+		{ at = Vector2.zero, radius = MAIN_RADIUS },
+		{ at = BRIDGE_LEFT.islet, radius = BRIDGE_LEFT.radius },
+		{ at = BRIDGE_BACK.islet, radius = BRIDGE_BACK.radius },
+		{ at = BOSS_ARENA, radius = BOSS.ArenaRadius + 4 },
+	}
+	for _, ground in DUEL_GROUNDS do
+		table.insert(zones, { at = ground.arena, radius = DUEL.ArenaRadius + 4 })
+	end
+	return zones
 end
 
 -- Far islets drifting around the island: depth and scale without anything to load.
 local function farIslets(parent: Instance)
 	local random = Random.new(41)
+	local zones = reservedZones()
 	local placed = 0
+	local candidates = 0
 	local attempts = 0
 	while placed < 9 and attempts < 60 do
 		attempts += 1
@@ -346,16 +482,30 @@ local function farIslets(parent: Instance)
 		-- Keep the view toward the castle (-Z from the island) clear.
 		local towardCastle = math.abs((angle - math.rad(-90) + math.pi) % (math.pi * 2) - math.pi)
 		if towardCastle > math.rad(40) then
-			placed += 1
+			-- Every candidate draws the same numbers whether or not it's kept, so dropping
+			-- one never reshuffles the others.
+			candidates += 1
 			local distance = random:NextNumber(130, 250)
 			local radius = random:NextNumber(10, 26)
 			local top = O.Y + random:NextNumber(-24, 46)
-			local center = Vector3.new(O.X + math.cos(angle) * distance, 0, O.Z + math.sin(angle) * distance)
-			local thickness = math.max(radius * 0.4, 8)
-			plateau(center, radius, top, thickness)
-			underside(center, radius, top - thickness, radius * 1.4, 100 + placed)
-			if radius > 15 then
-				tree(Vector3.new(center.X, top + 2, center.Z), parent, random:NextNumber(0.9, 1.3))
+			local treeScale = if radius > 15 then random:NextNumber(0.9, 1.3) else nil
+			local offset = Vector2.new(math.cos(angle), math.sin(angle)) * distance
+			-- An islet over a terrace would hang its rocky underside into the fight.
+			local clear = true
+			for _, zone in zones do
+				if (offset - zone.at).Magnitude < radius + zone.radius + 6 then
+					clear = false
+				end
+			end
+			if clear then
+				placed += 1
+				local center = Vector3.new(O.X + offset.X, 0, O.Z + offset.Y)
+				local thickness = math.max(radius * 0.4, 8)
+				plateau(center, radius, top, thickness)
+				underside(center, radius, top - thickness, radius * 1.4, 100 + candidates)
+				if treeScale then
+					tree(Vector3.new(center.X, top + 2, center.Z), parent, treeScale)
+				end
 			end
 		end
 	end
@@ -384,17 +534,19 @@ local function stairs(parent: Instance, from: Vector3, to: Vector3, width: numbe
 			CastShadow = false,
 		}, parent)
 	end
-	-- Low stone posts down both edges, one per step.
+	-- Low stone posts down both edges, every other step. They stand just outside the steps,
+	-- so each runs down to the steps' footing rather than hanging over the ground beside.
 	for i = 1, steps, 2 do
 		local top = from.Y + rise * i
+		local height = top + 2.4 - (from.Y - 3)
 		for _, side in { -1, 1 } do
 			local position = Vector3.new(from.X, 0, from.Z)
 				+ forward * (stepRun * (i - 0.5))
 				+ look.RightVector * side * (width / 2 + 0.5)
 			part({
 				Name = "StairPost",
-				Size = Vector3.new(1, 2.4, 1),
-				CFrame = CFrame.new(position.X, top + 1.2, position.Z) * look.Rotation,
+				Size = Vector3.new(1, height, 1),
+				CFrame = CFrame.new(position.X, top + 2.4 - height / 2, position.Z) * look.Rotation,
 				Material = Enum.Material.Slate,
 				Color = Palette.Stone,
 				CastShadow = false,
@@ -402,6 +554,9 @@ local function stairs(parent: Instance, from: Vector3, to: Vector3, width: numbe
 		end
 	end
 end
+
+-- Plank width: the rope rails sit just outside it, so this is the walkable width.
+local BRIDGE_WIDTH = 6
 
 local function bridge(parent: Instance, data)
 	local a = Vector3.new(O.X + data.from.X, LOWER, O.Z + data.from.Y)
@@ -414,10 +569,22 @@ local function bridge(parent: Instance, data)
 		local sag = math.sin(t * math.pi) * 1.2
 		part({
 			Name = "Plank",
-			Size = Vector3.new(4.6, 0.3, 1),
+			Size = Vector3.new(BRIDGE_WIDTH, 0.3, 1),
 			CFrame = look * CFrame.new(0, -0.15 - sag, -length * t),
 			Material = Enum.Material.WoodPlanks,
 			Color = Palette.Deck:Lerp(Palette.Timber, (i % 4) / 6),
+		}, parent)
+	end
+	-- A stone footing under each end, flush with the planks: smooth terrain rounds down
+	-- toward the cliff edge, so without it the bridge starts with a step up out of a dip.
+	for _, span in { { -4.5, 0.5 }, { length - 0.5, length + 4.5 } } do
+		local mid, run = (span[1] + span[2]) / 2, span[2] - span[1]
+		part({
+			Name = "BridgeFoot",
+			Size = Vector3.new(BRIDGE_WIDTH + 0.8, 4, run),
+			CFrame = look * CFrame.new(0, -2, -mid),
+			Material = Enum.Material.Slate,
+			Color = Palette.Stone,
 		}, parent)
 	end
 	for _, side in { -1, 1 } do
@@ -428,7 +595,7 @@ local function bridge(parent: Instance, data)
 				decor({
 					Name = "RopePost",
 					Size = Vector3.new(0.35, 3.2, 0.35),
-					CFrame = look * CFrame.new(side * 2.4, 1.4 - sag, -length * t),
+					CFrame = look * CFrame.new(side * (BRIDGE_WIDTH / 2 + 0.1), 1.4 - sag, -length * t),
 					Material = Enum.Material.Wood,
 					Color = Palette.Timber,
 				}),
@@ -439,10 +606,10 @@ local function bridge(parent: Instance, data)
 		local holder =
 			part(decor({ Name = "RopeHolder", Size = Vector3.one * 0.2, Transparency = 1, CFrame = look }), parent)
 		local a0 = Instance.new("Attachment")
-		a0.Position = Vector3.new(side * 2.4, 2.8, 0)
+		a0.Position = Vector3.new(side * (BRIDGE_WIDTH / 2 + 0.1), 2.8, 0)
 		a0.Parent = holder
 		local a1 = Instance.new("Attachment")
-		a1.Position = Vector3.new(side * 2.4, 2.8, -length)
+		a1.Position = Vector3.new(side * (BRIDGE_WIDTH / 2 + 0.1), 2.8, -length)
 		a1.Parent = holder
 		local rope = Instance.new("Beam")
 		rope.Attachment0 = a0
@@ -581,13 +748,6 @@ end
 -- the edge. Each ground is a folder under Workspace.Lobby.DuelGrounds with its key points
 -- as attributes (PadA, PadB, Arena: walk-surface positions) and a Sign whose Status label
 -- DuelService keeps up to date.
-local DUEL = Config.Duel
-local DUEL_GROUNDS = {
-	-- Pad pair centre (lower tier) and terrace centre, as offsets from the lobby origin.
-	-- The terraces sit in gaps between the far islets (see farIslets' seed).
-	{ pads = Vector2.new(44, 28), arena = Vector2.new(106, -14) },
-	{ pads = Vector2.new(-38, 24), arena = Vector2.new(-108, -16) },
-}
 local DUEL_PAD_GAP = 12 -- studs between the two pads of a pair
 -- Terraces sit a little below the rim, in full view of it. Their fill top (walk - 2) stays
 -- on the 4-stud voxel grid, or the surface comes out higher than asked.
@@ -635,8 +795,9 @@ local function duelTerrace(parent: Instance, center: Vector3, seed: number, size
 		local p1 = center + Vector3.new(math.cos(a1) * radius, 0, math.sin(a1) * radius)
 		part({
 			Name = "FencePost",
-			Size = Vector3.new(0.8, 4.4, 0.8),
-			CFrame = CFrame.new(p0 + Vector3.new(0, 2.2, 0)),
+			-- Rooted 3 studs down: the terrace's rounded rim sags under the fence line.
+			Size = Vector3.new(0.8, 7.4, 0.8),
+			CFrame = CFrame.new(p0 + Vector3.new(0, 0.7, 0)),
 			Material = Enum.Material.SmoothPlastic,
 			Color = Palette.Vermilion,
 		}, parent)
@@ -717,9 +878,6 @@ end
 -- Boss trials: a shrine pad on the back islet opens the boss picker (BossService / BossHUD),
 -- and the fight is on a larger fenced terrace floating behind the island. Published on
 -- Workspace.Lobby.BossShrine as attributes Pad and Arena (walk-surface positions).
-local BOSS = Config.Bosses
-local BOSS_ARENA = Vector2.new(-60, 135) -- offset from the lobby origin, clear of the far islets
-local BOSS_PAD = Vector2.new(-6, 3) -- offset from the back islet's centre
 
 local function bossGrounds(lobby: Instance, islet: Vector3)
 	local holder = Instance.new("Folder")
@@ -748,7 +906,11 @@ local function bossGrounds(lobby: Instance, islet: Vector3)
 	local arena = at(BOSS_ARENA.X, DUEL_WALK, BOSS_ARENA.Y)
 	-- A torii behind the pad frames the arena terrace beyond it.
 	local away = flatUnit(pad - arena)
-	prop("Torii", CFrame.lookAt(pad - away * 5, pad - away * 6), holder, 0.55)
+	local torii =
+		prop("Torii", CFrame.lookAt(pad - away * BOSS_TORII_BACK, pad - away * (BOSS_TORII_BACK + 1)), holder, 0.55)
+	if torii then
+		Torii.openGate(torii)
+	end
 	lantern(pad + Vector3.new(-away.Z, 0, away.X) * 6, holder)
 	lantern(pad - Vector3.new(-away.Z, 0, away.X) * 6, holder)
 	local sign = part(decor({ Name = "Sign", Size = Vector3.one, Transparency = 1, CFrame = CFrame.new(pad) }), holder)
@@ -870,6 +1032,36 @@ local function pavilion(parent: Instance, center: Vector3, facing: Vector3)
 	text.Parent = gui
 end
 
+-- The backdrop mountains (Workspace.Props.Mountains) were laid out around the castle before
+-- the lobby floated above it, and one of them sliced through the back islet and the boss
+-- shrine. Push any mountain whose footprint reaches the lobby further out along its
+-- bearing from the castle: the castle keeps the same horizon, a little farther off.
+local LOBBY_FOOTPRINT = { at = Vector2.new(-10, 40), radius = 150 } -- the island, islets and terraces
+local function clearBackdrop()
+	local props = workspace:FindFirstChild("Props")
+	local mountains = props and props:FindFirstChild("Mountains")
+	if not mountains then
+		return
+	end
+	local centre = Vector2.new(O.X, O.Z) + LOBBY_FOOTPRINT.at
+	for _, mountain in mountains:GetChildren() do
+		if not mountain:IsA("BasePart") then
+			continue
+		end
+		-- The cone is narrower than its box at the lobby's height.
+		local reach = LOBBY_FOOTPRINT.radius + math.max(mountain.Size.X, mountain.Size.Z) / 2 * 0.8
+		local flat = Vector2.new(mountain.Position.X, mountain.Position.Z)
+		local bearing = if flat.Magnitude > 1 then flat.Unit else Vector2.new(0, 1)
+		local pushed = 0
+		while (flat + bearing * pushed - centre).Magnitude < reach and pushed < 600 do
+			pushed += 10
+		end
+		if pushed > 0 then
+			mountain.Position += Vector3.new(bearing.X, 0, bearing.Y) * pushed
+		end
+	end
+end
+
 -- A sea of cloud beneath the island, parting toward the castle valley.
 local function cloudSea(parent: Instance)
 	local layer = part(
@@ -939,7 +1131,10 @@ function LobbyBuilder.build(): Folder
 
 	-- Torii terrace: the queue pad, a great torii framing the castle, two guardians.
 	queuePad(lobby, terraceCenter)
-	prop("Torii", CFrame.lookAt(at(0, UPPER, -68), at(0, UPPER, -200)), lobby, 1.55)
+	local torii = prop("Torii", CFrame.lookAt(at(0, UPPER, -68), at(0, UPPER, -200)), lobby, 1.55)
+	if torii then
+		Torii.openGate(torii) -- the path runs through it to the terrace's far edge
+	end
 	for _, x in { -9, 9 } do
 		lantern(at(x, UPPER, -12), lobby)
 		lantern(at(x * 1.3, UPPER, -62), lobby)
@@ -1000,6 +1195,7 @@ function LobbyBuilder.build(): Folder
 	farIslets(lobby)
 	duelGrounds(lobby)
 	cloudSea(lobby)
+	clearBackdrop()
 
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = "LobbySpawn"
@@ -1017,6 +1213,12 @@ function LobbyBuilder.build(): Folder
 	lobby:SetAttribute("SpawnPoint", spawnPoint)
 	lobby:SetAttribute("QueuePad", terraceCenter)
 	lobby:SetAttribute("TrainerHome", trainerHome)
+	-- Seat every prop on the terrain now that it can be raycast (see pendingSeats).
+	task.wait()
+	for _, seatIt in pendingSeats do
+		seatIt()
+	end
+	table.clear(pendingSeats)
 	return lobby
 end
 
