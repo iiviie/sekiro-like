@@ -1,6 +1,7 @@
 --!strict
 local Ambience = require(script.Ambience)
 local BossHUD = require(script.BossHUD)
+local ChatTags = require(script.ChatTags)
 local Coach = require(script.Coach)
 local CombatHUD = require(script.CombatHUD)
 local CombatInput = require(script.CombatInput)
@@ -28,6 +29,7 @@ DuelHUD.start()
 BossHUD.start()
 LobbyHUD.start()
 Toasts.start()
+ChatTags.start()
 Coach.start()
 TrainerReadout.start()
 TitleScreen.show() -- yields until the player enters, so the click doesn't swing a sword
