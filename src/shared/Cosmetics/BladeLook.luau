@@ -214,13 +214,14 @@ local function aura(sword: BasePart, guard: Vector3, tip: Vector3, color: Color3
 		e.Name = "MasteryAura"
 		e.Texture = GLOW
 		e.Color = ColorSequence.new(color:Lerp(Color3.new(1, 1, 1), 0.4), color)
-		e.Size = seq(0.9, 0.6, 0)
-		e.Transparency = seq(0.55, 0.7, 1)
+		e.Size = seq(0.7, 0.5, 0)
+		-- Half-additive and fairly opaque: a fully additive pale glow vanishes in daylight.
+		e.Transparency = seq(0.3, 0.5, 1)
 		e.Lifetime = NumberRange.new(0.45, 0.8)
 		e.Speed = NumberRange.new(0.2, 0.6)
 		e.SpreadAngle = Vector2.new(180, 180)
 		e.Acceleration = Vector3.new(0, 1.6, 0)
-		e.LightEmission = 1
+		e.LightEmission = 0.5
 		e.LightInfluence = 0
 		e.Rate = 6
 		e:SetAttribute("BaseRate", 6)
