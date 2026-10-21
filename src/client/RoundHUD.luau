@@ -354,6 +354,15 @@ local WALL_NORMAL = NumberSequence.new({
 	NumberSequenceKeypoint.new(0.7, 1),
 	NumberSequenceKeypoint.new(1, 1),
 })
+-- ...and on a phone: three overlapping panels at WALL_NORMAL stack into a solid red band up to
+-- a third of the wall, which late in a match (the ring close all round) tints 30-50 % of a small
+-- screen. Lighter at the foot and gone by under half its height; the ground line still marks it.
+local WALL_PHONE = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.5),
+	NumberSequenceKeypoint.new(0.2, 0.78),
+	NumberSequenceKeypoint.new(0.45, 1),
+	NumberSequenceKeypoint.new(1, 1),
+})
 local WALL_THIN = NumberSequence.new({
 	NumberSequenceKeypoint.new(0, 0.85),
 	NumberSequenceKeypoint.new(0.25, 0.95),
@@ -517,6 +526,7 @@ local function placeRing(center: Vector3, radius: number)
 	-- stand between it and you, thin out. From inside, a panel within a couple of studs of the
 	-- lens is the only one hidden.
 	local eyeOutside = Vector3.new(eye.X - center.X, 0, eye.Z - center.Z).Magnitude > radius - 0.5
+	local normal = if UI.compact(UI.viewport()) then WALL_PHONE else WALL_NORMAL
 	for i = 1, MIST_COLUMNS do
 		local base = mistBottoms[i].Position
 		local gap = Vector3.new(base.X - eye.X, 0, base.Z - eye.Z).Magnitude
@@ -524,7 +534,7 @@ local function placeRing(center: Vector3, radius: number)
 			then WALL_HIDDEN
 			elseif eyeOutside and gap < 9 then WALL_HIDDEN
 			elseif eyeOutside and gap < 16 then WALL_THIN
-			else WALL_NORMAL
+			else normal
 		if wallLevels[i] ~= level then
 			wallLevels[i] = level
 			mistBeams[i].Transparency = level
