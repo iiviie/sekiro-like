@@ -166,13 +166,13 @@ function StoreUI.priceText(item: Catalog.Item): string
 	local price = item.price
 	if not price then
 		return ""
+	elseif price.product then -- the Robux price first (Premium also has a gem price)
+		local robux = StoreUI.robux(price.product)
+		return if robux then `R$ {UI.number(robux)}` else "See price"
 	elseif price.coins then
 		return `{UI.number(price.coins)} coins`
 	elseif price.gems then
 		return `{UI.number(price.gems)} gems`
-	elseif price.product then
-		local robux = StoreUI.robux(price.product)
-		return if robux then `R$ {UI.number(robux)}` else "See price"
 	end
 	return ""
 end
@@ -442,6 +442,48 @@ end
 function StoreUI.wishable(item: Catalog.Item): boolean
 	local price = item.price
 	return price ~= nil and price.product == nil and (price.coins ~= nil or price.gems ~= nil) and not item.default
+end
+
+-- Today's shop as the server published it (ReplicatedStorage.ShopRotation): coin, gem,
+-- featured = { items, ... }, endsAt, returnDays.
+function StoreUI.rotation(): { [string]: any }
+	local raw = ReplicatedStorage:GetAttribute("ShopRotation")
+	if typeof(raw) ~= "string" or raw == "" then
+		return {}
+	end
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
+	return if ok and typeof(decoded) == "table" then decoded else {}
+end
+
+-- Whether `id` is in today's shop (the daily slots or the week's set).
+function StoreUI.inShopToday(id: string): boolean
+	local rotation = StoreUI.rotation()
+	for _, list in { rotation.coin or {}, rotation.gem or {}, (rotation.featured or {}).items or {} } do
+		if table.find(list, id) then
+			return true
+		end
+	end
+	return false
+end
+
+-- A gem-priced shop item sells only while it's in the shop (server/ShopService's real
+-- rotation); coin items always sell. True when `item` is gem-only, rule-free and out today.
+function StoreUI.rotatedOut(item: Catalog.Item): boolean
+	local price = item.price
+	if not price or price.gems == nil or price.coins ~= nil or item.rule or not StoreUI.wishable(item) then
+		return false
+	end
+	local rotation = StoreUI.rotation()
+	if not rotation.gem then
+		return false -- not published yet: let the server decide
+	end
+	return not table.find(rotation.gem, item.id) and not table.find((rotation.featured or {}).items or {}, item.id)
+end
+
+-- "within 13 days": the longest a gem item can be out of the shop (server-computed).
+function StoreUI.returnText(): string
+	local days = StoreUI.rotation().returnDays
+	return if typeof(days) == "number" and days > 0 then `within {Text.days(days)}` else "soon"
 end
 
 return StoreUI

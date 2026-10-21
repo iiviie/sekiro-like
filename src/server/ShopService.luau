@@ -20,9 +20,14 @@
 --     per-player history in the profile (Ext.Shop) with all-time tallies, so odds can be audited.
 --   * The capsule is off unless EconomyConfig.PaidCapsule allows it, and hidden and refused
 --     for players whose PolicyService says ArePaidRandomItemsRestricted (Monetization's cache;
---     restricted while unknown). Every pool item can also be bought directly and for Shards.
+--     restricted while unknown). Every pool item can also be bought for Shards, and directly
+--     (coin items any day, gem items while they're in the shop).
 --   * The rotation is a pure function of the UTC day (same on every server), never refreshed
---     for money, and every item comes back within Shop.ReturnWithinDays.
+--     for money. It is a real gate for gem items: a gem-priced pool item sells (Locker, Store,
+--     the shard shop's direct price) only on days it's in the gem slots or the week's set
+--     (Economy.setBuyGate); coin items always sell, and Shards buy any pool item any day. The
+--     longest a gem item can be away is computed (returnDays) and published with the rotation;
+--     start-up warns when it's over Shop.ReturnWithinDays.
 --   * Pools hold only priced, rule-free, on-sale cosmetics: earn-only items (achievements,
 --     boss clears, ranked, pass, bundles, VIP) never appear in a draw or the shop.
 --
@@ -105,9 +110,10 @@ local TEXT: { [string]: string } = {
 	locked = "You haven't unlocked that yet.",
 	["not for sale"] = "That isn't for sale.",
 	expired = "That offer has rotated out. Here's today's shop.",
+	rotation = "That isn't in the shop today. It comes back to the Store's daily shop: wishlist it in the Locker to hear the day it does.",
 	unavailable = Text.ProgressFailed,
 	off = "The Shrine Capsule isn't open.",
-	restricted = "The Shrine Capsule isn't available in your region. Every item in it can be bought directly or with Shards.",
+	restricted = "The Shrine Capsule isn't available in your region. Every item in it can be bought with Shards, or directly while it's in the shop.",
 	closed = "The Shrine Capsule is closed until its next banner.",
 }
 local BURST = 6
@@ -720,6 +726,22 @@ local function shopLists(): ({ Item }, { Item })
 	return coinItems, gemItems
 end
 
+-- The longest a gem item can be out of the shop, in days: it sells on days it's in the gem
+-- slots or the week's set, so the shorter of the two paths' bounds (a set of FeaturedSize, two
+-- cycles of weeks). Coin items always sell, so they don't count.
+function ShopService.returnDays(): number
+	local _, gemItems = shopLists()
+	local cfg = EconomyConfig.Shop
+	local daily = maxReturn(#gemItems, cfg.GemSlots)
+	local weekly = maxReturn(#gemItems, cfg.FeaturedSize) * 7
+	if daily == 0 then
+		return weekly
+	elseif weekly == 0 then
+		return daily
+	end
+	return math.min(daily, weekly)
+end
+
 local function weekOf(day: number): number
 	return (day + 3) // 7 -- weeks start on Monday (UTC day 0 was a Thursday)
 end
@@ -747,6 +769,7 @@ function ShopService.rotation(day: number?): { [string]: any }
 		endsAt = (today + 1) * DAY,
 		coin = slotsFor(coinItems, cfg.CoinSlots, today, "coin"),
 		gem = slotsFor(gemItems, cfg.GemSlots, today, "gem"),
+		returnDays = ShopService.returnDays(),
 		featured = {
 			week = week,
 			endsAt = ((week + 1) * 7 - 3) * DAY,
@@ -756,6 +779,19 @@ function ShopService.rotation(day: number?): { [string]: any }
 			discount = cfg.FeaturedDiscount,
 		},
 	}
+end
+
+-- Whether a gem-priced pool item may be bought on `day` (default today): it's in that day's gem
+-- slots or the week's set. Anything else (coin items, earned items, non-pool items) is never
+-- gated here.
+function ShopService.inRotation(id: string, day: number?): boolean
+	local item = Catalog.get(id)
+	local price = item and item.price
+	if not item or not price or price.gems == nil or price.coins ~= nil or not inPool(item) then
+		return true
+	end
+	local rotation = ShopService.rotation(day)
+	return table.find(rotation.gem, id) ~= nil or table.find(rotation.featured.items, id) ~= nil
 end
 
 -- What `player` pays for the featured set now: the unowned items at the set discount.
@@ -1191,7 +1227,9 @@ end
 --   capsule(on | nil)          override the PaidCapsule switch (nil = config)
 --   ready(category, on)        flip Catalog.Ready for a category on the server, then republish
 --   seasonEnd(season, epoch?)  pretend `season` ends at `epoch` (default now; false clears)
---   rotation(fromDay, days)    the rotation for a range of days + the longest return gap
+--   rotation(fromDay, days)    the rotation for a range of days + the longest return gaps
+--   buy(id, currency?)         Economy.buy for the first player (what the Locker's BuyItem does)
+--   inRotation(id, day?)       whether a gem item sells that day
 --   state()                    the first player's Ext.Shop / Ext.Ranked / Ext.SeasonRewards
 --   grantDraws(n, paid)        ShopService.grantDraws for the first player
 --   republish()
@@ -1324,10 +1362,26 @@ local function testHooks()
 			for _, gap in gaps do
 				worst = math.max(worst, gap)
 			end
+			-- Gem items: the longest run of days a gem item can't be bought (not in the gem
+			-- slots nor the week's set), measured over the range.
 			local coinItems, gemItems = shopLists()
+			local gemWorst = 0
+			for _, item in gemItems do
+				local away = 0
+				for day = from, from + days - 1 do
+					if ShopService.inRotation(item.id, day) then
+						away = 0
+					else
+						away += 1
+						gemWorst = math.max(gemWorst, away)
+					end
+				end
+			end
 			return HttpService:JSONEncode({
 				days = list,
 				worstGap = worst,
+				gemDaysAway = gemWorst,
+				returnDays = ShopService.returnDays(),
 				repeatsNextDay = nextDay,
 				coinItems = #coinItems,
 				gemItems = #gemItems,
@@ -1336,6 +1390,12 @@ local function testHooks()
 					maxReturn(#gemItems, EconomyConfig.Shop.GemSlots)
 				),
 			})
+		elseif command == "buy" then
+			assert(player, "no player")
+			local ok, why = Economy.buy(player, args[1], args[2])
+			return HttpService:JSONEncode({ ok = ok, reason = why, text = if why then TEXT[why] else nil })
+		elseif command == "inRotation" then
+			return ShopService.inRotation(args[1], args[2])
 		elseif command == "state" then
 			assert(player, "no player")
 			local d = StatsService.get(player)
@@ -1427,15 +1487,19 @@ function ShopService.start()
 			end
 		end
 	end
-	local coinItems, gemItems = shopLists()
+	-- The real rotation: a gem-priced pool item sells only while it's in the shop.
+	Economy.setBuyGate(function(item: Item, currency: Economy.Currency): (boolean, string?)
+		if currency == "Gems" and not ShopService.inRotation(item.id) then
+			return false, "rotation"
+		end
+		return true, nil
+	end)
 	local cfg = EconomyConfig.Shop
-	local worst = math.max(
-		maxReturn(#coinItems, cfg.CoinSlots),
-		maxReturn(#gemItems, cfg.GemSlots),
-		maxReturn(#gemItems, cfg.FeaturedSize) * 7
-	)
+	local worst = ShopService.returnDays()
 	if worst > cfg.ReturnWithinDays then
-		warn(`[ShopService] shop items could take {worst} days to return (limit {cfg.ReturnWithinDays}): add slots`)
+		warn(
+			`[ShopService] gem items could be out of the shop for {worst} days (limit {cfg.ReturnWithinDays}): add a gem slot`
+		)
 	end
 
 	StatsService.onPublish(publishPlayer)

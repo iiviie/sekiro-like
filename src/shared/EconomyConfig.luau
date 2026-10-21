@@ -90,6 +90,9 @@ local N = {
 		Played = 30, -- per royale, duel or boss fight
 		Win = 20, -- royale or duel win
 		FinalWeekMultiplier = 2,
+		-- "First steps on the path": a season's first fight lifts the pass to this tier (tops
+		-- Pass XP up to it once per season), so the first look at the pass is a reward.
+		FirstFightTier = 1,
 	},
 
 	-- Anti-farm.
@@ -154,8 +157,11 @@ local N = {
 	},
 
 	-- Daily shop: CoinSlots + GemSlots a day, a weekly featured set of FeaturedSize gem items at
-	-- FeaturedDiscount off (rounded to 50 gems). Every item returns within ReturnWithinDays.
-	Shop = { CoinSlots = 2, GemSlots = 2, FeaturedSize = 3, FeaturedDiscount = 0.2, ReturnWithinDays = 56 },
+	-- FeaturedDiscount off (rounded to 50 gems). Gem-priced shop items can only be bought while
+	-- they're in today's gem slots or the week's set (server/ShopService gates Economy.buy);
+	-- coin items are always in the Locker. The server warns at start-up when a gem item could
+	-- be out of the shop for more than ReturnWithinDays: then add a gem slot.
+	Shop = { CoinSlots = 2, GemSlots = 2, FeaturedSize = 3, FeaturedDiscount = 0.2, ReturnWithinDays = 14 },
 
 	-- Ranked season end: rewards need at least MinGames rated games in the season. After the
 	-- rewards are paid (on the season's tier), each rating keeps Keep of its distance from

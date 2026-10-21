@@ -10,6 +10,7 @@
 --   Economy.own(player, itemId, source)                    -> boolean   (adds to the inventory)
 --   Economy.owns(player, itemId)                           -> boolean
 --   Economy.buy(player, itemId, currency?)                 -> (boolean, string?)
+--   Economy.setBuyGate(fn(item, currency) -> (boolean, string?))   ShopService's rotation gate
 --   Economy.equip(player, slot, itemId)                    -> boolean
 --   Economy.equipped(player, slot)                         -> string   (an item id, "" = none)
 --   Economy.equipIfDefault(player, itemId)                 -> string?  (a new title/blade over the default)
@@ -269,8 +270,17 @@ function Economy.unlocked(player: Player, id: string): (boolean, number, number)
 	return have >= need, have, need
 end
 
+-- A check every coin / gem purchase passes after its own rules (server/ShopService: a gem-priced
+-- shop item sells only while it's in the rotation). Set once at start; nil = no gate.
+local buyGate: ((Item, Currency) -> (boolean, string?))? = nil
+
+function Economy.setBuyGate(gate: (Item, Currency) -> (boolean, string?))
+	buyGate = gate
+end
+
 -- Buys a priced item with coins or gems (the one it's priced in, or `currency` when it has
--- both). Robux items go through Monetization.prompt.
+-- both). Robux items go through Monetization.prompt; an item with a product (the premium
+-- pass's gem price) is sold by its own service, never here.
 function Economy.buy(player: Player, id: string, currency: Currency?): (boolean, string?)
 	local d = StatsService.get(player)
 	local item = Catalog.get(id)
@@ -281,7 +291,7 @@ function Economy.buy(player: Player, id: string, currency: Currency?): (boolean,
 		return false, "owned"
 	end
 	local price = item.price
-	if not price or not Catalog.isReady(item) then
+	if not price or price.product ~= nil or not Catalog.isReady(item) then
 		return false, "not for sale"
 	end
 	local pay: Currency, amount: number
@@ -295,6 +305,12 @@ function Economy.buy(player: Player, id: string, currency: Currency?): (boolean,
 	local ok = Economy.unlocked(player, id)
 	if not ok then
 		return false, "locked"
+	end
+	if buyGate then
+		local allowed, why = buyGate(item, pay)
+		if not allowed then
+			return false, why or "not for sale"
+		end
 	end
 	if not StatsService.canTransact(player) then
 		return false, "unavailable"
