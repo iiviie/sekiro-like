@@ -307,7 +307,32 @@ local function heightOf(model: Model): number
 	return if typeof(s) == "number" and s > 0 then s else 1
 end
 
+-- Pulls `eye` in front of whatever stands between it and `focus` (a fence post, a lantern, a
+-- wall), so a shot never looks through scenery. Fighters and effects are ignored.
+local function unblocked(eye: Vector3, focus: Vector3): Vector3
+	local along = eye - focus
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.IgnoreWater = true
+	for _ = 1, 6 do
+		local hit = workspace:Raycast(focus, along, params)
+		if not hit then
+			return eye
+		end
+		local part = hit.Instance
+		local model = part:FindFirstAncestorOfClass("Model")
+		local body = model and model:FindFirstChildOfClass("Humanoid")
+		if not body and part.Transparency < 0.6 and part.CanCollide then
+			return hit.Position - along.Unit * 0.6
+		end
+		params:AddToFilter(if body then model :: Model else part)
+	end
+	return eye
+end
+
 -- A low hero shot of `f`, from `side` (1 its right, -1 its left), `alpha` 0..1 through the shot.
+-- Wide enough for the whole body (kneels, crouches and low stances stay in frame above the
+-- card), dollying in a little; leans in on the climax.
 local function heroShot(f: Fighter, side: number, alpha: number, punch: number): (CFrame, number)
 	local r = rootOf(f.model)
 	if not r then
@@ -316,11 +341,11 @@ local function heroShot(f: Fighter, side: number, alpha: number, punch: number):
 	local s = heightOf(f.model)
 	local e = 1 - (1 - alpha) ^ 2
 	local angle = math.rad(side * (30 - 18 * e))
-	local dist = (9.2 - 1.6 * e - punch * 1.2) * s
+	local dist = (11.6 - 2 * e - punch * 1.2) * s
 	local base = r.CFrame
 	local offset = CFrame.Angles(0, angle, 0) * Vector3.new(0, 0, -dist)
-	local eye = base * Vector3.new(offset.X, -0.9 * s + 0.3 * e * s, offset.Z)
-	local focus = base * Vector3.new(0, 0.9 * s, 0)
+	local focus = base * Vector3.new(0, 0.15 * s, 0)
+	local eye = unblocked(base * Vector3.new(offset.X, -0.55 * s + 0.3 * e * s, offset.Z), focus)
 	return CFrame.lookAt(eye, focus), 46 - 3 * e - punch * 4
 end
 
@@ -339,8 +364,9 @@ local function twoShot(a: Fighter, b: Fighter, alpha: number, sideSign: number):
 	local span = across.Magnitude
 	local e = 1 - (1 - alpha) ^ 2
 	local dist = span * 0.62 + 9 - 2.2 * e
-	local eye = mid + perp * dist + Vector3.new(0, 1.2 + 0.6 * e, 0) + axis * (1.5 - 3 * e)
-	return CFrame.lookAt(eye, mid + Vector3.new(0, 1.4, 0)), 52 - 4 * e
+	local focus = mid + Vector3.new(0, 1.4, 0)
+	local eye = unblocked(mid + perp * dist + Vector3.new(0, 1.2 + 0.6 * e, 0) + axis * (1.5 - 3 * e), focus)
+	return CFrame.lookAt(eye, focus), 52 - 4 * e
 end
 
 -- Where the gameplay camera will pick up (behind you, looking at your foe), for the hand-off.
@@ -453,7 +479,20 @@ local function endSession(s: Session, quick: boolean?)
 	for _, gui in s.hidden do
 		gui.Enabled = true
 	end
+	-- Hand the camera back from where play picks up: behind you facing your foe (a skipped
+	-- intro would otherwise swing round from the hero shot, through your body), or for a
+	-- preview where it was before.
 	local camera = workspace.CurrentCamera
+	local foe: Model? = nil
+	for _, f in s.fighters do
+		if f.model ~= player.Character then
+			foe = f.model
+		end
+	end
+	local back = if s.preview then s.camFrom else behindMe(foe) or s.camFrom
+	if back then
+		camera.CFrame = back
+	end
 	camera.CameraType = Enum.CameraType.Custom
 	camera.FieldOfView = s.fov
 	task.delay(0.4, function()
@@ -569,6 +608,7 @@ function IntroCinematic.play(spec: Spec)
 		hidden = {},
 		preview = spec.mode == "preview",
 		fov = workspace.CurrentCamera.FieldOfView,
+		camFrom = workspace.CurrentCamera.CFrame,
 		firstTo = spec.firstTo,
 		rated = spec.rated,
 	}
