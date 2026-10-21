@@ -1,9 +1,10 @@
 --!strict
 -- Rewards for good play, as they happen. Every deflect, kill and win pays XP (and some
 -- coins) the moment it lands, with a toast on the player's screen; XP fills Mastery levels
--- that pay coins (and every 5th, gems and Whetstones); daily Trials track events and pay out
--- when complete; and each match ends with a report card of what you did. Numbers live in
--- Shared/EconomyConfig; currencies move through server/Economy (logged, checked).
+-- that pay coins (and every 5th, gems and Whetstones); the season pass's daily missions and
+-- weekly bounties (server/PassService) track events and pay out when complete; and each match
+-- ends with a report card of what you did. Numbers live in Shared/EconomyConfig; currencies
+-- move through server/Economy (logged, checked).
 --
 -- Anti-farm: a fighter's kill coins pay once per match (finishing someone who rose from a
 -- cut-down pays XP only); duels against the same human pay less after the second that day
@@ -12,7 +13,7 @@
 -- Remotes (server -> one client), on ReplicatedStorage.Remotes.Progress:
 --   "Reward"  { xp, coins, reason }         a toast
 --   "LevelUp" { level, coins }
---   "Trial"   { id, text, coins, xp }       a trial completed
+--   "Mission" { id, text, weekly, pass, coins, xp }   a mission completed (server/PassService)
 --   "Unlock"  { id, name, category }         an item granted by a rule (server/Economy)
 --   "Notice"  { text }                        a line of feedback (server/Monetization)
 --   "Report"  { placement, fighters, kills, deathblows, deflects, perfects, xp, coins, won,
@@ -27,6 +28,7 @@ local Progression = require(ReplicatedStorage.Shared.Progression)
 local Round = require(ReplicatedStorage.Shared.Round)
 local CombatService = require(script.Parent.CombatService)
 local Economy = require(script.Parent.Economy)
+local PassService = require(script.Parent.PassService)
 local StatsService = require(script.Parent.StatsService)
 
 type Combatant = CombatService.Combatant
@@ -60,8 +62,6 @@ local function funnel(player: Player, step: number)
 		AnalyticsService:LogOnboardingFunnelStepEvent(player, step, FUNNEL[step])
 	end)
 end
-
-local today = EconomyConfig.day
 
 -- Victims whose kill reward was already paid this life cycle (a cut-down, then the death).
 local paidVictims: { [Combatant]: boolean } = setmetatable({}, { __mode = "k" }) :: any
@@ -149,7 +149,7 @@ local function winExtras(player: Player, royale: boolean)
 end
 
 local function passXP(player: Player, amount: number, reason: string)
-	extra(player, "PassXP", amount, reason)
+	PassService.addXP(player, amount, reason)
 end
 
 local function reward(player: Player, event: string, reason: string?, factor: number?)
@@ -160,40 +160,12 @@ local function reward(player: Player, event: string, reason: string?, factor: nu
 	end
 end
 
--- Advances any of today's trials listening for `event`; completed ones pay at once.
+-- Advances the daily missions and weekly bounties listening for `event` (server/PassService
+-- pays their Pass XP); completed ones pay coins, Mastery XP and Whetstones here.
 local function trialEvent(player: Player, event: string, amount: number?)
-	local d = StatsService.get(player)
-	if not d then
-		return
-	end
-	local day = today()
-	if d.TrialDay ~= day then
-		d.TrialDay = day
-		table.clear(d.TrialProgress)
-	end
-	local changed = false
-	for _, id in Progression.dailyTrials(player.UserId, day) do
-		local trial = Progression.trial(id)
-		if trial and trial.event == event then
-			local before = d.TrialProgress[id] or 0
-			if before < trial.goal then
-				local after = math.min(trial.goal, before + (amount or 1))
-				d.TrialProgress[id] = after
-				changed = true
-				if after >= trial.goal then
-					remote:FireClient(
-						player,
-						"Trial",
-						{ id = id, text = trial.text, coins = trial.coins, xp = trial.xp }
-					)
-					grant(player, trial.xp, trial.coins, nil)
-					extra(player, "Whetstones", EconomyConfig.Whetstones.Trial, "Trial")
-				end
-			end
-		end
-	end
-	if changed then
-		StatsService.commit(player)
+	for _, payout in PassService.missionEvent(player, event, amount) do
+		grant(player, payout.xp, payout.coins, nil)
+		extra(player, "Whetstones", payout.whetstones, "Mission")
 	end
 end
 
@@ -227,6 +199,7 @@ function ProgressService.matchEnded(places: { [Player]: number }, fighters: numb
 			reward(player, "Played", "Match fought")
 			passXP(player, EconomyConfig.Pass.Played, "Match fought")
 			trialEvent(player, "Played")
+			trialEvent(player, "Royale")
 			-- Placement among every fighter (bots count): outlasting them is worth something.
 			local report = reports[player]
 			local outlasted = math.max(0, fighters - place)
@@ -276,6 +249,7 @@ function ProgressService.duelEnded(results: { [Player]: DuelResult })
 			trialEvent(player, "Played")
 			if factor > 0 then
 				passXP(player, EconomyConfig.Pass.Played * factor, "Duel fought")
+				trialEvent(player, "Duel")
 			end
 			local perRound = Progression.Rewards.DuelRound.XP or 0
 			if result.rounds > 0 and factor > 0 then
@@ -289,6 +263,7 @@ function ProgressService.duelEnded(results: { [Player]: DuelResult })
 			if result.won and factor > 0 then
 				reward(player, "DuelWin", "Duel won", factor)
 				passXP(player, EconomyConfig.Pass.Win * factor, "Duel won")
+				trialEvent(player, "DuelWin")
 				if factor >= 1 then
 					winExtras(player, false)
 				end
@@ -336,6 +311,7 @@ function ProgressService.bossEnded(player: Player, result: BossResult): boolean
 	pay(rewards.Fought, 1, "Boss fought")
 	passXP(player, EconomyConfig.Pass.Played, "Boss fought")
 	trialEvent(player, "Played")
+	trialEvent(player, "BossFought")
 	if result.lives > 0 then
 		pay(rewards.Phase, result.lives, if result.lives == 1 then "Life taken" else `{result.lives} lives taken`)
 	end
@@ -344,6 +320,7 @@ function ProgressService.bossEnded(player: Player, result: BossResult): boolean
 		local stars = math.max(result.stars, 1)
 		pay(rewards.Clear, stars, `{result.name} defeated`)
 		extra(player, "Whetstones", rewards.Clear.Whetstones * stars, "Boss clear")
+		trialEvent(player, "BossClear")
 		local d = StatsService.get(player)
 		if d then
 			first = (d.BossClears[result.boss] or 0) == 0
@@ -486,7 +463,7 @@ function ProgressService.start()
 	CombatService.onDied(onKill)
 	CombatService.onCutDown(onKill)
 
-	-- Keep today's trial list fresh on join, and start the funnel for first-time players
+	-- Keep today's missions fresh on join, and start the funnel for first-time players
 	-- once their data has loaded (Played == 0) and they're past the title card.
 	Players.PlayerAdded:Connect(function(player)
 		player:GetAttributeChangedSignal("Entered"):Once(function()
