@@ -46,8 +46,8 @@ function BladeLook.emitter(kind: string, color: Color3): ParticleEmitter
 		e.SpreadAngle = Vector2.new(180, 180)
 		e.Acceleration = Vector3.new(0.6, -1.4, 0.3)
 		e.RotSpeed = NumberRange.new(-180, 180)
-		e.LightEmission = 0.35
-		e.LightInfluence = 0.4
+		e.LightEmission = 0.08 -- additive light turns pale pink white in daylight
+		e.LightInfluence = 0.3
 		if kind == "paper" then
 			e.Squash = NumberSequence.new(-0.5) -- wide strips of paper
 			e.LightEmission = 0.1

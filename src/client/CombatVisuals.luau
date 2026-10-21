@@ -749,10 +749,11 @@ local function startStreak(model: Model, fighter: Fighter, trail: Trail, clock: 
 	if (tip - guard).Magnitude < 0.5 then
 		return
 	end
-	local perilous = clock < (perilUntil[model] or 0)
-	local keypoints = trail.Color.Keypoints
-	local core = if perilous then PERIL_CORE else keypoints[1].Value
-	local body = if perilous then PERIL_BODY else keypoints[#keypoints].Value
+	local first = trail.Color.Keypoints[1].Value
+	local perilous = clock < (perilUntil[model] or 0) or first == ANIMATOR_PERIL
+	local look = Cosmetics.blade(model)
+	local core = if perilous then PERIL_CORE else look.trail[1]
+	local body = if perilous then PERIL_BODY else look.trail[2]
 	local reds = core.R > core.B + 0.25
 	-- The core's colour at the tip: white-hot steel, or a red that stays red under bloom.
 	local hot = if reds then core:Lerp(body, 0.45) else core:Lerp(WHITE, 0.7)

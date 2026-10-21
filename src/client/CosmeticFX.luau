@@ -223,14 +223,15 @@ local function emit(
 end
 
 local function petals(e: ParticleEmitter, color: Color3, glow: number)
+	-- Saturated and fairly large: pale petals vanish against daylight sand.
 	e.Texture = C.Petal
-	e.Color = ColorSequence.new(color:Lerp(WHITE, 0.45), color)
-	e.Size = seq(0.45, 0.4, 0.2)
-	e.Transparency = seq(0, 0, 1)
+	e.Color = ColorSequence.new(color, color:Lerp(WHITE, 0.4))
+	e.Size = seq(0.62, 0.58, 0.4)
+	e.Transparency = seq(0, 0, 0.1, 1)
 	e.Rotation = NumberRange.new(0, 360)
 	e.RotSpeed = NumberRange.new(-260, 260)
-	e.LightEmission = glow
-	e.LightInfluence = 0.3
+	e.LightEmission = glow * 0.5
+	e.LightInfluence = 0.15
 end
 
 local function feathers(e: ParticleEmitter, color: Color3)
@@ -466,9 +467,9 @@ local function petalStorm(ctx: Ctx, color: Color3, count: number, glow: number)
 	emit(ctx.point, count, 3.2, function(e)
 		petals(e, color, glow)
 		e.Lifetime = NumberRange.new(1.6, 2.6)
-		e.Speed = NumberRange.new(14, 32)
+		e.Speed = NumberRange.new(10, 24)
 		e.SpreadAngle = Vector2.new(180, 180)
-		e.Drag = 3.2
+		e.Drag = 3.6
 		e.Acceleration = Vector3.new(3, -3.5, 1)
 	end)
 	-- A ring of petals thrown out flat around the body, then a slow fall around it.
@@ -496,7 +497,7 @@ end
 
 -- Sakura Scatter (桜): the cut throws a storm of cherry petals.
 local function sakuraScatter(ctx: Ctx): Grade
-	local pink = Color3.fromRGB(255, 168, 204)
+	local pink = Color3.fromRGB(252, 156, 198)
 	crossCut(ctx, Color3.fromRGB(255, 190, 215), 13)
 	kit.flare(ctx.point, Color3.fromRGB(255, 214, 230), 18, true)
 	petalStorm(ctx, pink, 150, 0.25)
@@ -659,13 +660,13 @@ end
 
 -- Yozakura Finale (夜桜): night falls, a pink crescent and a storm of glowing petals.
 local function yozakura(ctx: Ctx): Grade
-	local pink = Color3.fromRGB(255, 170, 214)
+	local pink = Color3.fromRGB(240, 128, 182)
 	crescentCut(ctx, Color3.fromRGB(255, 196, 228), 15)
 	kit.cutStreak(ctx.point, ctx.sweep, 15, 1.2, Color3.fromRGB(255, 205, 228))
-	petalStorm(ctx, pink, 190, 0.85)
+	petalStorm(ctx, pink, 190, 0.3)
 	-- A spiral column of petals rising off the fallen.
 	local column = emit(ctx.root.Position + Vector3.new(0, -2, 0), 0, 2.8, function(e)
-		petals(e, pink, 0.85)
+		petals(e, pink, 0.3)
 		e.Lifetime = NumberRange.new(1, 1.6)
 		e.Speed = NumberRange.new(6, 10)
 		e.SpreadAngle = Vector2.new(14, 14)
@@ -806,7 +807,7 @@ local function smearEmitter(style: Blades.SmearStyle): (Attachment, ParticleEmit
 		local e = BladeLook.emitter(style.kind, style.color)
 		e.Name = "LineSmearMotes"
 		if style.kind == "petals" then
-			e.LightEmission = 0.7
+			e.LightEmission = 0.15
 			e.Speed = NumberRange.new(1, 3)
 		elseif style.kind == "feathers" then
 			e.Speed = NumberRange.new(1, 2.5)
@@ -890,7 +891,7 @@ function CosmeticFX.deflect(style: Blades.DeflectStyle, point: Vector3, directio
 	local scale = if perfect then 1.6 else 1
 	if style.kind == "petals" then
 		emit(point, math.floor(36 * scale), 2.5, function(e)
-			petals(e, style.spark, 0.7)
+			petals(e, style.spark, 0.25)
 			e.Size = seq(0.32, 0.28, 0.12)
 			e.Lifetime = NumberRange.new(0.9, 1.5)
 			e.Speed = NumberRange.new(10, 22)

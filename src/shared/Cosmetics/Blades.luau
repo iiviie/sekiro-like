@@ -141,9 +141,9 @@ local LINES: { [string]: Line } = {
 		edge = rgb(255, 205, 228),
 		trail = { rgb(255, 222, 238), rgb(214, 92, 170) },
 		glow = rgb(255, 150, 205),
-		motes = { kind = "petals", color = rgb(255, 176, 214), rate = 7 },
-		smear = { kind = "petals", color = rgb(255, 186, 220), every = 2, count = 2 },
-		deflect = { kind = "petals", spark = rgb(255, 170, 215), sound = "LineChime", volume = 0.7 },
+		motes = { kind = "petals", color = rgb(246, 120, 182), rate = 7 },
+		smear = { kind = "petals", color = rgb(246, 120, 182), every = 2, count = 2 },
+		deflect = { kind = "petals", spark = rgb(244, 110, 178), sound = "LineChime", volume = 0.7 },
 		ribbon = rgb(255, 196, 225),
 	},
 	-- The thunder god's blade: storm steel, a violet-white edge, sparks that crawl along it.
