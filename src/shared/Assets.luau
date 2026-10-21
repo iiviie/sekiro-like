@@ -118,7 +118,7 @@ local Assets = {
 	},
 
 	-- Painted icons (art/icons: made with ChatGPT image generation from STYLE.md, cut out
-	-- by cutout.py, 512x512 with alpha).
+	-- by cutout.py, 512x512 with alpha). No blood or gore in uploaded art (STYLE.md).
 	Icons = {
 		Coin = "rbxassetid://138650594432073", -- gold mon coin
 		Gem = "rbxassetid://97874635512621", -- jade magatama
@@ -132,12 +132,12 @@ local Assets = {
 		Weapons = "rbxassetid://85570251895221", -- katana
 		Katana = "rbxassetid://85570251895221",
 		Odachi = "rbxassetid://135455492450465",
-		Kill = "rbxassetid://116673045229952", -- cracked oni mask
-		Deathblow = "rbxassetid://73839084534890", -- blade through an enso
+		Kill = "rbxassetid://112821001622465", -- oni mask cracked in two, light through the crack
+		Deathblow = "rbxassetid://101929479863760", -- blade through a black ink enso, white glint
 		Resurrect = "rbxassetid://90992805174516", -- crimson lotus
 		Level = "rbxassetid://122647416701873", -- tomoe medallion
 		Lock = "rbxassetid://113696248618534",
-		Streak = "rbxassetid://121273399733221", -- three ink slashes
+		Streak = "rbxassetid://132631930188004", -- three gold-tipped ink strokes
 		Skin = "rbxassetid://96083641263939", -- glowing blade
 
 		-- Economy (batch4.txt)
@@ -167,12 +167,12 @@ local Assets = {
 		-- Deathblow finishers, keyed by Catalog finisher ref. The blade-line finales
 		-- (Yozakura/Raijin/Karasu) have no icon of their own.
 		Finishers = {
-			Default = "rbxassetid://102058521467001", -- katana through an enso, crimson splash
-			InkBrush = "rbxassetid://140080934861324",
-			SakuraScatter = "rbxassetid://115851893873984",
-			CrowFeathers = "rbxassetid://111023273299574",
+			Default = "rbxassetid://131684935876906", -- katana sheathing in an ink enso, white slash, gold sparks
+			InkBrush = "rbxassetid://135575884123385",
+			SakuraScatter = "rbxassetid://139554243572322",
+			CrowFeathers = "rbxassetid://87348458097319",
 			LightningSheath = "rbxassetid://76791681606281",
-			MoonCrescent = "rbxassetid://77980167870750",
+			MoonCrescent = "rbxassetid://87182872199803",
 		} :: { [string]: string },
 		-- Blade lines, keyed by Catalog bladeLine ref (SakuraStorm and Crow are the names
 		-- part_A.md planned; kept as aliases).
@@ -186,7 +186,7 @@ local Assets = {
 		-- Locker / Store tab icons.
 		Tabs = {
 			Outfits = "rbxassetid://85085136038540", -- folded gi, obi, kasa
-			Finishers = "rbxassetid://88625871551799", -- katana through an ink burst
+			Finishers = "rbxassetid://135393234053394", -- katana with a white-gold slash trail
 			Titles = "rbxassetid://76225121385769", -- kakejiku scroll
 			Banners = "rbxassetid://109430683068315", -- sashimono flag
 			Season = "rbxassetid://130273536542140", -- sun/moon medallion
