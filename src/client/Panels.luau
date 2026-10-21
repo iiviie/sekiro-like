@@ -660,14 +660,17 @@ local function rewardsPanel()
 end
 
 local function settingsPanel()
-	local options = {
+	-- `offByDefault`: the attribute reads as off until it's switched on (the rest read as on).
+	local options: { { key: string, label: string, offByDefault: boolean? } } = {
 		{ key = "SettingCameraShake", label = "Camera shake" },
 		{ key = "SettingHitstop", label = "Hit freeze (hitstop)" },
 		{ key = "SettingControlsHint", label = "Show controls reminder" },
+		{ key = "SettingReducedEffects", label = "Reduced effects", offByDefault = true },
 	}
 	sectionTitle("Settings  ·  saved for this session", 0)
 	for i, option in options do
-		local on = player:GetAttribute(option.key) ~= false
+		local value = player:GetAttribute(option.key)
+		local on = if option.offByDefault then value == true else value ~= false
 		UI.text({
 			Position = UDim2.fromOffset(0, 10 + i * 52),
 			Size = UDim2.new(1, -150, 0, 40),
