@@ -17,6 +17,7 @@ local CombatHUD = require(script.Parent.CombatHUD)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Round = require(ReplicatedStorage.Shared.Round)
 local Types = require(ReplicatedStorage.Shared.Types)
+local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
 local state = Round.state()
@@ -39,7 +40,8 @@ local screen: ScreenGui
 local phaseLabel: TextLabel
 local subLabel: TextLabel
 local feed: Frame
-local spectateLabel: TextLabel
+local spectateBar: Frame
+local spectateName: TextLabel
 local warning: Frame
 local ring: Part
 local mistBottoms: { Attachment } = {}
@@ -49,6 +51,7 @@ local mistWidth = 0
 local ringShown = false
 local mistGrade: ColorCorrectionEffect
 local spectating: Model? = nil
+local stepSpectate: (step: number) -> ()
 
 local function now(): number
 	return workspace:GetServerTimeNow()
@@ -84,8 +87,10 @@ local function buildScreen()
 	banner.Size = UDim2.fromOffset(460, 64)
 	banner.Parent = screen
 
-	phaseLabel = label(banner, 21, PARCHMENT)
-	phaseLabel.Size = UDim2.new(1, 0, 0, 24)
+	phaseLabel = label(banner, 24, PARCHMENT)
+	phaseLabel.Size = UDim2.new(1, 0, 0, 26)
+	phaseLabel.TextStrokeColor3 = UI.Theme.Ink
+	phaseLabel.TextStrokeTransparency = 0.35
 	local divider = Instance.new("ImageLabel")
 	divider.BackgroundTransparency = 1
 	divider.Image = Assets.UI.PostureOrnament
@@ -94,17 +99,22 @@ local function buildScreen()
 	divider.Position = UDim2.new(0.5, 0, 0, 33)
 	divider.Size = UDim2.fromOffset(200, 22)
 	divider.Parent = banner
-	subLabel = label(banner, 16, PARCHMENT)
-	subLabel.TextTransparency = 0.3
-	subLabel.Position = UDim2.fromOffset(0, 44)
-	subLabel.Size = UDim2.new(1, 0, 0, 18)
+	subLabel = UI.label("body", {
+		Name = "Sub",
+		Position = UDim2.fromOffset(0, 44),
+		Size = UDim2.new(1, 0, 0, 20),
+		TextSize = 16,
+		TextColor3 = UI.Theme.Bone,
+		TextStrokeColor3 = UI.Theme.Ink,
+		TextStrokeTransparency = 0.35,
+	}, banner)
 
 	-- Kill feed, top-right.
 	feed = Instance.new("Frame")
 	feed.BackgroundTransparency = 1
 	feed.AnchorPoint = Vector2.new(1, 0)
 	feed.Position = UDim2.new(1, -24, 0, 20)
-	feed.Size = UDim2.fromOffset(360, 140)
+	feed.Size = UDim2.fromOffset(420, 4 * 40)
 	feed.Parent = screen
 	local list = Instance.new("UIListLayout")
 	list.HorizontalAlignment = Enum.HorizontalAlignment.Right
@@ -112,11 +122,50 @@ local function buildScreen()
 	list.Padding = UDim.new(0, 4)
 	list.Parent = feed
 
-	spectateLabel = label(screen, 18, PARCHMENT)
-	spectateLabel.AnchorPoint = Vector2.new(0.5, 1)
-	spectateLabel.Position = UDim2.new(0.5, 0, 1, -40)
-	spectateLabel.Size = UDim2.fromOffset(500, 22)
-	spectateLabel.Visible = false
+	-- Spectating: previous / next around a plate with who you're watching.
+	spectateBar = UI.new("Frame", {
+		Name = "Spectate",
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -28),
+		Size = UDim2.fromOffset(460, 60),
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, screen)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, spectateBar)
+	local prev = UI.iconButton({ Name = "Previous", kind = "prev", LayoutOrder = 1 }, spectateBar)
+	local plate = UI.panel({
+		Name = "Plate",
+		material = "plain",
+		sliceScale = 0.4,
+		LayoutOrder = 2,
+		Size = UDim2.fromOffset(300, 54),
+	}, spectateBar)
+	UI.label("caption", {
+		Position = UDim2.fromOffset(0, 6),
+		Size = UDim2.new(1, 0, 0, 16),
+		Text = "Watching",
+	}, plate)
+	spectateName = UI.label("heading", {
+		Name = "Target",
+		Position = UDim2.fromOffset(10, 22),
+		Size = UDim2.new(1, -20, 0, 26),
+		TextSize = 20,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Text = "",
+	}, plate)
+	local nextButton = UI.iconButton({ Name = "Next", kind = "next", LayoutOrder = 3 }, spectateBar)
+	prev.Activated:Connect(function()
+		stepSpectate(-1)
+	end)
+	nextButton.Activated:Connect(function()
+		stepSpectate(1)
+	end)
 
 	-- A red edge vignette while you stand in the mist.
 	warning = Instance.new("Frame")
@@ -138,24 +187,56 @@ local function buildScreen()
 	screen.Parent = player:WaitForChild("PlayerGui")
 end
 
-local function pushFeed(text: string, color: Color3)
-	local line = label(feed, 17, color)
-	line.Size = UDim2.new(1, 0, 0, 20)
-	line.TextXAlignment = Enum.TextXAlignment.Right
-	line.Text = text
-	line.LayoutOrder = -math.floor(os.clock() * 1000)
+local function hex(c: Color3): string
+	return string.format("#%02X%02X%02X", c.R * 255, c.G * 255, c.B * 255)
+end
+
+local function escape(text: string): string
+	return (text:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+end
+
+-- One kill-feed plate: "killer / victim" (killer in bone, victim dimmed, the slash in the
+-- accent colour), or a plain line in `accent` when there's no pair.
+local function pushFeed(text: string, accent: Color3, killer: string?, victim: string?, tail: string?)
+	local theme = UI.Theme
+	local plate = UI.panel({
+		Name = "Line",
+		material = "plain",
+		sliceScale = 0.4,
+		Size = UDim2.fromOffset(0, 36),
+		AutomaticSize = Enum.AutomaticSize.X,
+		LayoutOrder = -math.floor(os.clock() * 1000),
+	}, feed)
+	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, plate)
+	local rich = if killer and victim
+		then `<font color="{hex(theme.Bone)}">{escape(killer)}</font>  <font color="{hex(accent)}"><b>/</b></font>  <font color="{hex(
+			theme.Dim
+		)}">{escape(victim)}</font>{if tail then `<font color="{hex(theme.Ash)}">  {escape(tail)}</font>` else ""}`
+		else `<font color="{hex(accent)}">{escape(text)}</font>`
+	local line = UI.label("label", {
+		Name = "Text",
+		Size = UDim2.fromScale(0, 1),
+		AutomaticSize = Enum.AutomaticSize.X,
+		TextSize = 15,
+		RichText = true,
+		Text = rich,
+	}, plate)
 	local lines = feed:GetChildren()
 	local count = 0
 	for _, child in lines do
-		if child:IsA("TextLabel") then
+		if child.Name == "Line" then
 			count += 1
 		end
 	end
 	if count > FEED_MAX then
 		-- Drop the oldest line (the highest LayoutOrder sits at the bottom).
-		local oldest: TextLabel? = nil
+		local oldest: GuiObject? = nil
 		for _, child in lines do
-			if child:IsA("TextLabel") and (not oldest or child.LayoutOrder > (oldest :: TextLabel).LayoutOrder) then
+			if
+				child.Name == "Line"
+				and child:IsA("GuiObject")
+				and (not oldest or child.LayoutOrder > (oldest :: GuiObject).LayoutOrder)
+			then
 				oldest = child
 			end
 		end
@@ -164,10 +245,16 @@ local function pushFeed(text: string, color: Color3)
 		end
 	end
 	task.delay(FEED_LIFETIME, function()
-		if line.Parent then
-			TweenService:Create(line, TweenInfo.new(0.6), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		if plate.Parent then
+			local info = TweenInfo.new(0.6)
+			TweenService:Create(line, info, { TextTransparency = 1 }):Play()
+			TweenService:Create(plate, info, { ImageTransparency = 1, BackgroundTransparency = 1 }):Play()
+			local edge = plate:FindFirstChildWhichIsA("UIStroke")
+			if edge then
+				TweenService:Create(edge, info, { Transparency = 1 }):Play()
+			end
 			task.wait(0.65)
-			line:Destroy()
+			plate:Destroy()
 		end
 	end)
 end
@@ -325,10 +412,10 @@ local function spectate(model: Model?)
 	if humanoid then
 		local camera = workspace.CurrentCamera
 		camera.CameraSubject = humanoid
-		spectateLabel.Text = `Watching {model and model.Name or ""}  ·  click to switch`
-		spectateLabel.Visible = true
+		spectateName.Text = model and model.Name or ""
+		spectateBar.Visible = true
 	else
-		spectateLabel.Visible = false
+		spectateBar.Visible = false
 	end
 end
 
@@ -341,6 +428,20 @@ local function needsSpectate(): boolean
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	return not humanoid or humanoid.Health <= 0
+end
+
+-- The next (step 1) or previous (step -1) living fighter.
+function stepSpectate(step: number)
+	if not spectating then
+		return
+	end
+	local fighters = livingFighters()
+	if #fighters == 0 then
+		spectate(nil)
+		return
+	end
+	local index = table.find(fighters, spectating :: Model) or 0
+	spectate(fighters[(index - 1 + step) % #fighters + 1])
 end
 
 local function nextSpectateTarget()
@@ -456,16 +557,23 @@ local function onRoundEvent(kind: string, data: { [string]: any })
 			end)
 		end
 	elseif kind == "Eliminated" then
-		local text = if data.killer and data.deathblow
-			then `{data.killer} executed {data.victim}`
-			elseif data.killer then `{data.killer} slew {data.victim}`
-			else `{data.victim} was swallowed by the mist`
-		pushFeed(text, if data.deathblow then CRIMSON else PARCHMENT)
+		if data.killer then
+			pushFeed(
+				"",
+				if data.deathblow then CRIMSON else GOLD,
+				data.killer,
+				data.victim,
+				if data.deathblow then "executed" else nil
+			)
+		else
+			pushFeed(`{data.victim} was swallowed by the mist`, PARCHMENT)
+		end
 	elseif kind == "CutDown" then
-		local text = if data.killer
-			then `{data.killer} cut down {data.victim}  ·  回生`
-			else `{data.victim} fell to the mist  ·  回生`
-		pushFeed(text, PARCHMENT)
+		if data.killer then
+			pushFeed("", GOLD, data.killer, data.victim, "cut down · may rise")
+		else
+			pushFeed(`{data.victim} fell to the mist  ·  may rise`, PARCHMENT)
+		end
 	elseif kind == "Victory" then
 		local fought = wasInMatch
 		wasInMatch = false
