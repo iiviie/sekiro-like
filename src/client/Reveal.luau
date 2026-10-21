@@ -116,7 +116,11 @@ function Reveal.isOpen(): boolean
 	return current ~= nil and (current :: ScreenGui).Parent ~= nil
 end
 
-function Reveal.close()
+-- Reveals asked for while one is on screen wait their turn (a Premium unlock's "Thank you"
+-- and a refund reveal can land in the same second); each plays when the one before closes.
+local waiting: { { results: { Outcome }, opts: Options? } } = {}
+
+local function teardown()
 	if current then
 		current:Destroy()
 		current = nil
@@ -124,12 +128,30 @@ function Reveal.close()
 	restorePanels()
 end
 
+function Reveal.close()
+	teardown()
+	if #waiting > 0 then
+		-- Deferred, so whatever the closing button runs next (Done's onDone, "Open the Pass")
+		-- happens first and the next reveal plays over it.
+		task.defer(function()
+			if not Reveal.isOpen() and #waiting > 0 then
+				local nextUp = table.remove(waiting, 1) :: { results: { Outcome }, opts: Options? }
+				Reveal.play(nextUp.results, nextUp.opts)
+			end
+		end)
+	end
+end
+
 function Reveal.play(results: { Outcome }, opts: Options?)
-	Reveal.close()
-	local o: Options = opts or {}
 	if #results == 0 then
 		return
 	end
+	if Reveal.isOpen() then
+		table.insert(waiting, { results = results, opts = opts })
+		return
+	end
+	teardown()
+	local o: Options = opts or {}
 	-- Draws sort lowest rarity first (the best flips last); a purchase keeps the order it was
 	-- given in (the thing bought first).
 	local sorted = table.clone(results)
