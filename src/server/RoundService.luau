@@ -5,6 +5,10 @@
 -- everyone back to the lobby). Players who aren't queued stay in the lobby throughout.
 -- Phase timing and the ring are published as attributes on ReplicatedStorage.RoundState
 -- (see Shared/Round); eliminations and the winner go out on the RoundEvent remote.
+--
+-- RoundEvent "Podium" { entries = { { place, name, player: Player?, skin: string? } } }: the
+-- top three fighters (bots too) once a match ends, sent only when a human is among them;
+-- client/Podium shows them with their equipped title, banner and blade for a few seconds.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -42,6 +46,8 @@ local eliminated: { [Player]: boolean } = {} -- players out of the current match
 local eliminationOrder: { Player } = {} -- humans, first out first
 local matchWeapons: { [Player]: string } = {}
 local places: { [Player]: number } = {} -- humans' finishing place among every fighter
+type Fallen = { name: string, player: Player?, skin: string? }
+local fallen: { Fallen } = {} -- every fighter out of the match (bots too), first out first
 local fighterCount = 0
 local RETURN_DELAY = 5 -- eliminated players watch for a moment, then return to the lobby
 
@@ -91,6 +97,12 @@ local function onDied(victim: Combatant, killer: Combatant?, deathblow: boolean)
 			deathblow = deathblow,
 		})
 		local player = victim.player
+		local skin = victim.model:GetAttribute("Skin")
+		table.insert(fallen, {
+			name = displayName(victim.model),
+			player = player,
+			skin = if typeof(skin) == "string" then skin else nil,
+		})
 		if player then
 			places[player] = #aliveParticipants() + 1
 			eliminated[player] = true
@@ -150,6 +162,7 @@ local function intermission()
 	table.clear(eliminationOrder)
 	table.clear(matchWeapons)
 	table.clear(places)
+	table.clear(fallen)
 	BotService.setRespawn(false)
 	BotService.setCount(0)
 	for _, player in Players:GetPlayers() do
@@ -292,6 +305,29 @@ local function match()
 	return winner
 end
 
+-- The top three (survivors by vitality, then the last to fall), when a human is among them.
+local function sendPodium(survivors: { Combatant })
+	local entries = {}
+	local human = false
+	local function add(name: string, player: Player?, skin: string?)
+		if #entries < 3 then
+			table.insert(entries, { place = #entries + 1, name = name, player = player, skin = skin })
+			human = human or player ~= nil
+		end
+	end
+	for _, c in survivors do
+		local skin = c.model:GetAttribute("Skin")
+		add(displayName(c.model), c.player, if typeof(skin) == "string" then skin else nil)
+	end
+	for i = #fallen, 1, -1 do
+		local f = fallen[i]
+		add(f.name, if f.player and f.player.Parent then f.player else nil, f.skin)
+	end
+	if human then
+		roundEvent:FireAllClients("Podium", { entries = entries })
+	end
+end
+
 local function results(winner: Combatant?)
 	workspace:SetAttribute("Omen", nil)
 	state:SetAttribute("Omen", nil)
@@ -327,6 +363,7 @@ local function results(winner: Combatant?)
 		end
 	end
 	ProgressService.matchEnded(places, fighterCount, if winner then winner.player else nil)
+	sendPodium(survivors)
 	roundEvent:FireAllClients("Victory", {
 		winner = if winner then winner.model else nil,
 		name = if winner then displayName(winner.model) else nil,
