@@ -34,6 +34,11 @@ local FEED_MAX = 3
 local MIST_COLUMNS = if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then 40 else 72
 local MIST_HEIGHT = 28
 local MIST_BASE_Y = 1 -- just under the courtyard floor, so the mist rises out of the ground
+-- Soft puffs (the round glow, repeated up each column and drifting slowly upwards) instead
+-- of flat quads; neighbouring columns overlap so the wall has no seams.
+local MIST_PUFF = 9 -- studs per puff up a column
+local MIST_DRIFT = 0.06 -- puffs per second
+local MIST_OVERLAP = 1.6 -- column width over the gap between columns
 
 local RoundHUD = {}
 
@@ -123,8 +128,21 @@ local function buildScreen()
 	banner.BackgroundTransparency = 1
 	banner.AnchorPoint = Vector2.new(0.5, 0)
 	banner.Position = UDim2.new(0.5, 0, 0, 12)
-	banner.Size = UDim2.fromOffset(400, 56)
+	banner.Size = UDim2.fromOffset(400, 60)
 	banner.Parent = screen
+	-- A soft ink shadow behind the block, so the lines read over bright sky and cherry trees
+	-- (a stretched radial glow: no edges to see).
+	UI.new("ImageLabel", {
+		Name = "Backing",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, 120, 1, 44),
+		BackgroundTransparency = 1,
+		Image = Assets.UI.Glow,
+		ImageColor3 = UI.Theme.Ink,
+		ImageTransparency = 0.3,
+		ZIndex = 0,
+	}, banner)
 
 	phaseLabel = label(banner, 20, PARCHMENT)
 	phaseLabel.Size = UDim2.new(1, 0, 0, 22)
@@ -141,8 +159,8 @@ local function buildScreen()
 	subLabel = UI.label("body", {
 		Name = "Sub",
 		Position = UDim2.fromOffset(0, 37),
-		Size = UDim2.new(1, 0, 0, 18),
-		TextSize = 14,
+		Size = UDim2.new(1, 0, 0, 21),
+		TextSize = 17, -- 12 pt on a phone (hudScale 0.72)
 		TextColor3 = UI.Theme.Bone,
 		TextStrokeColor3 = UI.Theme.Ink,
 		TextStrokeTransparency = 0.35,
@@ -310,8 +328,8 @@ local MIST_NEAR = {
 		NumberSequenceKeypoint.new(1, 1),
 	}),
 	NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.45),
-		NumberSequenceKeypoint.new(0.3, 0.75),
+		NumberSequenceKeypoint.new(0, 0.6),
+		NumberSequenceKeypoint.new(0.3, 0.8),
 		NumberSequenceKeypoint.new(1, 1),
 	}),
 }
@@ -340,9 +358,15 @@ local function buildRing()
 		beam.Attachment1 = top
 		beam.FaceCamera = true
 		beam.Segments = 1
-		beam.Color = ColorSequence.new(Color3.fromRGB(210, 36, 28), Color3.fromRGB(110, 12, 12))
+		-- Ink-red, darkening upwards; barely self-lit, so it tints the arena only where it stands.
+		beam.Color = ColorSequence.new(Color3.fromRGB(170, 30, 26), Color3.fromRGB(120, 20, 20))
 		beam.Transparency = MIST_NEAR[3]
-		beam.LightEmission = 0.5
+		beam.Texture = Assets.UI.Glow
+		beam.TextureMode = Enum.TextureMode.Wrap
+		-- Puff sizes and drift vary a little per column, so the rows never line up.
+		beam.TextureLength = MIST_PUFF * (0.8 + 0.4 * ((i * 7) % 11) / 10)
+		beam.TextureSpeed = MIST_DRIFT * (0.7 + 0.6 * ((i * 5) % 7) / 6)
+		beam.LightEmission = 0.15
 		beam.LightInfluence = 0.3
 		beam.Enabled = false
 		beam.Parent = ring
@@ -382,14 +406,14 @@ local function placeRing(center: Vector3, radius: number)
 			mistTops[i].Position = base + Vector3.new(0, MIST_HEIGHT, 0)
 		end
 		local gap = Vector3.new(base.X - eye.X, 0, base.Z - eye.Z).Magnitude
-		local level = if gap < 9 then 1 elseif gap < 20 then 2 else 3
+		local level = if gap < 14 then 1 elseif gap < 22 then 2 else 3
 		if mistLevels[i] ~= level then
 			mistLevels[i] = level
 			mistBeams[i].Transparency = MIST_NEAR[level]
 		end
 	end
-	-- Each column a little wider than the gap to its neighbour, so the wall has no holes.
-	local width = 2 * math.pi * radius / MIST_COLUMNS + 0.4
+	-- Each column wider than the gap to its neighbour, so the soft edges overlap into a wall.
+	local width = 2 * math.pi * radius / MIST_COLUMNS * MIST_OVERLAP + 0.4
 	if math.abs(width - mistWidth) > 0.05 then
 		mistWidth = width
 		for _, beam in mistBeams do

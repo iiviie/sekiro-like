@@ -169,9 +169,21 @@ function DuelHUD.start()
 		BackgroundTransparency = 1,
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 16),
-		Size = UDim2.fromOffset(720, 66),
+		Size = UDim2.fromOffset(720, 68),
 		Visible = false,
 	}, screen)
+	-- A soft ink shadow behind the score, so it reads over bright sky (as RoundHUD's banner).
+	UI.new("ImageLabel", {
+		Name = "Backing",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0, 600, 1, 44),
+		BackgroundTransparency = 1,
+		Image = Assets.UI.Glow,
+		ImageColor3 = THEME.Ink,
+		ImageTransparency = 0.3,
+		ZIndex = 0,
+	}, banner)
 	titleLabel = UI.label("banner", {
 		Name = "Score",
 		Size = UDim2.new(1, 0, 0, 28),
@@ -193,8 +205,8 @@ function DuelHUD.start()
 	subLabel = UI.label("caption", {
 		Name = "Sub",
 		Position = UDim2.fromOffset(0, 46),
-		Size = UDim2.new(1, 0, 0, 20),
-		TextSize = 15,
+		Size = UDim2.new(1, 0, 0, 21),
+		TextSize = 17,
 		TextColor3 = THEME.Dim,
 		TextStrokeColor3 = THEME.Ink,
 		TextStrokeTransparency = 0.35,
