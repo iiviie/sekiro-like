@@ -26,7 +26,7 @@ local REPORT_TIME = 9
 -- level-up, a mission banner and the report card together, piled on top of each other: now
 -- the banners play one after another, the report waits for them (a few seconds at most),
 -- and anything that arrives while the report is open goes to the toast stack instead.
-local STAGE_Y = 0.31 -- under the round banner and its sub-line (RoundHUD owns the top 20%)
+local STAGE_TOP = UI.Hud.StageTop -- the stage line's top edge: under the round banner, over heads
 local REPORT_DELAY = 2.4
 local REPORT_MAX_DELAY = 6
 local stageFreeAt = 0
@@ -51,21 +51,41 @@ local function flushDeferred()
 	end
 end
 
--- Plays `show` on the centre stage once it is free and returns true, or returns false (the
--- caller falls back to a toast) while a report card is open.
-local function onStage(duration: number, show: () -> ()): boolean
-	if reportOpen then
-		return false
-	end
+-- In a fight (royale, duel, boss) the top-centre belongs to the round banner and the kill
+-- splashes: announcements go to the toast stack instead.
+local function fighting(): boolean
+	local character = player.Character
+	return character ~= nil and (character:GetAttribute("InMatch") == true or character:GetAttribute("InDuel") == true)
+end
+
+-- A match report on its way (arrived at `reportArrived`): it opens once the stage is free,
+-- at most REPORT_MAX_DELAY after it arrived.
+local reportPending = false
+local reportArrived = 0
+
+-- Plays `show` on the stage line once it is free, or `fallback` (a toast) instead while a
+-- report card is open, while you're fighting, or when it would hold the report up too long.
+-- A banner that was waiting its turn and finds the report open by then becomes the toast.
+local function stage(duration: number, show: () -> (), fallback: () -> ())
 	local now = os.clock()
 	local wait = math.max(0, stageFreeAt - now)
+	local late = reportPending and now + wait + duration > reportArrived + REPORT_MAX_DELAY
+	if reportOpen or fighting() or late then
+		fallback()
+		return
+	end
 	stageFreeAt = now + wait + duration
 	if wait > 0 then
-		task.delay(wait, show)
+		task.delay(wait, function()
+			if reportOpen then
+				fallback()
+			else
+				show()
+			end
+		end)
 	else
 		show()
 	end
-	return true
 end
 
 local function sound(id: string, volume: number, pitch: number)
@@ -81,6 +101,7 @@ end
 
 local T = UI.Theme
 local MAX_VISIBLE = 3
+local TOAST = UI.Hud.Toast
 
 local function icon(parent: Instance, image: string, size: number, position: UDim2, anchor: Vector2?): ImageLabel
 	return UI.new("ImageLabel", {
@@ -92,11 +113,37 @@ local function icon(parent: Instance, image: string, size: number, position: UDi
 	}, parent)
 end
 
+local stackList: UIListLayout
+
+-- Where the stack sits right now (see Toasts.start).
+local function placeStack()
+	local gui = player:FindFirstChild("PlayerGui")
+	local lobby = gui and gui:FindFirstChild("LobbyHUD")
+	local panels = gui and gui:FindFirstChild("LobbyPanels")
+	local window = panels and panels:FindFirstChild("Window")
+	local largeOpen = window ~= nil
+		and window:IsA("GuiObject")
+		and window.Visible
+		and lobby ~= nil
+		and lobby:IsA("ScreenGui")
+		and not lobby.Enabled
+	if largeOpen then
+		stack.AnchorPoint = Vector2.new(1, 1)
+		stack.Position = UDim2.new(1, -16, 1, -16)
+		stackList.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	else
+		stack.AnchorPoint = Vector2.new(1, 0)
+		stack.Position = UDim2.new(1, -16, 0, if fighting() then 168 else 120)
+		stackList.VerticalAlignment = Enum.VerticalAlignment.Top
+	end
+end
+
 -- One plate in the stack: a CanvasGroup (so one tween fades everything) holding a lacquer
 -- plate that slides in from the right. Only the newest MAX_VISIBLE stay; older ones fade.
 local function plate(height: number?, autoHeight: boolean?): (CanvasGroup, Frame)
+	placeStack()
 	local row = UI.new("CanvasGroup", {
-		Size = UDim2.fromOffset(380, height or 64),
+		Size = UDim2.fromOffset(TOAST.X, height or TOAST.Y),
 		AutomaticSize = if autoHeight then Enum.AutomaticSize.Y else Enum.AutomaticSize.None,
 		BackgroundTransparency = 1,
 		GroupTransparency = 1,
@@ -105,7 +152,7 @@ local function plate(height: number?, autoHeight: boolean?): (CanvasGroup, Frame
 	local inner = UI.panel({
 		Name = "Plate",
 		material = "plain",
-		Size = UDim2.new(1, 0, 0, height or 64),
+		Size = UDim2.new(1, 0, 0, height or TOAST.Y),
 		AutomaticSize = if autoHeight then Enum.AutomaticSize.Y else Enum.AutomaticSize.None,
 		Position = UDim2.fromOffset(if UI.reducedMotion() then 0 else 24, 0),
 	}, row)
@@ -124,6 +171,7 @@ local function plate(height: number?, autoHeight: boolean?): (CanvasGroup, Frame
 		old:SetAttribute("Leaving", true)
 		UI.play(old, UI.Motion.Close, { GroupTransparency = 1 })
 		task.delay(0.15, function()
+			old.Visible = false
 			old:Destroy()
 		end)
 	end
@@ -140,6 +188,7 @@ local function leave(row: CanvasGroup, after: number)
 		row:SetAttribute("Leaving", true)
 		UI.play(row, TweenInfo.new(0.3), { GroupTransparency = 1 })
 		task.wait(0.32)
+		row.Visible = false -- a CanvasGroup out of texture budget ignores its transparency
 		row:Destroy()
 	end)
 end
@@ -151,12 +200,12 @@ local function toast(xp: number, coins: number, reason: string)
 	end) then
 		return
 	end
-	local row, inner = plate(64)
+	local row, inner = plate(TOAST.Y)
 	local main = if coins > 0 then `+{UI.number(coins)}` else `+{UI.number(xp)}`
-	icon(inner, if coins > 0 then ICONS.Coin else ICONS.Level, 46, UDim2.new(0, 10, 0.5, 0), Vector2.new(0, 0.5))
+	icon(inner, if coins > 0 then ICONS.Coin else ICONS.Level, 38, UDim2.new(0, 8, 0.5, 0), Vector2.new(0, 0.5))
 	local line = UI.new("Frame", {
-		Position = UDim2.fromOffset(64, 8),
-		Size = UDim2.new(1, -76, 0, 28),
+		Position = UDim2.fromOffset(54, 5),
+		Size = UDim2.new(1, -64, 0, 26),
 		BackgroundTransparency = 1,
 	}, inner)
 	UI.new("UIListLayout", {
@@ -167,28 +216,28 @@ local function toast(xp: number, coins: number, reason: string)
 	}, line)
 	UI.text({
 		LayoutOrder = 1,
-		Size = UDim2.fromOffset(0, 28),
+		Size = UDim2.fromOffset(0, 26),
 		AutomaticSize = Enum.AutomaticSize.X,
 		FontFace = UI.Fonts.Number,
-		TextSize = 24,
+		TextSize = 21,
 		TextColor3 = if coins > 0 then T.GoldHi else T.Bone,
 		Text = main,
 	}, line)
 	UI.text({
 		LayoutOrder = 2,
-		Size = UDim2.fromOffset(0, 26),
+		Size = UDim2.fromOffset(0, 24),
 		AutomaticSize = Enum.AutomaticSize.X,
 		FontFace = UI.Fonts.Label,
-		TextSize = 18,
+		TextSize = 16,
 		Text = if coins > 0 then (if xp > 0 then `coins   +{UI.number(xp)} XP` else "coins") else "XP",
 	}, line)
 	UI.text({
-		Position = UDim2.fromOffset(64, 36),
-		Size = UDim2.new(1, -76, 0, 20),
+		Position = UDim2.fromOffset(54, 31),
+		Size = UDim2.new(1, -64, 0, 18),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		FontFace = UI.Fonts.Body,
-		TextSize = 15,
+		TextSize = 14,
 		TextColor3 = T.Dim,
 		Text = reason,
 	}, inner)
@@ -210,15 +259,15 @@ function Toasts.notice(text: string, color: Color3?)
 	local good = color == UI.Gold or color == UI.Jade or color == T.Gold
 	local row, inner = plate(0, true)
 	UI.new("UIPadding", {
-		PaddingLeft = UDim.new(0, 20),
-		PaddingRight = UDim.new(0, 14),
-		PaddingTop = UDim.new(0, 12),
-		PaddingBottom = UDim.new(0, 12),
+		PaddingLeft = UDim.new(0, 18),
+		PaddingRight = UDim.new(0, 12),
+		PaddingTop = UDim.new(0, 9),
+		PaddingBottom = UDim.new(0, 9),
 	}, inner)
 	UI.new("Frame", {
 		Name = "Edge",
-		Position = UDim2.fromOffset(-14, -6),
-		Size = UDim2.new(0, 3, 1, 12),
+		Position = UDim2.fromOffset(-12, -4),
+		Size = UDim2.new(0, 3, 1, 8),
 		BackgroundColor3 = if good then T.Gold else T.LacquerRed,
 		BorderSizePixel = 0,
 	}, inner)
@@ -228,41 +277,43 @@ function Toasts.notice(text: string, color: Color3?)
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		FontFace = UI.Fonts.Label,
-		TextSize = 17,
+		TextSize = 15,
 		TextColor3 = if color == UI.Jade then T.JadeText else T.Bone,
 		Text = text,
 	}, inner)
 	leave(row, 3.6)
 end
 
--- A centred banner on an ink band: finished missions, pass tiers, unlocks.
-local function banner(image: string, title: string, subtitle: string, color: Color3, y: number)
+-- A banner on an ink band at the top-centre, over the fighters' heads: finished missions,
+-- pass tiers, unlocks. Brief: 2.6 s.
+local function banner(image: string, title: string, subtitle: string, color: Color3)
 	local frame = UI.new("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, y),
-		Size = UDim2.fromOffset(560, 120),
+		Name = "Banner",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, STAGE_TOP),
+		Size = UDim2.fromOffset(440, 76),
 		BackgroundTransparency = 1,
 		ZIndex = 20,
 	}, screen)
 	local band = UI.new("ImageLabel", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(1.35, 1.05),
+		Size = UDim2.fromScale(1.25, 1.1),
 		BackgroundTransparency = 1,
 		Image = Assets.UI.InkBand,
 		ImageColor3 = Color3.new(0, 0, 0),
 		ImageTransparency = 1,
 		ZIndex = 20,
 	}, frame)
-	local pic = icon(frame, image, 110, UDim2.new(0, 64, 0.5, 0), Vector2.new(0.5, 0.5))
+	local pic = icon(frame, image, 60, UDim2.new(0, 36, 0.5, 0), Vector2.new(0.5, 0.5))
 	pic.ZIndex = 21
-	pic.Size = UDim2.fromOffset(40, 40)
+	pic.Size = UDim2.fromOffset(24, 24)
 	local titleLabel = UI.text({
-		Position = UDim2.fromOffset(132, 18),
-		Size = UDim2.new(1, -132, 0, 48),
+		Position = UDim2.fromOffset(76, 8),
+		Size = UDim2.new(1, -80, 0, 32),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		FontFace = UI.Fonts.Display,
-		TextSize = 40,
+		TextSize = 26,
 		TextColor3 = color,
 		TextStrokeColor3 = T.Ink,
 		TextStrokeTransparency = 0.35,
@@ -271,47 +322,49 @@ local function banner(image: string, title: string, subtitle: string, color: Col
 		ZIndex = 21,
 	}, frame)
 	local subLabel = UI.text({
-		Position = UDim2.fromOffset(134, 66),
-		Size = UDim2.new(1, -134, 0, 26),
+		Position = UDim2.fromOffset(77, 42),
+		Size = UDim2.new(1, -80, 0, 20),
 		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		FontFace = UI.Fonts.Label,
-		TextSize = 19,
+		TextSize = 15,
 		TextStrokeColor3 = T.Ink,
 		TextStrokeTransparency = 0.5,
 		TextTransparency = 1,
 		Text = subtitle,
 		ZIndex = 21,
 	}, frame)
-	UI.play(pic, UI.Motion.Pop, { Size = UDim2.fromOffset(110, 110) })
+	UI.play(pic, UI.Motion.Pop, { Size = UDim2.fromOffset(60, 60) })
 	UI.tween(band, 0.3, { ImageTransparency = 0.2 })
 	UI.tween(titleLabel, 0.3, { TextTransparency = 0 })
 	UI.tween(subLabel, 0.4, { TextTransparency = 0 })
-	task.delay(3, function()
-		UI.tween(band, 0.5, { ImageTransparency = 1 })
-		UI.tween(titleLabel, 0.5, { TextTransparency = 1, TextStrokeTransparency = 1 })
-		UI.tween(subLabel, 0.5, { TextTransparency = 1, TextStrokeTransparency = 1 })
-		UI.tween(pic, 0.5, { ImageTransparency = 1 })
-		task.wait(0.55)
+	task.delay(2.6, function()
+		UI.tween(band, 0.4, { ImageTransparency = 1 })
+		UI.tween(titleLabel, 0.4, { TextTransparency = 1, TextStrokeTransparency = 1 })
+		UI.tween(subLabel, 0.4, { TextTransparency = 1, TextStrokeTransparency = 1 })
+		UI.tween(pic, 0.4, { ImageTransparency = 1 })
+		task.wait(0.45)
 		frame:Destroy()
 	end)
 end
 
--- Level-up (guide 11.2): an ink band sweeps across the middle, the new level stamps down in
--- heavy gold, "MASTERY" in tracked caps above it and what it paid below; then it sweeps out.
+-- Level-up (guide 11.2), compact: an ink band slides in at the top-centre, "MASTERY" in
+-- tracked caps over the new level stamped in heavy gold with what it paid beside it; then it
+-- slides out.
 local function levelUp(level: number, coins: number, gems: number?)
 	local reduced = UI.reducedMotion()
 	local frame = UI.new("Frame", {
 		Name = "LevelUp",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, STAGE_Y),
-		Size = UDim2.fromOffset(600, 170),
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, STAGE_TOP),
+		Size = UDim2.fromOffset(400, 84),
 		BackgroundTransparency = 1,
 		ZIndex = 20,
 	}, screen)
 	local band = UI.new("ImageLabel", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(if reduced then 0.5 else -1, 0.5),
-		Size = UDim2.fromScale(1.5, 1.3), -- tall enough that the reward row sits on ink
+		Size = UDim2.fromScale(1.4, 1.15),
 		BackgroundTransparency = 1,
 		Image = Assets.UI.InkBand,
 		ImageColor3 = Color3.new(0, 0, 0),
@@ -321,10 +374,10 @@ local function levelUp(level: number, coins: number, gems: number?)
 	UI.play(band, UI.Motion.Slide, { Position = UDim2.fromScale(0.5, 0.5) })
 	local caps = UI.text({
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.fromScale(0.5, 0.02),
-		Size = UDim2.new(1, 0, 0, 30),
+		Position = UDim2.fromScale(0.5, 0),
+		Size = UDim2.new(1, 0, 0, 24),
 		FontFace = UI.Fonts.Banner,
-		TextSize = 26,
+		TextSize = 20,
 		TextColor3 = T.Bone,
 		TextStrokeColor3 = T.Ink,
 		TextStrokeTransparency = 0.4,
@@ -332,23 +385,11 @@ local function levelUp(level: number, coins: number, gems: number?)
 		Text = UI.tracked("Mastery"),
 		ZIndex = 21,
 	}, frame)
-	local number = UI.text({
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(300, 84),
-		FontFace = UI.Fonts.DisplayHeavy,
-		TextSize = 72,
-		TextColor3 = T.GoldHi,
-		TextStrokeColor3 = T.Ink,
-		TextStrokeTransparency = 0.2,
-		TextTransparency = 1,
-		Text = tostring(level),
-		ZIndex = 22,
-	}, frame)
-	local rewards = UI.new("Frame", {
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.fromScale(0.5, 0.98),
-		Size = UDim2.fromOffset(0, 32),
+	-- The level and its rewards on one row under the caps.
+	local row = UI.new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 24),
+		Size = UDim2.fromOffset(0, 56),
 		AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundTransparency = 1,
 		ZIndex = 21,
@@ -358,7 +399,20 @@ local function levelUp(level: number, coins: number, gems: number?)
 		VerticalAlignment = Enum.VerticalAlignment.Center,
 		Padding = UDim.new(0, 6),
 		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, rewards)
+	}, row)
+	local number = UI.text({
+		LayoutOrder = 0,
+		Size = UDim2.fromOffset(0, 56),
+		AutomaticSize = Enum.AutomaticSize.X,
+		FontFace = UI.Fonts.DisplayHeavy,
+		TextSize = 50,
+		TextColor3 = T.GoldHi,
+		TextStrokeColor3 = T.Ink,
+		TextStrokeTransparency = 0.2,
+		TextTransparency = 1,
+		Text = tostring(level) .. "  ",
+		ZIndex = 22,
+	}, row)
 	local parts: { { any } } = { { ICONS.Coin, `+{UI.number(coins)}`, T.GoldHi } }
 	if gems and gems > 0 then
 		table.insert(parts, { ICONS.Gem, `+{UI.number(gems)}`, T.JadeText })
@@ -367,25 +421,25 @@ local function levelUp(level: number, coins: number, gems: number?)
 	for i, part in parts do
 		local img = UI.new("ImageLabel", {
 			LayoutOrder = i * 2,
-			Size = UDim2.fromOffset(32, 32),
+			Size = UDim2.fromOffset(28, 28),
 			BackgroundTransparency = 1,
 			Image = part[1],
 			ImageTransparency = 1,
 			ZIndex = 21,
-		}, rewards)
+		}, row)
 		local amount = UI.text({
 			LayoutOrder = i * 2 + 1,
-			Size = UDim2.fromOffset(0, 30),
+			Size = UDim2.fromOffset(0, 28),
 			AutomaticSize = Enum.AutomaticSize.X,
 			FontFace = UI.Fonts.Number,
-			TextSize = 22,
+			TextSize = 20,
 			TextColor3 = part[3],
 			TextStrokeColor3 = T.Ink,
 			TextStrokeTransparency = 0.4,
 			TextTransparency = 1,
-			Text = part[2] .. "  ",
+			Text = part[2] .. " ",
 			ZIndex = 21,
-		}, rewards)
+		}, row)
 		table.insert(fades, img)
 		table.insert(fades, amount)
 	end
@@ -668,7 +722,17 @@ local function report(data: { [string]: any })
 		sound = "Cancel",
 		ZIndex = 12,
 	}, card)
-	done.Activated:Connect(close)
+	done.Activated:Connect(function()
+		-- "Lobby" means it: it leaves the royale queue too ("Fight again" re-queues).
+		if royale and player:GetAttribute("Queued") == true then
+			local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+			local lobby = remotes and remotes:FindFirstChild("LobbyAction")
+			if lobby and lobby:IsA("RemoteEvent") then
+				lobby:FireServer("Queue", false)
+			end
+		end
+		close()
+	end)
 	if royale then
 		local again = UI.button({
 			Name = "FightAgain",
@@ -719,6 +783,11 @@ local function report(data: { [string]: any })
 	end)
 end
 
+-- Whether the match report card is open (the lobby's offer card waits for it to close).
+function Toasts.reportOpen(): boolean
+	return reportOpen
+end
+
 function Toasts.start()
 	screen = UI.new("ScreenGui", {
 		Name = "Toasts",
@@ -726,20 +795,29 @@ function Toasts.start()
 		IgnoreGuiInset = true,
 		DisplayOrder = 12,
 	}, player:WaitForChild("PlayerGui"))
-	-- Top right, under the lobby's currency pills (the toasts explain where coins came from).
+	-- Phones get the HUD at their own scale (UI.hudScale).
+	local fit = UI.new("UIScale", { Name = "Fit" }, screen)
+	local function refit()
+		fit.Scale = UI.hudScale()
+	end
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	player:GetAttributeChangedSignal("UIViewport"):Connect(refit)
+	refit()
+	-- Top right, under the lobby's currency pills (the toasts explain where coins came from),
+	-- or under the kill feed in a fight; at the bottom right while a large panel's title bar
+	-- and close button sit up there. Clear of the middle of the screen either way.
 	stack = UI.new("Frame", {
 		Name = "Stack",
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -20, 0, 136),
-		Size = UDim2.fromOffset(380, 300),
+		Size = UDim2.fromOffset(TOAST.X, 3 * (TOAST.Y + 6)),
 		BackgroundTransparency = 1,
 	}, screen)
-	UI.new("UIListLayout", {
+	stackList = UI.new("UIListLayout", {
 		VerticalAlignment = Enum.VerticalAlignment.Top,
 		HorizontalAlignment = Enum.HorizontalAlignment.Right,
 		Padding = UDim.new(0, 6),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, stack)
+	placeStack()
 
 	local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Progress") :: RemoteEvent
 	remote.OnClientEvent:Connect(function(kind: string, data: { [string]: any })
@@ -747,39 +825,43 @@ function Toasts.start()
 			toast(data.xp or 0, data.coins or 0, data.reason or "")
 		elseif kind == "LevelUp" then
 			local level, coins = data.level or 1, data.coins or 0
-			local shown = onStage(2.75, function()
+			stage(2.75, function()
 				levelUp(level, coins, data.gems)
 				UI.sound("LevelUp")
 				sound(Assets.Sounds.PerfectDeflect, 0.45, 1.2)
-			end)
-			if not shown then
+			end, function()
 				Toasts.notice(`Mastery {level}  ·  +{UI.number(coins)} coins`, UI.Gold)
 				UI.sound("LevelUp")
-			end
+			end)
 		elseif kind == "Trial" then
 			local text = `{data.text}  ·  +{data.coins} coins`
-			if
-				not onStage(3.6, function()
-					banner(ICONS.Trials, "Trial complete", text, UI.Jade, STAGE_Y)
-					sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
-				end)
-			then
+			stage(3, function()
+				banner(ICONS.Trials, "Trial complete", text, UI.Jade)
+				sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
+			end, function()
 				Toasts.notice(`Trial complete  ·  {text}`, UI.Jade)
-			end
+			end)
 		elseif kind == "Report" then
-			-- After the banners already queued, but never long after the match ended.
-			local delay = math.clamp(stageFreeAt - os.clock(), REPORT_DELAY, REPORT_MAX_DELAY)
-			task.delay(delay, report, data)
+			-- After the banners already queued (and any that arrive while it waits), but never
+			-- long after the match ended.
+			reportPending = true
+			reportArrived = os.clock()
+			task.spawn(function()
+				task.wait(REPORT_DELAY)
+				while os.clock() < stageFreeAt and os.clock() - reportArrived < REPORT_MAX_DELAY do
+					task.wait(0.1)
+				end
+				reportPending = false
+				report(data)
+			end)
 		elseif kind == "Unlock" then
 			local name = data.name or ""
-			if
-				not onStage(3.6, function()
-					banner(ICONS.Trophy, "Unlocked", name, UI.Gold, STAGE_Y)
-					sound(Assets.Sounds.PerfectDeflect, 0.5, 1.1)
-				end)
-			then
+			stage(3, function()
+				banner(ICONS.Trophy, "Unlocked", name, UI.Gold)
+				sound(Assets.Sounds.PerfectDeflect, 0.5, 1.1)
+			end, function()
 				Toasts.notice(`Unlocked  ·  {name}`, UI.Gold)
-			end
+			end)
 		elseif kind == "Notice" then
 			Toasts.notice(data.text or "", UI.Parchment)
 		elseif kind == "Mission" then
@@ -787,34 +869,30 @@ function Toasts.start()
 			local pass = if (data.pass or 0) > 0 then `+{data.pass} Pass XP  ·  ` else ""
 			local title = if data.weekly then "Bounty complete" else "Mission complete"
 			local text = `{data.text}  ·  {pass}+{data.coins} coins`
-			if
-				not onStage(3.6, function()
-					banner(ICONS.Trials, title, text, UI.Jade, STAGE_Y)
-					sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
-				end)
-			then
+			stage(3, function()
+				banner(ICONS.Trials, title, text, UI.Jade)
+				sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
+			end, function()
 				Toasts.notice(`{title}  ·  {text}`, UI.Jade)
-			end
+			end)
 		elseif kind == "PassTier" then
 			local crest = (ICONS :: any).SeasonPass or Assets.RankCrests.Gold
 			local ready = if (data.claimable or 0) > 0 then `  ·  {data.claimable} to claim` else ""
 			local tier = data.tier
-			if
-				not onStage(3.6, function()
-					banner(crest, `Tier {tier}`, `Path of the Blade{ready}`, UI.Gold, STAGE_Y)
-					sound(Assets.Sounds.PerfectDeflect, 0.6, 0.85)
-				end)
-			then
+			stage(3, function()
+				banner(crest, `Tier {tier}`, `Path of the Blade{ready}`, UI.Gold)
+				sound(Assets.Sounds.PerfectDeflect, 0.6, 0.85)
+			end, function()
 				Toasts.notice(`Path of the Blade  ·  Tier {tier}{ready}`, UI.Gold)
-			end
+			end)
 		elseif kind == "PassPremium" then
 			local crest = (ICONS :: any).SeasonPass or Assets.RankCrests.Gold
 			local text = `{data.claimable or 0} rewards ready to claim`
-			if not onStage(3.6, function()
-				banner(crest, "Premium unlocked", text, UI.Gold, STAGE_Y)
-			end) then
+			stage(3, function()
+				banner(crest, "Premium unlocked", text, UI.Gold)
+			end, function()
 				Toasts.notice(`Premium unlocked  ·  {text}`, UI.Gold)
-			end
+			end)
 			UI.sound("Robux")
 		elseif kind == "PassClaim" then
 			Toasts.notice(`Claimed  ·  {data.text or ""}`, UI.Gold)
