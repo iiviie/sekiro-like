@@ -93,6 +93,12 @@ local N = {
 	AntiFarm = {
 		-- Rewards for the Nth duel today against the same human (1-based); beyond the list: 0.
 		RepeatOpponent = { 1, 1, 0.5, 0.25 },
+		-- Bot lobbies: once you can deflect, a royale of bots is won almost every time, so it
+		-- pays less than a fight with people (04_pacing_sim.md, the "skilled" row). Cutting
+		-- down a bot in a royale pays KillCoins of the kill and deathblow coins; a win where
+		-- every other fighter was a bot pays WinFactor of its coins and XP after the first
+		-- FullWinsPerDay such wins of a UTC day.
+		BotRoyale = { KillCoins = 0.5, FullWinsPerDay = 3, WinFactor = 0.5 },
 	},
 
 	-- Line upgrades: Whetstones per level are in Catalog; gems may pay for at most this share
