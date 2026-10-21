@@ -1,15 +1,16 @@
 --!strict
--- Builds the Ashina-style castle courtyard: terrain (packed-earth courtyard with a raked-sand
--- duelling circle, autumn grass, rock cliffs on the horizon), the castle walls around the
+-- Builds the Ashina-style castle courtyard: terrain (raked-sand courtyard with a pale sand
+-- duelling circle, grassy hills, rock outcrops on the horizon), the castle walls around the
 -- fighting area, banners, braziers and drifting leaves.
 -- Hand-placed props (torii, lanterns, trees, pagoda) live in Workspace.Props in the
--- place file. Lighting and post-processing are set in default.project.json.
+-- place file and are restyled at runtime by EnvironmentProfile; lighting is LightingProfile.
 --
 -- Performance: terrain is one cheap voxel mesh; walls are a few large anchored parts
 -- per segment, with shadows only on the big shapes and no queries or touches on trim.
 
 local Config = require(game:GetService("ReplicatedStorage").Shared.Config)
 local Palette = require(game:GetService("ReplicatedStorage").Shared.Palette)
+local EnvironmentProfile = require(script.Parent.EnvironmentProfile)
 local Torii = require(script.Parent.Torii)
 
 local ARENA = Config.Arena
@@ -44,12 +45,7 @@ local function terrain()
 	local t = workspace.Terrain
 	t:Clear()
 
-	t:SetMaterialColor(Enum.Material.Grass, Palette.AutumnGrass)
-	t:SetMaterialColor(Enum.Material.LeafyGrass, Palette.Moss)
-	t:SetMaterialColor(Enum.Material.Ground, Palette.Earth)
-	t:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(88, 86, 84))
-	t:SetMaterialColor(Enum.Material.Slate, Palette.Flagstone)
-	t:SetMaterialColor(Enum.Material.Sand, Color3.fromRGB(184, 168, 142))
+	EnvironmentProfile.applyTerrain() -- material colours and water for the daylight look
 
 	local random = Random.new(7) -- fixed seed: the same map on every server
 
@@ -59,14 +55,18 @@ local function terrain()
 	t:FillBlock(CFrame.new(0, -8, 0), Vector3.new(1024, 16, 1024), Enum.Material.Grass)
 	local function paint(from: Vector3, to: Vector3, material: Enum.Material)
 		local region = Region3.new(from:Min(to), from:Max(to)):ExpandToGrid(4)
-		t:ReplaceMaterial(region, 4, Enum.Material.Grass, material)
-		t:ReplaceMaterial(region, 4, Enum.Material.Ground, material)
+		for _, source in { Enum.Material.Grass, Enum.Material.Ground, Enum.Material.Sand } do
+			if source ~= material then
+				t:ReplaceMaterial(region, 4, source, material)
+			end
+		end
 	end
 	local top, bottom = 0, -4
-	-- Packed-earth courtyard inside the walls.
+	-- Raked-sand courtyard inside the walls: a quiet, fine-grained floor in a mid value so
+	-- the fighters read clearly against it (colour in EnvironmentProfile).
 	local inner = ARENA.WallHalfExtent * 2 - 4
-	paint(Vector3.new(-inner / 2, bottom, -inner / 2), Vector3.new(inner / 2, top, inner / 2), Enum.Material.Ground)
-	-- Tufts of moss and dry grass breaking up the bare earth; terrain blending softens
+	paint(Vector3.new(-inner / 2, bottom, -inner / 2), Vector3.new(inner / 2, top, inner / 2), Enum.Material.Sand)
+	-- Tufts of moss and grass breaking up the bare sand; terrain blending softens
 	-- their square voxel edges.
 	for _ = 1, 16 do
 		local center = Vector3.new(random:NextNumber(-60, 60), 0, random:NextNumber(-60, 60))
@@ -89,8 +89,13 @@ local function terrain()
 			)
 		end
 	end
-	-- Flagstone path from the torii, through the gate, to the duelling circle.
-	paint(Vector3.new(-4, bottom, DUEL_RADIUS + 1), Vector3.new(4, top, ARENA.WallHalfExtent + 50), Enum.Material.Slate)
+	-- Cobbled path from the torii, through the gate, to the duelling circle. (Not slate: slate
+	-- terrain reads pale lilac in midday light whatever colour it is given.)
+	paint(
+		Vector3.new(-4, bottom, DUEL_RADIUS + 1),
+		Vector3.new(4, top, ARENA.WallHalfExtent + 50),
+		Enum.Material.Cobblestone
+	)
 
 	-- Gentle grassy hills rolling away from the walls; distant mountains are meshes in
 	-- Workspace.Props, which are far cheaper than tall voxel peaks.
@@ -213,7 +218,6 @@ local function shrine(parent: Instance)
 	local center = CFrame.new(0, 0, front - depth / 2)
 	local deckTop = 3
 	local pillarHeight = 9
-	local VERMILION = Palette.Vermilion
 	local DECK = Palette.Deck
 
 	part({
@@ -241,18 +245,10 @@ local function shrine(parent: Instance)
 		}, model)
 	end
 
-	-- Pillars along the front and back of the deck.
+	-- Round lacquered pillars along the front and back of the deck, black-banded at the foot.
 	for _, z in { front - 0.8, front - depth + 0.8 } do
 		for x = -width / 2 + 1, width / 2 - 1, (width - 2) / 5 do
-			part({
-				Name = "Pillar",
-				Size = Vector3.new(1.1, pillarHeight, 1.1),
-				CFrame = CFrame.new(x, deckTop + pillarHeight / 2, z),
-				-- Lacquered, so not the grained timber override in MaterialService.
-				Material = Enum.Material.SmoothPlastic,
-				Reflectance = 0.04,
-				Color = VERMILION,
-			}, model)
+			EnvironmentProfile.post("Pillar", CFrame.new(x, deckTop, z), pillarHeight, 1.1, model, { band = 0.7 })
 		end
 	end
 
@@ -363,8 +359,8 @@ local function shrine(parent: Instance)
 	model.Parent = parent
 end
 
--- The duelling circle: pale sand inside a flagstone kerb, so dark-clad fighters read
--- clearly against the ground where most fights happen. Parts, not terrain, because terrain
+-- The duelling circle: pale sand inside a flagstone kerb, a step lighter than the courtyard,
+-- so dark-clad fighters read clearly against the ground where most fights happen. Parts, not terrain, because terrain
 -- voxels are 4 studs and can't hold a crisp edge. About thirty parts.
 local function duelCircle(parent: Instance)
 	part({
@@ -373,7 +369,7 @@ local function duelCircle(parent: Instance)
 		Size = Vector3.new(0.3, DUEL_RADIUS * 2, DUEL_RADIUS * 2),
 		CFrame = CFrame.new(0, FLOOR_Y, 0) * CFrame.Angles(0, 0, math.rad(90)),
 		Material = Enum.Material.Sand,
-		Color = Color3.fromRGB(186, 170, 144),
+		Color = Palette.Sand,
 		CastShadow = false,
 	}, parent)
 	local stones = 36
@@ -538,6 +534,7 @@ local function fallingLeaves(parent: Instance)
 end
 
 -- A few weathered boulders in the courtyard: cover to break line-of-sight in the ring.
+-- Sandstone rather than rock: terrain rock reads lilac and mossy on the pale sand at midday.
 local function boulders()
 	local t = workspace.Terrain
 	local spots = {
@@ -547,8 +544,8 @@ local function boulders()
 		{ Vector3.new(-26, -2.4, -38), 4.8 },
 	}
 	for _, spot in spots do
-		t:FillBall(spot[1], spot[2], Enum.Material.Rock)
-		t:FillBall(spot[1] + Vector3.new(spot[2] * 0.7, -0.8, 0.4), spot[2] * 0.55, Enum.Material.Rock)
+		t:FillBall(spot[1], spot[2], Enum.Material.Sandstone)
+		t:FillBall(spot[1] + Vector3.new(spot[2] * 0.7, -0.8, 0.4), spot[2] * 0.55, Enum.Material.Sandstone)
 	end
 end
 
@@ -595,6 +592,7 @@ end
 function MapBuilder.build()
 	terrain()
 	boulders()
+	EnvironmentProfile.dressProps()
 	task.wait() -- terrain filled this frame isn't hit by raycasts until the next
 	seatProps()
 

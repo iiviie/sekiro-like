@@ -22,6 +22,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local EnvironmentProfile = require(script.Parent.EnvironmentProfile)
 local Palette = require(ReplicatedStorage.Shared.Palette)
 local Torii = require(script.Parent.Torii)
 
@@ -31,6 +32,14 @@ local MAIN_RADIUS = LOBBY.Radius
 local LOWER = O.Y + 2 -- walk heights of the three tiers
 local WING = O.Y + 6
 local UPPER = O.Y + 10
+
+-- Terrain materials for the walkable floors. The fighting floors (duel and boss terraces,
+-- the plazas where lobby PvP happens) are fine raked sand in a quiet mid value so the
+-- fighters separate from the ground (colours in EnvironmentProfile); busier cobble is kept
+-- for the side paths between them. (Smooth stone floors pick up a strong sky sheen at midday
+-- and read pale lilac, whatever their colour.)
+local FLOOR = Enum.Material.Sand
+local PATH = Enum.Material.Cobblestone
 
 local LobbyBuilder = {}
 
@@ -396,11 +405,10 @@ local function landforms()
 	plateau(at(48, 0, -2), 20, O.Y + 4, 10)
 
 	-- Plazas and paths.
-	paint(at(0, 0, 24), 24, O.Y, Enum.Material.Cobblestone)
-	paint(at(0, 0, 24), 8, O.Y, Enum.Material.Slate)
-	path(at(0, 0, 14), at(0, 0, 4), 12, O.Y, Enum.Material.Cobblestone)
-	path(at(-16, 0, 16), at(-30, 0, 2), 6, O.Y, Enum.Material.Cobblestone)
-	path(at(16, 0, 16), at(30, 0, 2), 6, O.Y, Enum.Material.Cobblestone)
+	paint(at(0, 0, 24), 24, O.Y, FLOOR)
+	path(at(0, 0, 14), at(0, 0, 4), 12, O.Y, FLOOR)
+	path(at(-16, 0, 16), at(-30, 0, 2), 6, O.Y, PATH)
+	path(at(16, 0, 16), at(30, 0, 2), 6, O.Y, PATH)
 	path(
 		at(-14, 0, 32),
 		Vector3.new(O.X + BRIDGE_LEFT.from.X, 0, O.Z + BRIDGE_LEFT.from.Y),
@@ -409,11 +417,11 @@ local function landforms()
 		Enum.Material.Ground
 	)
 	path(at(6, 0, 44), Vector3.new(O.X + BRIDGE_BACK.from.X, 0, O.Z + BRIDGE_BACK.from.Y), 5, O.Y, Enum.Material.Ground)
-	paint(at(0, 0, -44), 18, O.Y + 8, Enum.Material.Cobblestone)
-	path(at(0, 0, -10), at(0, 0, -28), 10, O.Y + 8, Enum.Material.Cobblestone)
-	path(at(0, 0, -58), at(0, 0, -70), 10, O.Y + 8, Enum.Material.Cobblestone)
+	paint(at(0, 0, -44), 18, O.Y + 8, FLOOR)
+	path(at(0, 0, -10), at(0, 0, -28), 10, O.Y + 8, FLOOR)
+	path(at(0, 0, -58), at(0, 0, -70), 10, O.Y + 8, FLOOR)
 	paint(at(-48, 0, -2), 12, O.Y + 4, Enum.Material.Sand)
-	paint(at(48, 0, -2), 14, O.Y + 4, Enum.Material.Cobblestone)
+	paint(at(48, 0, -2), 14, O.Y + 4, FLOOR)
 
 	-- Ponds whose streams run to the rim, where the waterfalls take over. Water only
 	-- replaces the top voxel layer and stops short of the cliff, so the rock face stays solid.
@@ -441,7 +449,7 @@ local function landforms()
 
 	-- Flush landings where stairs and bridges meet the ground, so no rim boulder or rounded
 	-- plateau edge stands in the way (see landing()).
-	landing(CFrame.new(at(0, 0, -13.5)), Vector2.new(22, 13), UPPER, Enum.Material.Cobblestone)
+	landing(CFrame.new(at(0, 0, -13.5)), Vector2.new(22, 13), UPPER, FLOOR)
 	for _, side in { -1, 1 } do
 		landing(CFrame.new(at(side * 33.5, 0, -2)), Vector2.new(10, 12), WING, Enum.Material.Grass)
 	end
@@ -708,7 +716,7 @@ local function queuePad(parent: Instance, center: Vector3)
 		decor({
 			Name = "PadInner",
 			Material = Enum.Material.Sand,
-			Color = Color3.fromRGB(186, 170, 144),
+			Color = Palette.Sand,
 		}),
 		parent
 	)
@@ -771,7 +779,7 @@ local function duelPad(parent: Instance, name: string, center: Vector3)
 		radius - 0.6,
 		0.16,
 		center + Vector3.new(0, 0.54, 0),
-		decor({ Name = name .. "Inner", Material = Enum.Material.Sand, Color = Color3.fromRGB(186, 170, 144) }),
+		decor({ Name = name .. "Inner", Material = Enum.Material.Sand, Color = Palette.Sand }),
 		parent
 	)
 end
@@ -782,34 +790,40 @@ local function duelTerrace(parent: Instance, center: Vector3, seed: number, size
 	local top = center.Y - 2
 	plateau(center, radius + 4, top, 10)
 	underside(center, radius + 4, top - 10, 28, seed)
-	paint(center, radius + 1, top, Enum.Material.Cobblestone)
-	paint(center, 6, top, Enum.Material.Slate)
+	paint(center, radius + 1, top, FLOOR)
 
-	-- A sacred-rope fence: lacquered posts, a rope between them, and an invisible wall so
-	-- nobody is knocked off mid-duel.
+	-- A sacred-rope fence: round lacquered posts with black caps, a straw rope between them
+	-- hung with paper streamers, and an invisible wall so nobody is knocked off mid-duel.
 	local posts = math.max(16, math.floor(radius * 0.95))
 	for i = 1, posts do
 		local a0 = (i / posts) * math.pi * 2
 		local a1 = ((i + 1) / posts) * math.pi * 2
 		local p0 = center + Vector3.new(math.cos(a0) * radius, 0, math.sin(a0) * radius)
 		local p1 = center + Vector3.new(math.cos(a1) * radius, 0, math.sin(a1) * radius)
-		part({
-			Name = "FencePost",
-			-- Rooted 3 studs down: the terrace's rounded rim sags under the fence line.
-			Size = Vector3.new(0.8, 7.4, 0.8),
-			CFrame = CFrame.new(p0 + Vector3.new(0, 0.7, 0)),
-			Material = Enum.Material.SmoothPlastic,
-			Color = Palette.Vermilion,
-		}, parent)
+		-- Rooted 3 studs down: the terrace's rounded rim sags under the fence line.
+		EnvironmentProfile.post("FencePost", CFrame.new(p0 - Vector3.new(0, 3, 0)), 7.4, 0.8, parent)
 		local mid = (p0 + p1) / 2
 		local length = (p1 - p0).Magnitude
+		local rope = CFrame.lookAt(mid + Vector3.new(0, 3.6, 0), p1 + Vector3.new(0, 3.6, 0))
 		part(
 			decor({
 				Name = "FenceRope",
-				Size = Vector3.new(0.35, 0.35, length),
-				CFrame = CFrame.lookAt(mid + Vector3.new(0, 3.6, 0), p1 + Vector3.new(0, 3.6, 0)),
+				Shape = Enum.PartType.Cylinder, -- a cylinder's axis is its X: turn it along the rope
+				Size = Vector3.new(length, 0.4, 0.4),
+				CFrame = rope * CFrame.Angles(0, math.rad(90), 0),
 				Material = Enum.Material.Fabric,
-				Color = Palette.Parchment,
+				Color = Palette.Straw,
+			}),
+			parent
+		)
+		-- A zigzag paper streamer (shide) hanging from the middle of each span.
+		part(
+			decor({
+				Name = "FenceShide",
+				Size = Vector3.new(0.05, 1.1, 0.4),
+				CFrame = rope * CFrame.new(0, -0.75, 0) * CFrame.Angles(0, math.rad(90), 0),
+				Material = Enum.Material.SmoothPlastic,
+				Color = Color3.fromRGB(244, 240, 230),
 			}),
 			parent
 		)
@@ -900,7 +914,7 @@ local function bossGrounds(lobby: Instance, islet: Vector3)
 		radius - 0.6,
 		0.16,
 		pad + Vector3.new(0, 0.54, 0),
-		decor({ Name = "PadInner", Material = Enum.Material.Sand, Color = Color3.fromRGB(186, 170, 144) }),
+		decor({ Name = "PadInner", Material = Enum.Material.Sand, Color = Palette.Sand }),
 		holder
 	)
 	local arena = at(BOSS_ARENA.X, DUEL_WALK, BOSS_ARENA.Y)
@@ -981,14 +995,10 @@ local function pavilion(parent: Instance, center: Vector3, facing: Vector3)
 	}, parent)
 	for _, x in { -w / 2 + 0.6, w / 2 - 0.6 } do
 		for _, z in { -d / 2 + 0.6, d / 2 - 0.6 } do
-			part({
-				Name = "DojoPost",
-				Size = Vector3.new(0.9, h, 0.9),
-				CFrame = look * CFrame.new(x, h / 2, z),
-				Material = Enum.Material.SmoothPlastic,
-				Color = Palette.Vermilion,
-				CastShadow = false,
-			}, parent)
+			EnvironmentProfile.post("DojoPost", look * CFrame.new(x, 0, z), h, 0.9, parent, {
+				castShadow = false,
+				band = 1,
+			})
 		end
 	end
 	for _, side in { -1, 1 } do
@@ -1167,7 +1177,7 @@ function LobbyBuilder.build(): Folder
 		decor({
 			Name = "TrainerSand",
 			Material = Enum.Material.Sand,
-			Color = Color3.fromRGB(186, 170, 144),
+			Color = Palette.Sand,
 		}),
 		lobby
 	)
