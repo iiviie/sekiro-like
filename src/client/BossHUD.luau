@@ -65,11 +65,47 @@ local function now(): number
 	return workspace:GetServerTimeNow()
 end
 
+-- Builder Sans has no star glyph: say it in words (the picker cards draw gold tomoe).
 local function stars(count: number): string
 	if count <= 0 then
 		return "Tutorial"
 	end
-	return string.rep("★", count) .. string.rep("☆", 3 - count)
+	return `Difficulty {count}/3`
+end
+
+-- A row of gold tomoe for a boss's difficulty, over a card's rarity caption.
+local function tomoeRow(card: GuiObject, count: number)
+	local caption = card:FindFirstChild("Rarity")
+	if not caption or not caption:IsA("TextLabel") then
+		return
+	end
+	caption.Text = ""
+	local row = UI.new("Frame", {
+		Name = "Tomoe",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, caption.Position.Y.Scale, caption.Position.Y.Offset),
+		Size = UDim2.fromOffset(3 * 22, 18),
+		BackgroundTransparency = 1,
+		ZIndex = 5,
+	}, card)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		Padding = UDim.new(0, 4),
+	}, row)
+	for i = 1, 3 do
+		local img = UI.new("ImageLabel", {
+			Size = UDim2.fromOffset(18, 18),
+			BackgroundTransparency = 1,
+			ImageTransparency = if i <= count then 0 else 0.7,
+			ZIndex = 5,
+		}, row)
+		if not UI.art(img, "Tomoe") then
+			img.BackgroundTransparency = if i <= count then 0 else 0.7
+			img.BackgroundColor3 = THEME.GoldHi
+			UI.new("UICorner", { CornerRadius = UDim.new(1, 0) }, img)
+		end
+	end
 end
 
 local function track(parent: Instance, position: UDim2, height: number, color: Color3, centered: boolean): Frame
@@ -168,7 +204,7 @@ local function build()
 		Text = "Challenge",
 		FontFace = UI.Fonts.Display,
 		TextSize = 24,
-		Size = UDim2.fromOffset(220, UI.Touch),
+		Size = UDim2.fromOffset(400, UI.Touch),
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -16),
 	}, picker)
@@ -502,7 +538,7 @@ local function openPicker(bosses: { { [string]: any } }, busy: { [string]: any }
 				elseif count >= 3 then "epic"
 				elseif count == 2 then "rare"
 				else "uncommon"
-			UI.card({
+			local card = UI.card({
 				Name = `Boss_{id}`,
 				LayoutOrder = i,
 				name = entry.name,
@@ -524,6 +560,9 @@ local function openPicker(bosses: { { [string]: any } }, busy: { [string]: any }
 					end
 				end,
 			}, list)
+			if count > 0 and not entry.tutorial then
+				tomoeRow(card, count)
+			end
 		end
 		local entry = selectedId and pickEntries[selectedId]
 		challengeButton.Text = if entry then `Challenge  ·  {entry.name}` else "Challenge"

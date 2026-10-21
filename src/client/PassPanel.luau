@@ -307,7 +307,7 @@ local function header(body: Frame, width: number)
 			FontFace = UI.Fonts.Number,
 			TextSize = 18,
 			TextColor3 = T.GoldHi,
-			Text = "PREMIUM  ✓",
+			Text = "PREMIUM OWNED",
 		}, chip)
 	else
 		local upgrade = UI.button({
