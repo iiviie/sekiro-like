@@ -26,6 +26,7 @@ export type Handle = {
 	props: { [string]: BasePart },
 	alive: boolean,
 	accent: Color3,
+	sheathed: boolean?, -- the sword is hidden while a hilt sits in the saya (SHEATHED)
 }
 
 local function reduced(): boolean
@@ -1035,6 +1036,72 @@ local BEATS: { [string]: { Beat } } = {
 }
 
 ---------------------------------------------------------------------------------------
+-- A sheathed blade. The real sword stays welded to the hand, and with real avatars' arm
+-- lengths it showed beside the saya instead of in it, so while an intro has the blade
+-- sheathed the sword is hidden (locally) and a hilt sits in the saya's mouth instead.
+
+-- Clip seconds at which the blade leaves the saya.
+local SHEATHED: { [string]: number } = { Iai = 0.72 }
+
+local function swordParts(h: Handle): { BasePart }
+	local out = {}
+	for _, name in { "Sword", "Sword2" } do
+		local s = h.model:FindFirstChild(name)
+		if s and s:IsA("BasePart") then
+			table.insert(out, s)
+			for _, d in s:GetDescendants() do
+				if d:IsA("BasePart") then
+					table.insert(out, d)
+				end
+			end
+		end
+	end
+	return out
+end
+
+local function sheathe(h: Handle, sheathed: boolean)
+	for _, p in swordParts(h) do
+		p.LocalTransparencyModifier = if sheathed then 1 else 0
+	end
+	local hilt = h.props.Hilt
+	if hilt and hilt.Parent then
+		for _, d in (hilt.Parent :: Instance):GetChildren() do
+			if d:IsA("BasePart") then
+				d.Transparency = if sheathed then 0 else 1
+			end
+		end
+	end
+end
+
+local function buildHilt(h: Handle)
+	local saya = h.props.Saya
+	if not saya then
+		return
+	end
+	local s = scaleOf(h)
+	local holder = Instance.new("Model")
+	holder.Name = "IntroHilt"
+	local function bit(name: string, size: Vector3, color: Color3, at: CFrame, shape: Enum.PartType?): BasePart
+		local b = part({ Name = name, Size = size * s, Color = color, Shape = shape }, holder)
+		b.CFrame = saya.CFrame * at
+		local w = Instance.new("Weld")
+		w.Part0, w.Part1, w.C0 = saya, b, at
+		w.Parent = b
+		return b
+	end
+	-- the tsuba (a guard disc) at the mouth, then the wrapped grip and a gold pommel
+	bit(
+		"Tsuba",
+		Vector3.new(0.06, 0.5, 0.5),
+		LACQUER,
+		CFrame.new(0, 0, 1.7 * s) * CFrame.Angles(0, math.pi / 2, 0),
+		Enum.PartType.Cylinder
+	)
+	local grip = bit("Tsuka", Vector3.new(0.17, 0.2, 1.05), Color3.fromRGB(34, 30, 36), CFrame.new(0, 0, 2.26 * s))
+	bit("Kashira", Vector3.new(0.19, 0.22, 0.08), GOLD, CFrame.new(0, 0, 2.8 * s))
+	holder.Parent = h.folder
+	h.props.Hilt = grip
+end
 
 -- Dresses `model` with `clip`'s props and schedules its beats `offset` seconds from now (the
 -- clip's time 0). Returns a handle for stop().
@@ -1053,6 +1120,18 @@ function IntroFX.start(model: Model, clip: string, accent: Color3, offset: numbe
 			end
 		end
 	end
+	local drawAt = SHEATHED[clip]
+	if drawAt and h.props.Saya then
+		buildHilt(h)
+		sheathe(h, true)
+		h.sheathed = true
+		task.delay(math.max(offset + drawAt, 0), function()
+			if h.alive and h.sheathed then
+				h.sheathed = false
+				sheathe(h, false)
+			end
+		end)
+	end
 	for _, beat in BEATS[clip] or {} do
 		task.delay(math.max(offset + beat.at, 0), function()
 			if h.alive and model.Parent then
@@ -1069,6 +1148,10 @@ end
 -- Ends the intro's effects: props and anything still burning are cleared (after `delay`).
 function IntroFX.stop(h: Handle, delay: number?)
 	h.alive = false
+	if h.sheathed then
+		h.sheathed = false
+		sheathe(h, false) -- cut short before the draw: the blade comes back at once
+	end
 	local folder = h.folder
 	if delay and delay > 0 then
 		task.delay(delay, function()
