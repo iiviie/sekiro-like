@@ -1,6 +1,7 @@
 --!strict
 -- Teaches the fight inside the fight. For a player's first matches, every swing coming at
--- you flashes a big "F  DEFLECT" prompt in time with the glint; a deflect is followed by
+-- you flashes a small "[F] DEFLECT" prompt in time with the glint, in the lower third above
+-- the bars (never over the fighters); a deflect is followed by
 -- "CLICK  RIPOSTE" when it recoiled the attacker; a broken opponent by "CLICK  DEATHBLOW"; perilous attacks name their
 -- answer. Nobody reads a rules screen before their first fight, so the rules come to them,
 -- at the moment they matter. It retires itself once the player has the hang of it.
@@ -44,6 +45,7 @@ local lastHitAt = 0
 
 local screen: ScreenGui
 local prompt: Frame
+local promptScale: UIScale
 local keyLabel: TextLabel
 local wordLabel: TextLabel
 local token = 0
@@ -70,9 +72,15 @@ local function show(key: string, word: string, color: Color3, hold: number)
 	keyLabel.Text = key
 	wordLabel.Text = word
 	wordLabel.TextColor3 = color
+	-- Above the boss's bars in a boss fight, else just above your own posture bar.
+	local gui = player:FindFirstChild("PlayerGui")
+	local hud = gui and gui:FindFirstChild("BossHUD")
+	local bossBar = hud and hud:FindFirstChild("BossBar")
+	local overBoss = bossBar ~= nil and bossBar:IsA("GuiObject") and bossBar.Visible
+	prompt.Position = UDim2.new(0.5, 0, 1, if overBoss then -264 else -192)
 	prompt.Visible = true
-	prompt.Size = UDim2.fromOffset(150, 150)
-	UI.tween(prompt, 0.12, { Size = UDim2.fromOffset(190, 190) })
+	promptScale.Scale = 1.2
+	UI.tween(promptScale, 0.12, { Scale = 1 })
 	task.delay(hold, function()
 		if token == mine then
 			prompt.Visible = false
@@ -199,52 +207,64 @@ function Coach.start()
 		IgnoreGuiInset = true,
 		DisplayOrder = 8,
 	}, player:WaitForChild("PlayerGui"))
+	-- A key cap and the word beside it, centred in the lower third: above your posture bar
+	-- and a boss's bars, below the fighters, so the exchange itself stays in view.
 	prompt = UI.new("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.64),
-		Size = UDim2.fromOffset(190, 190),
+		Name = "Prompt",
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -192),
+		Size = UDim2.fromOffset(0, 40),
+		AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundTransparency = 1,
 		Visible = false,
 	}, screen)
+	promptScale = UI.new("UIScale", {}, prompt)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 10),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, prompt)
 	local cap = UI.new("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.fromScale(0.5, 0),
-		Size = UDim2.fromScale(0.62, 0.5),
+		Name = "Key",
+		LayoutOrder = 1,
+		Size = UDim2.fromOffset(0, 36),
+		AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundColor3 = UI.Ink,
-		BackgroundTransparency = 0.1,
+		BackgroundTransparency = 0.15,
 		BorderSizePixel = 0,
 	}, prompt)
-	UI.corner(cap, UDim.new(0.18, 0))
-	UI.stroke(cap, UI.Parchment, 3, 0)
-	UI.new("UIAspectRatioConstraint", { AspectRatio = 1.25 }, cap)
+	UI.corner(cap, UDim.new(0, 7))
+	UI.stroke(cap, UI.Parchment, 2, 0)
+	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, cap)
 	keyLabel = UI.text({
-		Size = UDim2.fromScale(1, 1),
+		Size = UDim2.fromScale(0, 1),
+		AutomaticSize = Enum.AutomaticSize.X,
 		Font = UI.Bold,
-		TextScaled = true,
+		TextSize = 22,
 		Text = "F",
 	}, cap)
-	UI.new("UIPadding", {
-		PaddingTop = UDim.new(0.12, 0),
-		PaddingBottom = UDim.new(0.12, 0),
-		PaddingLeft = UDim.new(0.1, 0),
-		PaddingRight = UDim.new(0.1, 0),
-	}, cap)
 	wordLabel = UI.text({
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.fromScale(0.5, 0.56),
-		Size = UDim2.fromScale(2.4, 0.26),
+		Name = "Word",
+		LayoutOrder = 2,
+		Size = UDim2.fromOffset(0, 36),
+		AutomaticSize = Enum.AutomaticSize.X,
 		Font = UI.Display,
-		TextScaled = true,
+		TextSize = 30,
 		TextStrokeTransparency = 0.2,
 		Text = "DEFLECT",
 	}, prompt)
 
+	-- The death tip sits just above where the prompt flashes, clear of the screen's centre.
 	tipLabel = UI.text({
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.fromScale(0.5, 0.7),
-		Size = UDim2.fromOffset(900, 34),
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -312),
+		Size = UDim2.fromOffset(760, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextWrapped = true,
 		Font = UI.Display,
-		TextSize = 28,
+		TextSize = 26,
 		TextStrokeTransparency = 0.3,
 		TextColor3 = UI.Gold,
 		Visible = false,
