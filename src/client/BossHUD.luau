@@ -681,7 +681,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 				3.5
 			)
 		else
-			CombatHUD.splash(Assets.UI.KanjiEnd, `{data.name} stands`, UI.Parchment, 3)
+			CombatHUD.splash(Assets.UI.KanjiEnd, `{Bosses.the(data.name or "", true)} stands`, UI.Parchment, 3)
 		end
 		local token = fightToken
 		task.delay(4, function()

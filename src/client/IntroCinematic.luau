@@ -799,7 +799,9 @@ local function listen(remote: RemoteEvent)
 			-- someone else pressed skip: say so on the skip line
 			local s = session :: Session
 			if s.skipLabel and not s.voted then
-				s.skipLabel.Text = "Your opponent wants to skip  ·  SPACE"
+				s.skipLabel.Text = if UI.touchSized()
+					then "Your opponent wants to skip  ·  tap Skip"
+					else "Your opponent wants to skip  ·  SPACE"
 			end
 		end
 	end)

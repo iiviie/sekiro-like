@@ -573,7 +573,7 @@ local function updateGround(ground: Ground)
 		task.spawn(runDuel, ground, { lone })
 		return
 	end
-	setStatus(ground, `{lone.DisplayName} awaits a challenger  ·  bot in {math.ceil(botAt - t)}`)
+	setStatus(ground, `{lone.DisplayName} awaits a challenger  ·  a bot joins in {math.ceil(botAt - t)}s`)
 end
 
 function DuelService.start()
