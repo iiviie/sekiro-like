@@ -72,7 +72,7 @@ local function outcome(kind: string, data: { [string]: any })
 	elseif kind == "Guard" then
 		local grey = UI.Theme.Steel
 		if LocalCombat.pressDelayed and ms <= window + 200 then
-			show(`GUARDED  ·  re-pressed too soon after lowering guard: the window opened late`, grey)
+			show(`GUARDED  ·  pressed again too soon: the window opened late`, grey)
 		elseif ms > 600 then
 			show(`GUARDED  ·  tap block within {window} ms of impact to deflect`, grey)
 		else
@@ -82,7 +82,7 @@ local function outcome(kind: string, data: { [string]: any })
 		if ms < 0 and ms > -400 then
 			show(`TOO LATE  ·  {-ms} ms after impact`, UI.Theme.CrimsonText)
 		elseif LocalCombat.pressDelayed and ms >= 0 and ms <= window + 200 then
-			show(`HIT  ·  re-pressed too soon after lowering guard: the window opened late`, UI.Theme.CrimsonText)
+			show(`HIT  ·  pressed again too soon: the window opened late`, UI.Theme.CrimsonText)
 		elseif ms >= 0 and ms < 1500 then
 			show(`TOO EARLY  ·  {ms} ms  (and guard wasn't held)`, UI.Theme.CrimsonText)
 		else

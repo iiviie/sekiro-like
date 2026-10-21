@@ -528,7 +528,9 @@ local function refreshBanner()
 	elseif phase == "Match" and not fighting and not needsSpectate() then
 		local alive = state:GetAttribute("Alive") or 0
 		phaseLabel.Text = spaced("Royale under way")
-		subLabel.Text = `{alive} remain  ·  you'll join the next one`
+		subLabel.Text = if player:GetAttribute("Queued")
+			then `{alive} remain  ·  you're in the next one`
+			else `{alive} remain  ·  press PLAY for the next one`
 	elseif phase == "Match" then
 		local alive = state:GetAttribute("Alive") or 0
 		phaseLabel.Text = spaced(`{alive} Remain`)
@@ -540,7 +542,7 @@ local function refreshBanner()
 		end
 	else
 		phaseLabel.Text = spaced("Decided")
-		subLabel.Text = `Next round in {clock(remaining)}`
+		subLabel.Text = `Next royale in {clock(remaining)}`
 	end
 end
 
@@ -579,7 +581,7 @@ local finalShown = false
 
 local function onRoundEvent(kind: string, data: { [string]: any })
 	if (kind == "Eliminated" or kind == "CutDown") and data.killer == player.DisplayName and not data.deathblow then
-		-- Your own kill: a 斬 splash that counts the streak (deathblows get 忍殺 instead).
+		-- Your own kill: a 斬 splash that counts the streak (deathblows get CombatHUD's Deathblow splash instead).
 		killStreak += 1
 		local words = { "Cut down", "Two cut down", "Three cut down", "Four cut down", "Five cut down" }
 		CombatHUD.splash(Assets.UI.KanjiSlay, words[math.min(killStreak, #words)], CRIMSON, 0.9)
@@ -631,7 +633,7 @@ local function onRoundEvent(kind: string, data: { [string]: any })
 			return
 		end
 		if data.winner and data.winner == player.Character then
-			CombatHUD.splash(Assets.UI.KanjiVictory, "Victory Achieved", GOLD, 3.5)
+			CombatHUD.splash(Assets.UI.KanjiVictory, "Victory", GOLD, 3.5)
 		elseif data.name then
 			CombatHUD.splash(Assets.UI.KanjiEnd, `{data.name} prevails`, PARCHMENT, 3)
 		end

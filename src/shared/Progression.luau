@@ -95,7 +95,7 @@ Progression.Skins = {
 	{
 		id = "Obsidian",
 		name = "Obsidian Oni",
-		blurb = "Black glass with a burning edge. Earned in blood.",
+		blurb = "Black glass with a burning edge. Earned in battle.",
 		tint = Vector3.new(0.28, 0.25, 0.3),
 		-- An ember-gold burning edge over violet-black glass, kept off the perilous red.
 		outline = Color3.fromRGB(255, 150, 60),

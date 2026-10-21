@@ -6,7 +6,7 @@
 --                 with a bloom underneath, and fades away while empty
 --   enemies       posture and vitality over the head of whoever you're fighting, and the
 --                 red deathblow dot when they break
---   splashes      brush kanji on an ink band (死, 忍殺, round banners)
+--   splashes      brush kanji on an ink band (死, 斬, round banners)
 --   screen        a light cinematic vignette and a red edge flash for perilous attacks
 --
 -- Nothing runs per frame: bars update from attribute and health signals and animate with
@@ -736,10 +736,10 @@ local function onCombatEvent(kind: string, data: { [string]: any })
 	local defender: Model? = data.defender
 	if kind == "Deathblow" and attacker == character and defender then
 		if data.lethal == false then
-			CombatHUD.splash(UI.KanjiExecution, "Deathblow  ·  they still stand", DEATH_RED, 1.1)
+			CombatHUD.splash(UI.KanjiSlay, "Deathblow  ·  they still stand", DEATH_RED, 1.1)
 			showEnemy(defender)
 		else
-			CombatHUD.splash(UI.KanjiExecution, "Shinobi Execution", DEATH_RED, 1.1)
+			CombatHUD.splash(UI.KanjiSlay, "Deathblow", DEATH_RED, 1.1)
 			removeEnemy(defender)
 		end
 	elseif kind == "CutDown" and data.model == character then

@@ -11,6 +11,7 @@ local SoundService = game:GetService("SoundService")
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Round = require(ReplicatedStorage.Shared.Round)
+local Text = require(ReplicatedStorage.Shared.Text)
 local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
@@ -503,6 +504,9 @@ local function report(data: { [string]: any })
 	scrim.Name = "ReportScrim"
 	local won = data.won == true
 	local duel = data.duel -- { score, opponent, rating? } for a duel
+	local rated = if duel and typeof(duel.rating) == "number"
+		then `  ·  rating {if duel.rating >= 0 then "+" else ""}{duel.rating}`
+		else ""
 	local card = UI.panel({
 		Name = "Report",
 		material = "washi",
@@ -540,12 +544,10 @@ local function report(data: { [string]: any })
 		TextColor3 = T.Ink,
 		TextTransparency = 0.2,
 		Text = if duel
-			then `{duel.score} against {duel.opponent}{if typeof(duel.rating) == "number"
-				then `  ·  rating {if duel.rating >= 0 then "+" else ""}{duel.rating}`
-				else ""}`
+			then `{duel.score}{if data.boss then "  ·  " else " against "}{duel.opponent}{rated}`
 			elseif won then "You were the last one standing."
 			elseif data.placement <= 3 then "So close. One more."
-			else "Every death is a lesson. Next fight starts soon.",
+			else "Every death is a lesson.",
 		ZIndex = 11,
 	}, card)
 	UI.divider(card, {
@@ -887,7 +889,7 @@ function Toasts.start()
 			end)
 		elseif kind == "PassPremium" then
 			local crest = (ICONS :: any).SeasonPass or Assets.RankCrests.Gold
-			local text = `{data.claimable or 0} rewards ready to claim`
+			local text = `{Text.count(data.claimable or 0, "reward")} ready to claim`
 			stage(3, function()
 				banner(crest, "Premium unlocked", text, UI.Gold)
 			end, function()

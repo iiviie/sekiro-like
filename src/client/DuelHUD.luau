@@ -149,7 +149,7 @@ local function step()
 	elseif state == "Waiting" then
 		local left = if typeof(botAt) == "number" then math.max(0, math.ceil(botAt - now())) else nil
 		waitLabel.Text = if left
-			then `Waiting for a challenger on the other pad  ·  a bot steps in in {left}`
+			then `Waiting for a challenger  ·  a bot joins in {left}s`
 			else "Waiting for a challenger on the other pad"
 	end
 end

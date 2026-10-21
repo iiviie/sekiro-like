@@ -370,7 +370,7 @@ function ProgressService.bossEnded(player: Player, result: BossResult): boolean
 			coins = report.coins,
 			won = result.won,
 			duel = {
-				score = if result.won then string.format("Cleared  %d:%02d", minutes, seconds) else "Fallen",
+				score = if result.won then string.format("Cleared in %d:%02d", minutes, seconds) else "Not this time",
 				opponent = result.name,
 			},
 		})
