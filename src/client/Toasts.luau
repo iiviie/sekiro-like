@@ -22,6 +22,8 @@ local Toasts = {}
 local screen: ScreenGui
 local stack: Frame
 local REPORT_TIME = 9
+-- The report card's left edge beside the lobby rail (LobbyHUD: 16 edge + 64 cell + plate).
+local REPORT_LEFT = UI.Hud.Edge + UI.Hud.NavCell.X + 12 + 24
 
 -- The centre of the screen holds one announcement at a time. A match end used to fire the
 -- level-up, a mission banner and the report card together, piled on top of each other: now
@@ -98,6 +100,16 @@ local T = UI.Theme
 local MAX_VISIBLE = 3
 local TOAST = UI.Hud.Toast
 
+-- A fight on a touch screen: the touch cluster owns the right side, so the stack goes to the
+-- empty top-left (under the Roblox buttons; the Mastery plate is hidden in fights), two deep.
+local function touchFight(): boolean
+	return fighting() and UI.touchSized()
+end
+
+local function maxVisible(): number
+	return if touchFight() then 2 else MAX_VISIBLE
+end
+
 local function icon(parent: Instance, image: string, size: number, position: UDim2, anchor: Vector2?): ImageLabel
 	return UI.new("ImageLabel", {
 		AnchorPoint = anchor or Vector2.zero,
@@ -122,10 +134,17 @@ local function placeStack()
 		and lobby ~= nil
 		and lobby:IsA("ScreenGui")
 		and not lobby.Enabled
+	stackList.HorizontalAlignment = Enum.HorizontalAlignment.Right
 	if largeOpen then
 		stack.AnchorPoint = Vector2.new(1, 1)
 		stack.Position = UDim2.new(1, -16, 1, -16)
 		stackList.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	elseif touchFight() then
+		-- 64 pt down on the real screen, whatever the HUD's scale.
+		stack.AnchorPoint = Vector2.zero
+		stack.Position = UDim2.fromOffset(16, math.ceil(64 / UI.hudScale()))
+		stackList.VerticalAlignment = Enum.VerticalAlignment.Top
+		stackList.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	else
 		stack.AnchorPoint = Vector2.new(1, 0)
 		stack.Position = UDim2.new(1, -16, 0, if fighting() then 168 else 120)
@@ -134,9 +153,10 @@ local function placeStack()
 end
 
 -- One plate in the stack: a CanvasGroup (so one tween fades everything) holding a lacquer
--- plate that slides in from the right. Only the newest MAX_VISIBLE stay; older ones fade.
+-- plate that slides in from its edge. Only the newest maxVisible() stay; older ones fade.
 local function plate(height: number?, autoHeight: boolean?): (CanvasGroup, Frame)
 	placeStack()
+	local slide = if UI.reducedMotion() then 0 elseif touchFight() then -24 else 24
 	local row = UI.new("CanvasGroup", {
 		Size = UDim2.fromOffset(TOAST.X, height or TOAST.Y),
 		AutomaticSize = if autoHeight then Enum.AutomaticSize.Y else Enum.AutomaticSize.None,
@@ -149,7 +169,7 @@ local function plate(height: number?, autoHeight: boolean?): (CanvasGroup, Frame
 		material = "plain",
 		Size = UDim2.new(1, 0, 0, height or TOAST.Y),
 		AutomaticSize = if autoHeight then Enum.AutomaticSize.Y else Enum.AutomaticSize.None,
-		Position = UDim2.fromOffset(if UI.reducedMotion() then 0 else 24, 0),
+		Position = UDim2.fromOffset(slide, 0),
 	}, row)
 	-- Older plates beyond the limit fade out early.
 	local rows = {}
@@ -161,7 +181,7 @@ local function plate(height: number?, autoHeight: boolean?): (CanvasGroup, Frame
 	table.sort(rows, function(a, b)
 		return a.LayoutOrder < b.LayoutOrder
 	end)
-	for i = MAX_VISIBLE + 1, #rows do
+	for i = maxVisible() + 1, #rows do
 		local old = rows[i] :: CanvasGroup
 		old:SetAttribute("Leaving", true)
 		UI.play(old, UI.Motion.Close, { GroupTransparency = 1 })
@@ -502,11 +522,15 @@ local function report(data: { [string]: any })
 	local rated = if duel and typeof(duel.rating) == "number"
 		then `  ·  rating {if duel.rating >= 0 then "+" else ""}{duel.rating}`
 		else ""
+	-- Desktop and tablet: left of centre, just right of the lobby's nav rail, so your own
+	-- character stays in view while the next royale counts down. A phone keeps it centred
+	-- (there's no room beside the rail).
+	local beside = UI.viewport().Y >= 500
 	local card = UI.panel({
 		Name = "Report",
 		material = "washi",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.47),
+		AnchorPoint = if beside then Vector2.new(0, 0.5) else Vector2.new(0.5, 0.5),
+		Position = if beside then UDim2.new(0, REPORT_LEFT, 0.47, 0) else UDim2.fromScale(0.5, 0.47),
 		Size = UDim2.fromOffset(480, 410), -- room for the hint line above the buttons
 		ZIndex = 10,
 		Active = true,
