@@ -1014,20 +1014,6 @@ function IntroCinematic.start()
 		end
 		bots.ChildAdded:Connect(consider)
 	end)
-	-- The Locker's Preview button on an intro: play it here, then reopen the Locker on intros.
-	local lockerModule = script.Parent:FindFirstChild("LockerPanel")
-	if lockerModule and lockerModule:IsA("ModuleScript") then
-		local ok, locker = pcall(require, lockerModule)
-		if ok and typeof(locker) == "table" and typeof(locker.setPreview) == "function" then
-			locker.setPreview("intro", function(item: Catalog.Item)
-				IntroCinematic.preview(item.ref, function()
-					if typeof(locker.show) == "function" then
-						locker.show("intro")
-					end
-				end)
-			end)
-		end
-	end
 	-- Studio test hook: PlayerScripts.IntroTest:Invoke("preview", "Iai") / ("vs", model, ref)
 	if RunService:IsStudio() then
 		local hook = Instance.new("BindableFunction")
