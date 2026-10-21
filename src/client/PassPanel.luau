@@ -303,7 +303,7 @@ local function header(body: Frame, width: number)
 	local gemButton = not premium and premiumGems ~= nil
 
 	-- Pass XP toward the next tier (value outside the bar), the countdown under it.
-	local right = if gemButton then 372 else 232 -- the premium button(s)
+	local right = if gemButton then 336 else 232 -- the premium button(s)
 	local barX = HEADER_H + 146
 	local barW = math.max(150, width - barX - right - 16)
 	local maxed = tier >= Season.Tiers
@@ -369,16 +369,18 @@ local function header(body: Frame, width: number)
 			Text = "PREMIUM OWNED",
 		}, chip)
 	else
-		local gemW = if gemButton then 132 else 0
+		local gemW = if gemButton then 124 else 0
 		local upgrade = UI.button({
 			Name = "BuyPremium",
 			variant = if running then "premium" else "disabled",
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.new(1, -(if gemButton then gemW + 8 else 0), 0, 0),
-			Size = UDim2.fromOffset(220, HEADER_H),
+			Size = UDim2.fromOffset(if gemButton then 192 else 220, HEADER_H),
 			FontFace = UI.Fonts.Number,
 			TextSize = 17,
-			Text = `Unlock Premium  ·  {price(Season.Products.Premium)}`,
+			Text = if gemButton
+				then `Premium  ·  {price(Season.Products.Premium)}`
+				else `Unlock Premium  ·  {price(Season.Products.Premium)}`,
 		}, body)
 		upgrade.Activated:Connect(function()
 			action("Buy", Season.Products.Premium)

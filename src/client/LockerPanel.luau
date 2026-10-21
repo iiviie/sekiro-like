@@ -122,7 +122,7 @@ local function status(item: Catalog.Item, owns: boolean, equipped: boolean, prog
 		if not Catalog.isReady(item) then
 			return "Coming soon"
 		end
-		return if StoreUI.rotatedOut(item) then "Returns to the shop" else StoreUI.priceText(item)
+		return if StoreUI.rotatedOut(item) then "Out of shop" else StoreUI.priceText(item)
 	end
 	return "Locked"
 end
@@ -488,7 +488,7 @@ local function preview(parent: Instance, item: Catalog.Item, state: { [string]: 
 			-- The quiet way to the gem packs, under the text (not a gold button).
 			local link = UI.tertiary({
 				Name = "GemsLink",
-				Position = UDim2.fromOffset(10, y + 104),
+				Position = UDim2.fromOffset(14, y + 104),
 				Size = UDim2.fromOffset(150, 26),
 				TextXAlignment = Enum.TextXAlignment.Left,
 				Text = "Gems in the Store",

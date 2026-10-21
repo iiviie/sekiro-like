@@ -1444,7 +1444,10 @@ local function purchaseReveal(data: { [string]: any })
 		end
 		note = if #names > 0 then `{table.concat(names, " and ")}: on you now.` else "Everything is in your Locker."
 		if refundGems > 0 then
-			note = `You had {table.concat(refundNames, " and ")}: +{UI.number(refundGems)} gems. {note}`
+			local had = if #refundNames > 1
+				then `{table.concat(refundNames, ", ", 1, #refundNames - 1)} and {refundNames[#refundNames]}`
+				else refundNames[1]
+			note = `You had {had}: +{UI.number(refundGems)} gems back. {note}`
 		end
 		-- A blade that didn't go on (you wear another): one tap to wear it.
 		for _, granted in off do
