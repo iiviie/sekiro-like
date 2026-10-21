@@ -29,8 +29,9 @@ local CRIMSON = Color3.fromRGB(200, 40, 34)
 local FEED_LIFETIME = 6
 local FEED_MAX = 3
 -- The mist wall is a ring of vertical, camera-facing beams: double-sided, unlike a
--- cylinder part, whose inside faces are culled so it vanishes once you're within it.
-local MIST_COLUMNS = 72
+-- cylinder part, whose inside faces are culled so it vanishes once you're within it. Phones
+-- and tablets get fewer, wider columns: each is a tall translucent quad (overdraw).
+local MIST_COLUMNS = if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then 40 else 72
 local MIST_HEIGHT = 28
 local MIST_BASE_Y = 1 -- just under the courtyard floor, so the mist rises out of the ground
 
@@ -315,6 +316,8 @@ local MIST_NEAR = {
 	}),
 }
 local mistLevels: { number } = {}
+local placedCenter: Vector3? = nil -- where the columns were last put (they only move as it closes)
+local placedRadius = -1
 
 local function buildRing()
 	ring = Instance.new("Part")
@@ -368,11 +371,16 @@ local function placeRing(center: Vector3, radius: number)
 	-- columns fade out as the camera gets close; the screen tint says you're in the mist.
 	local camera = workspace.CurrentCamera
 	local eye = if camera then camera.CFrame.Position else Vector3.zero
+	local moved = center ~= placedCenter or radius ~= placedRadius
+	placedCenter, placedRadius = center, radius
 	for i = 1, MIST_COLUMNS do
-		local angle = (i / MIST_COLUMNS) * math.pi * 2
-		local base = Vector3.new(center.X + math.cos(angle) * radius, MIST_BASE_Y, center.Z + math.sin(angle) * radius)
-		mistBottoms[i].Position = base
-		mistTops[i].Position = base + Vector3.new(0, MIST_HEIGHT, 0)
+		local base = mistBottoms[i].Position
+		if moved then
+			local angle = (i / MIST_COLUMNS) * math.pi * 2
+			base = Vector3.new(center.X + math.cos(angle) * radius, MIST_BASE_Y, center.Z + math.sin(angle) * radius)
+			mistBottoms[i].Position = base
+			mistTops[i].Position = base + Vector3.new(0, MIST_HEIGHT, 0)
+		end
 		local gap = Vector3.new(base.X - eye.X, 0, base.Z - eye.Z).Magnitude
 		local level = if gap < 9 then 1 elseif gap < 20 then 2 else 3
 		if mistLevels[i] ~= level then
