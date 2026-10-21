@@ -101,6 +101,9 @@ local EXTRAS: { [string]: Extra } = {
 	S1Cedar = { motes = { kind = "embers", color = rgb(250, 210, 160), rate = 2 } },
 	S1Vermilion = { motes = { kind = "glints", color = rgb(255, 210, 160), rate = 3 } },
 	S1Hanafubuki = { motes = { kind = "petals", color = rgb(255, 196, 220), rate = 9 } },
+	-- Boss no-hit gold variants without a boss skin of their own (the rest borrow their base's).
+	GoldShadow = { motes = { kind = "embers", color = rgb(255, 206, 96), rate = 5 }, ribbon = rgb(255, 206, 96) },
+	GoldPuppet = { motes = { kind = "glints", color = rgb(255, 222, 140), rate = 4 }, ribbon = rgb(255, 206, 96) },
 }
 
 -- Premium blade lines: the L1 look, plus what L2-L4 add.
@@ -212,7 +215,8 @@ function Blades.look(id: string?, level: number?, mastery: number?): Look
 		}
 	end
 	local skin = Progression.skin(ref)
-	local extra: Extra = EXTRAS[skin.id] or {}
+	-- A boss no-hit gold variant keeps its boss skin's motes and wears a gold ribbon.
+	local extra: Extra = EXTRAS[skin.id] or (skin.goldOf and EXTRAS[skin.goldOf]) or {}
 	local trail = skin.trail
 	return {
 		id = `skin.{skin.id}`,
@@ -231,7 +235,7 @@ function Blades.look(id: string?, level: number?, mastery: number?): Look
 		finisher = nil,
 		level = 1,
 		evolution = evolution,
-		ribbon = extra.ribbon or trail[2],
+		ribbon = if skin.goldOf then rgb(255, 206, 96) else extra.ribbon or trail[2],
 	}
 end
 

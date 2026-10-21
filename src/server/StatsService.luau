@@ -54,6 +54,7 @@ export type Data = {
 	WeaponUses: { [string]: number },
 	WeaponXP: { [string]: number }, -- per-weapon Mastery (evolutions, part C)
 	BossClears: { [string]: number }, -- boss id -> times cleared
+	BossNoHit: { [string]: number }, -- boss id -> clears without taking a hit (gold skins)
 	-- Wallet.
 	Coins: number,
 	Gems: number,
@@ -126,6 +127,7 @@ local NUMBER_MAPS = {
 	"WeaponUses",
 	"WeaponXP",
 	"BossClears",
+	"BossNoHit",
 	"Inventory",
 	"LineLevels",
 	"TrialProgress",
@@ -237,6 +239,7 @@ local function fresh(): Data
 		WeaponUses = {},
 		WeaponXP = {},
 		BossClears = {},
+		BossNoHit = {},
 		Coins = EconomyConfig.StartCoins,
 		Gems = EconomyConfig.StartGems,
 		Whetstones = 0,
@@ -444,6 +447,7 @@ local function publish(player: Player)
 	player:SetAttribute("XPToNext", Progression.xpToNext(d.Level))
 	player:SetAttribute("TrialProgress", HttpService:JSONEncode(d.TrialProgress))
 	player:SetAttribute("BossClears", HttpService:JSONEncode(d.BossClears))
+	player:SetAttribute("BossNoHit", HttpService:JSONEncode(d.BossNoHit))
 	player:SetAttribute("DataLoaded", loaded[player] == true)
 	player:SetAttribute("DataFailed", failed[player] ~= nil)
 	player:SetAttribute("DataError", failed[player])
@@ -669,6 +673,16 @@ end
 local function applyRating(d: Data, delta: number)
 	d.Rating = math.max(0, math.floor(d.Rating + delta + 0.5))
 	d.PeakRating = math.max(d.PeakRating, d.Rating)
+end
+
+-- A boss cleared without taking a hit (server/BossService): counts toward that boss's gold
+-- skin (Catalog rule { boss, noHit }), which Economy grants on the publish.
+function StatsService.recordNoHit(player: Player, bossId: string)
+	local d = data[player]
+	if d then
+		d.BossNoHit[bossId] = (d.BossNoHit[bossId] or 0) + 1
+		publish(player)
+	end
 end
 
 -- The ranked soft reset between seasons (server/ShopService calls it once per player per

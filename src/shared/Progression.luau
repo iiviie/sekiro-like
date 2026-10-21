@@ -40,6 +40,7 @@ export type Skin = {
 	trail: { Color3 }, -- start, end
 	glow: Color3?,
 	petals: Color3?,
+	goldOf: string?, -- a boss no-hit gold variant: the skin it gilds (motes come from it)
 }
 
 Progression.Skins = {
@@ -281,6 +282,69 @@ Progression.Skins = {
 		petals = Color3.fromRGB(255, 190, 215),
 	},
 } :: { Skin }
+
+-- Boss no-hit gold variants (Shared/Catalog `skin.Gold<...>`, earned by clearing that boss
+-- without taking a hit): the boss skin with a gold edge, outline and glow. Crimson Shadow
+-- and the Puppet Maiden have no boss skin, so theirs are gilded from a look of their own.
+do
+	local GOLD = Color3.fromRGB(255, 206, 96)
+	local WHITE_GOLD = Color3.fromRGB(255, 240, 186)
+	local function find(id: string): Skin
+		for _, skin in Progression.Skins do
+			if skin.id == id then
+				return skin
+			end
+		end
+		error(`[Progression] no skin {id} to gild`)
+	end
+	local own: { [string]: Skin } = {
+		Shadow = {
+			id = "Shadow",
+			name = "Shadow",
+			blurb = "",
+			tint = Vector3.new(0.3, 0.27, 0.32),
+			outline = GOLD,
+			fill = Color3.fromRGB(26, 20, 28),
+			trail = { WHITE_GOLD, Color3.fromRGB(60, 40, 70) },
+		},
+		Puppet = {
+			id = "Puppet",
+			name = "Puppet",
+			blurb = "",
+			tint = Vector3.new(1.4, 1.3, 1.25),
+			outline = GOLD,
+			fill = Color3.fromRGB(245, 236, 228),
+			trail = { WHITE_GOLD, Color3.fromRGB(150, 120, 140) },
+		},
+	}
+	for _, g in
+		{
+			{ "Washi", "Gilded Talisman", "The shikigami's charms, untouched and edged in gold." },
+			{ "Nameless", "Gilded Nameless", "The nameless warrior never landed a cut." },
+			{ "CatClaw", "Gilded Claw", "The cat general's claws met only air." },
+			{ "Mistveil", "Gilded Mist", "Through the fog without a scratch." },
+			{ "DemonHorn", "Gilded Horn", "The little demon's horn, gilded for a clean fight." },
+			{ "FoxFire", "Gilded Fox Fire", "Gold flame for outlasting the night fox untouched." },
+			{ "Niten", "Gilded Twin", "Both heavens, and not one blow taken." },
+			{ "Shadow", "Gilded Shadow", "Black glass with a gold edge: the crimson shadow never touched you." },
+			{ "Puppet", "Gilded Strings", "Porcelain and gold: the puppet maiden's strings never caught you." },
+		}
+	do
+		local base = own[g[1]] or find(g[1])
+		table.insert(Progression.Skins, {
+			id = `Gold{g[1]}`,
+			name = g[2],
+			blurb = g[3],
+			tint = base.tint:Lerp(Vector3.new(1.5, 1.2, 0.55), 0.3),
+			outline = GOLD,
+			fill = base.fill,
+			trail = { WHITE_GOLD, base.trail[2] },
+			glow = GOLD,
+			petals = base.petals,
+			goldOf = if own[g[1]] then nil else g[1],
+		})
+	end
+end
 
 local byId: { [string]: Skin } = {}
 for _, skin in Progression.Skins do

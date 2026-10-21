@@ -21,7 +21,7 @@
 --                              busy = { player, boss }?, line = position? }
 --                     "Start" { boss, name, nameJP, stars, model, fightAt, lives }
 --                     "Phase" { phase, lives, stage?, lesson? }
---                     "End" { won, boss, name, time, firstClear }  (or { left = true, ... } when a
+--                     "End" { won, boss, name, stars, time, firstClear, noHit }  (or { left = true, ... } when a
 --                              fight ends without a result: BossTest "stop", the player leaving)
 --                     "Notice" { text, kind, line? }   kind: "Refused" | "Line" | "Turn" | "Failed"
 --                              (every Choose gets a Start or a Notice; a "Line" notice carries
@@ -46,6 +46,7 @@ local Locomotion = require(script.Parent.Locomotion)
 local LobbyService = require(script.Parent.LobbyService)
 local Outfit = require(script.Parent.Outfit)
 local ProgressService = require(script.Parent.ProgressService)
+local StatsService = require(script.Parent.StatsService)
 
 type Combatant = CombatService.Combatant
 
@@ -62,6 +63,8 @@ export type Fight = {
 	placed: boolean, -- the player was moved to the arena (gets a fresh body afterwards)
 	result: string?, -- "Won" | "Lost" | "Left"
 	tally: { [string]: number }, -- outcomes of blows involving the boss (tests)
+	hit: boolean?, -- the player lost health after the countdown (no gold skin this time)
+	hitWatch: RBXScriptConnection?,
 }
 
 local RULES = Config.Bosses
@@ -402,6 +405,15 @@ local function fightBody(f: Fight)
 	CombatService.reset(pc, RULES.Countdown)
 	CombatService.setResurrections(pc, RULES.PlayerResurrections)
 	pc.god = testGod[player] == true
+	-- A no-hit clear (the boss's gold skin): any loss of health from here on spoils it, a
+	-- cut, chip damage or being cut down. Gourd heals only go up.
+	local lastHealth = pc.humanoid.Health
+	f.hitWatch = pc.humanoid.HealthChanged:Connect(function(health: number)
+		if health < lastHealth - 0.01 then
+			f.hit = true
+		end
+		lastHealth = health
+	end)
 	boss.protectedUntil = f.fightAt
 	LobbyService.setInBoss(pc.model, 1)
 	LobbyService.setInBoss(boss.model, 1)
@@ -485,6 +497,10 @@ local function fightBody(f: Fight)
 	end
 	local time = math.max(now() - f.fightAt, 0)
 	local first = false
+	local noHit = won and not f.hit
+	if f.hitWatch then
+		f.hitWatch:Disconnect()
+	end
 	if f.result ~= "Left" then
 		first = ProgressService.bossEnded(player, {
 			boss = id,
@@ -494,7 +510,18 @@ local function fightBody(f: Fight)
 			lives = f.lives,
 			time = time,
 		})
-		send(player, "End", { won = won, boss = id, name = def.name, time = time, firstClear = first })
+		if noHit then
+			StatsService.recordNoHit(player, id) -- Economy grants the gold skin on this publish
+		end
+		send(player, "End", {
+			won = won,
+			boss = id,
+			name = def.name,
+			stars = def.stars,
+			time = time,
+			firstClear = first,
+			noHit = noHit,
+		})
 	else
 		-- Ended without a result (BossTest "stop", or the player left): still take the boss HUD down.
 		send(player, "End", { left = true, boss = id, name = def.name, time = time })
@@ -507,6 +534,9 @@ end
 -- the arena with a fresh body, the arena free for whoever is next in line.
 local function cleanup(f: Fight)
 	local player = f.player
+	if f.hitWatch then
+		f.hitWatch:Disconnect()
+	end
 	local brain = f.brain :: BossAI.Brain?
 	if brain then
 		pcall(BossAI.stop, brain)
