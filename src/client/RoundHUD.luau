@@ -27,7 +27,7 @@ local PARCHMENT = Color3.fromRGB(232, 222, 200)
 local GOLD = Color3.fromRGB(240, 200, 110)
 local CRIMSON = Color3.fromRGB(200, 40, 34)
 local FEED_LIFETIME = 6
-local FEED_MAX = 4
+local FEED_MAX = 3
 -- The mist wall is a ring of vertical, camera-facing beams: double-sided, unlike a
 -- cylinder part, whose inside faces are culled so it vanishes once you're within it.
 local MIST_COLUMNS = 72
@@ -40,6 +40,8 @@ local screen: ScreenGui
 local phaseLabel: TextLabel
 local subLabel: TextLabel
 local feed: Frame
+local feedList: UIListLayout
+local feedInLobby: boolean? = nil
 local spectateBar: Frame
 local spectateName: TextLabel
 local warning: Frame
@@ -73,22 +75,58 @@ local function clock(seconds: number): string
 	return string.format("%d:%02d", seconds // 60, seconds % 60)
 end
 
+-- The feed's corner: top-right in a fight, bottom-left in the lobby (newest line nearest the
+-- edge either way).
+local function placeFeed(lobby: boolean)
+	if feedInLobby == lobby then
+		return
+	end
+	feedInLobby = lobby
+	if lobby then
+		feed.AnchorPoint = Vector2.new(0, 1)
+		feed.Position = UDim2.new(0, 16, 1, -16)
+		feedList.HorizontalAlignment = Enum.HorizontalAlignment.Left
+		feedList.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	else
+		feed.AnchorPoint = Vector2.new(1, 0)
+		feed.Position = UDim2.new(1, -16, 0, 64)
+		feedList.HorizontalAlignment = Enum.HorizontalAlignment.Right
+		feedList.VerticalAlignment = Enum.VerticalAlignment.Top
+	end
+	-- Newest first at the top in a fight, newest last (at the bottom) in the lobby.
+	for _, child in feed:GetChildren() do
+		if child:IsA("GuiObject") then
+			child.LayoutOrder = -child.LayoutOrder
+		end
+	end
+end
+
 local function buildScreen()
 	screen = Instance.new("ScreenGui")
 	screen.Name = "RoundHUD"
 	screen.ResetOnSpawn = false
 	screen.IgnoreGuiInset = true
+	-- Phones get the HUD at their own scale (UI.hudScale).
+	local fit = UI.new("UIScale", { Name = "Fit" }, screen)
+	local function refit()
+		fit.Scale = UI.hudScale()
+	end
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	player:GetAttributeChangedSignal("UIViewport"):Connect(refit)
+	refit()
 
-	-- Phase banner: spaced small caps over the gold ornament, a quieter line beneath.
+	-- Phase banner: spaced small caps over the gold ornament, a quieter line beneath; small,
+	-- in the top bar's middle.
 	local banner = Instance.new("Frame")
+	banner.Name = "Banner"
 	banner.BackgroundTransparency = 1
 	banner.AnchorPoint = Vector2.new(0.5, 0)
-	banner.Position = UDim2.new(0.5, 0, 0, 16)
-	banner.Size = UDim2.fromOffset(460, 64)
+	banner.Position = UDim2.new(0.5, 0, 0, 12)
+	banner.Size = UDim2.fromOffset(400, 56)
 	banner.Parent = screen
 
-	phaseLabel = label(banner, 24, PARCHMENT)
-	phaseLabel.Size = UDim2.new(1, 0, 0, 26)
+	phaseLabel = label(banner, 20, PARCHMENT)
+	phaseLabel.Size = UDim2.new(1, 0, 0, 22)
 	phaseLabel.TextStrokeColor3 = UI.Theme.Ink
 	phaseLabel.TextStrokeTransparency = 0.35
 	local divider = Instance.new("ImageLabel")
@@ -96,31 +134,31 @@ local function buildScreen()
 	divider.Image = Assets.UI.PostureOrnament
 	divider.ImageTransparency = 0.15
 	divider.AnchorPoint = Vector2.new(0.5, 0.5)
-	divider.Position = UDim2.new(0.5, 0, 0, 33)
-	divider.Size = UDim2.fromOffset(200, 22)
+	divider.Position = UDim2.new(0.5, 0, 0, 28)
+	divider.Size = UDim2.fromOffset(150, 16)
 	divider.Parent = banner
 	subLabel = UI.label("body", {
 		Name = "Sub",
-		Position = UDim2.fromOffset(0, 44),
-		Size = UDim2.new(1, 0, 0, 20),
-		TextSize = 16,
+		Position = UDim2.fromOffset(0, 37),
+		Size = UDim2.new(1, 0, 0, 18),
+		TextSize = 14,
 		TextColor3 = UI.Theme.Bone,
 		TextStrokeColor3 = UI.Theme.Ink,
 		TextStrokeTransparency = 0.35,
 	}, banner)
 
-	-- Kill feed, top-right.
+	-- Kill feed: top-right under the Roblox top bar in a fight; in the lobby (where the
+	-- pills and toasts own the top-right) it drops to the bottom-left corner, under the nav.
 	feed = Instance.new("Frame")
+	feed.Name = "Feed"
 	feed.BackgroundTransparency = 1
-	feed.AnchorPoint = Vector2.new(1, 0)
-	feed.Position = UDim2.new(1, -24, 0, 20)
-	feed.Size = UDim2.fromOffset(420, 4 * 40)
+	feed.Size = UDim2.fromOffset(360, FEED_MAX * 32)
 	feed.Parent = screen
-	local list = Instance.new("UIListLayout")
-	list.HorizontalAlignment = Enum.HorizontalAlignment.Right
-	list.SortOrder = Enum.SortOrder.LayoutOrder
-	list.Padding = UDim.new(0, 4)
-	list.Parent = feed
+	feedList = Instance.new("UIListLayout")
+	feedList.SortOrder = Enum.SortOrder.LayoutOrder
+	feedList.Padding = UDim.new(0, 3)
+	feedList.Parent = feed
+	placeFeed(false)
 
 	-- Spectating: previous / next around a plate with who you're watching.
 	spectateBar = UI.new("Frame", {
@@ -203,11 +241,11 @@ local function pushFeed(text: string, accent: Color3, killer: string?, victim: s
 		Name = "Line",
 		material = "plain",
 		sliceScale = 0.4,
-		Size = UDim2.fromOffset(0, 36),
+		Size = UDim2.fromOffset(0, 29),
 		AutomaticSize = Enum.AutomaticSize.X,
-		LayoutOrder = -math.floor(os.clock() * 1000),
+		LayoutOrder = (if feedInLobby then 1 else -1) * math.floor(os.clock() * 1000),
 	}, feed)
-	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, plate)
+	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, plate)
 	local rich = if killer and victim
 		then `<font color="{hex(theme.Bone)}">{escape(killer)}</font>  <font color="{hex(accent)}"><b>/</b></font>  <font color="{hex(
 			theme.Dim
@@ -217,7 +255,7 @@ local function pushFeed(text: string, accent: Color3, killer: string?, victim: s
 		Name = "Text",
 		Size = UDim2.fromScale(0, 1),
 		AutomaticSize = Enum.AutomaticSize.X,
-		TextSize = 15,
+		TextSize = 14,
 		RichText = true,
 		Text = rich,
 	}, plate)
@@ -229,13 +267,13 @@ local function pushFeed(text: string, accent: Color3, killer: string?, victim: s
 		end
 	end
 	if count > FEED_MAX then
-		-- Drop the oldest line (the highest LayoutOrder sits at the bottom).
+		-- Drop the oldest line (made first: the smallest |LayoutOrder|).
 		local oldest: GuiObject? = nil
 		for _, child in lines do
 			if
 				child.Name == "Line"
 				and child:IsA("GuiObject")
-				and (not oldest or child.LayoutOrder > (oldest :: GuiObject).LayoutOrder)
+				and (not oldest or math.abs(child.LayoutOrder) < math.abs((oldest :: GuiObject).LayoutOrder))
 			then
 				oldest = child
 			end
@@ -470,6 +508,12 @@ local function refreshBanner()
 	local remaining = Round.endsAt() - now()
 	local character = player.Character
 	local fighting = character ~= nil and character:GetAttribute("InMatch") == true
+	placeFeed(
+		character ~= nil
+			and character:GetAttribute("InMatch") ~= true
+			and character:GetAttribute("InDuel") ~= true
+			and not needsSpectate()
+	)
 	if phase == "Intermission" then
 		local queued = state:GetAttribute("Queued") or 0
 		if state:GetAttribute("Waiting") then
