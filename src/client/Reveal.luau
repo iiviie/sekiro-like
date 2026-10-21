@@ -109,10 +109,14 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 	if #results == 0 then
 		return
 	end
+	-- Draws sort lowest rarity first (the best flips last); a purchase keeps the order it was
+	-- given in (the thing bought first).
 	local sorted = table.clone(results)
-	table.sort(sorted, function(a, b)
-		return rankOf(a) < rankOf(b)
-	end)
+	if not o.gift then
+		table.sort(sorted, function(a, b)
+			return rankOf(a) < rankOf(b)
+		end)
+	end
 	local best = sorted[#sorted]
 	local bestStyle = UI.rarity(best.rarity)
 	local single = #results == 1
@@ -320,7 +324,7 @@ function Reveal.play(results: { Outcome }, opts: Options?)
 		local s = UI.new("ImageLabel", {
 			Name = "Slip",
 			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.new(0.5, 0, 0.5, 20),
+			Position = UDim2.new(0.5, 0, 0.5, if gift then 0 else 20),
 			Size = UDim2.fromOffset(0, 300),
 			BackgroundTransparency = 1,
 			ClipsDescendants = true,

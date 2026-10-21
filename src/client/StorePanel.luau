@@ -151,8 +151,9 @@ local function tryOnLink(item: Catalog.Item)
 	end
 	local link = UI.tertiary({
 		Name = "TryOn",
-		Position = UDim2.fromOffset(10, 10),
-		Size = UDim2.fromOffset(120, 40),
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -UI.Touch - 24),
+		Size = UDim2.fromOffset(160, 36),
 		Text = "Try it on",
 		TextSize = 16,
 		ZIndex = 23,
@@ -588,8 +589,9 @@ local function offerCard(
 	if tryItem then
 		local try = UI.tertiary({
 			Name = "TryOn",
-			Position = UDim2.fromOffset(114, 116),
+			Position = UDim2.fromOffset(120, 116),
 			Size = UDim2.fromOffset(200, 36),
+			TextXAlignment = Enum.TextXAlignment.Left,
 			Text = `Try {tryItem.name} on`,
 			TextSize = 16,
 			ZIndex = 2,
@@ -693,7 +695,10 @@ local function outcomeName(outcome: { [string]: any }): string
 		local item = Catalog.get(outcome.id)
 		return if item then item.name else tostring(outcome.id)
 	end
-	return outcome.label or Text.currency(outcome.amount or 0, tostring(outcome.kind))
+	if typeof(outcome.amount) == "number" then
+		return Text.currency(outcome.amount, tostring(outcome.kind))
+	end
+	return outcome.label or tostring(outcome.kind)
 end
 
 -- The odds in one line, in words: "Coins 52% · Whetstones 18% · ... · a cosmetic 10% (epic
@@ -1041,7 +1046,9 @@ local function shrineTab(list: ScrollingFrame)
 			TextSize = 14,
 			Text = "",
 		}, capBox)
-		local featuredName = if featured then `the featured {featured.name}` else "the featured blade"
+		local featuredName = if featured
+			then `the featured {featured.name}{if featured.category == "bladeLine" then " blade line" else ""}`
+			else "the featured blade"
 		local epicLeft = math.max(1, (cap.epicAt or 10) - (cap.epicSince or 0))
 		local legLeft = math.max(1, (cap.legendaryAt or 40) - (cap.legendarySince or 0))
 		-- The guarantees in plain words; the banner's end lives in the odds sheet, not here (no
@@ -1331,7 +1338,13 @@ local function purchaseReveal(data: { [string]: any })
 	elseif key == "pass.Premium" then
 		local tier = StoreUI.attr("PassTier", 0)
 		local claimable = StoreUI.attr("PassClaimable", 0)
-		table.insert(results, { kind = "item", id = key, rarity = item.rarity, status = "Unlocked" })
+		table.insert(results, {
+			kind = "item",
+			id = key,
+			rarity = item.rarity,
+			status = "Unlocked",
+			caption = "THIS SEASON'S PREMIUM TRACK",
+		})
 		for _, outcome in nextPremiumItems(tier, 2) do
 			table.insert(results, outcome)
 		end
@@ -1347,11 +1360,18 @@ local function purchaseReveal(data: { [string]: any })
 		end
 		primary = openPass
 	elseif key == "pass.TierSkip" or key == "pass.Tiers10" then
-		table.insert(results, { kind = "item", id = key, rarity = "rare", status = "Applied" })
+		table.insert(
+			results,
+			{ kind = "item", id = key, rarity = "rare", status = "Applied", caption = "PATH OF THE BLADE" }
+		)
 		note = `You're on tier {StoreUI.attr("PassTier", 0)} of the Path of the Blade.`
 		primary = openPass
 	elseif item.category == "pass" then
-		table.insert(results, 1, { kind = "item", id = key, rarity = item.rarity, status = "Yours" })
+		table.insert(
+			results,
+			1,
+			{ kind = "item", id = key, rarity = item.rarity, status = "Yours", caption = "YOURS FOR GOOD" }
+		)
 		note = ({
 			["pass.Loadouts"] = "Six loadout slots: Locker, then Loadouts at the top.",
 			["pass.TitleSlot"] = "Pick a second title in the Locker's Title tab.",

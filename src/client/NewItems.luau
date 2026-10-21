@@ -102,6 +102,7 @@ local function showCard(batch: { Unlock })
 	}, screen)
 	UI.stroke(card, T.Gold, 1, 0.3)
 	local art = UI.new("Frame", {
+		Name = "Art",
 		Position = UDim2.fromOffset(10, 10),
 		Size = UDim2.fromOffset(60, 60),
 		BackgroundTransparency = 1,
@@ -156,6 +157,7 @@ local function showCard(batch: { Unlock })
 	x.Activated:Connect(close)
 
 	local row = UI.new("Frame", {
+		Name = "Actions",
 		AnchorPoint = Vector2.new(0, 1),
 		Position = UDim2.new(0, 10, 1, -8),
 		Size = UDim2.new(1, -20, 0, 46),

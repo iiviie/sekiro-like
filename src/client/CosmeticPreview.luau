@@ -270,8 +270,10 @@ local function cameraFor(root: BasePart, finisher: boolean, t: number): CFrame
 	local sway = math.sin(t * 0.45) * 0.35
 	local angle = math.rad(32) + sway -- toward the sword hand
 	local dir = (flat * math.cos(angle) + right * math.sin(angle)).Unit
-	local focus = root.Position + Vector3.yAxis * 0.6 + right * 0.5
-	return CFrame.lookAt(focus + dir * 7.5 + Vector3.yAxis * 1.4, focus)
+	-- Far enough back that a full cut stays in frame; the body a little left of centre, so
+	-- the plate in the corner never covers the blade.
+	local focus = root.Position + Vector3.yAxis * 0.2 + right * 1.2
+	return CFrame.lookAt(focus + dir * 11 + Vector3.yAxis * 2, focus)
 end
 
 -- Puts `item` (a blade, blade line, outfit or finisher) on you and shows it off. `opts.level`:
@@ -298,9 +300,9 @@ function CosmeticPreview.present(item: Catalog.Item, opts: { level: number?, bac
 		Name = "Plate",
 		material = "lacquer",
 		sliceScale = 0.6,
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -16),
-		Size = UDim2.fromOffset(340, 64 + UI.Touch),
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 16, 1, -16),
+		Size = UDim2.fromOffset(320, 64 + UI.Touch),
 	}, gui)
 	UI.text({
 		Name = "ItemName",
