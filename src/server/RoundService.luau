@@ -14,6 +14,7 @@ local Round = require(ReplicatedStorage.Shared.Round)
 local BotService = require(script.Parent.BotService)
 local CombatService = require(script.Parent.CombatService)
 local LobbyService = require(script.Parent.LobbyService)
+local ProgressService = require(script.Parent.ProgressService)
 local StatsService = require(script.Parent.StatsService)
 
 type Combatant = CombatService.Combatant
@@ -40,6 +41,8 @@ local participants: { [Model]: boolean } = {}
 local eliminated: { [Player]: boolean } = {} -- players out of the current match
 local eliminationOrder: { Player } = {} -- humans, first out first
 local matchWeapons: { [Player]: string } = {}
+local places: { [Player]: number } = {} -- humans' finishing place among every fighter
+local fighterCount = 0
 local RETURN_DELAY = 5 -- eliminated players watch for a moment, then return to the lobby
 
 local function now(): number
@@ -77,6 +80,9 @@ local function spawnPlayer(player: Player)
 end
 
 local function onDied(victim: Combatant, killer: Combatant?, deathblow: boolean)
+	if victim.model:GetAttribute("InDuel") then
+		return -- DuelService brings duellists back for the next round
+	end
 	local phase = Round.phase()
 	if phase == "Match" and participants[victim.model] then
 		roundEvent:FireAllClients("Eliminated", {
@@ -86,6 +92,7 @@ local function onDied(victim: Combatant, killer: Combatant?, deathblow: boolean)
 		})
 		local player = victim.player
 		if player then
+			places[player] = #aliveParticipants() + 1
 			eliminated[player] = true
 			table.insert(eliminationOrder, player)
 			task.delay(RETURN_DELAY, function()
@@ -122,7 +129,15 @@ local function queuedPlayers(): { Player }
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		local c = character and CombatService.get(character)
-		if LobbyService.isQueued(player) and c and c.state ~= "Dead" then
+		-- Only players past the title card: nobody gets dropped into a fight unseen. Anyone
+		-- on a duel pad or in a duel stays there; they rejoin the queue when it's over.
+		if
+			LobbyService.isQueued(player)
+			and player:GetAttribute("Entered")
+			and player:GetAttribute("DuelState") == nil
+			and c
+			and c.state ~= "Dead"
+		then
 			table.insert(queued, player)
 		end
 	end
@@ -134,12 +149,13 @@ local function intermission()
 	table.clear(eliminated)
 	table.clear(eliminationOrder)
 	table.clear(matchWeapons)
+	table.clear(places)
 	BotService.setRespawn(false)
 	BotService.setCount(0)
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if not humanoid or humanoid.Health <= 0 then
+		if (not humanoid or humanoid.Health <= 0) and player:GetAttribute("DuelState") ~= "Dueling" then
 			spawnPlayer(player)
 		end
 	end
@@ -169,6 +185,7 @@ end
 local function match()
 	local queued = queuedPlayers()
 	BotService.setRespawn(false)
+	BotService.setTier(BotService.tierFor(queued))
 	BotService.setCount(math.max(0, Config.Round.MinFighters - #queued))
 
 	-- Queued players and the filler bots fight; place them evenly around the courtyard.
@@ -195,9 +212,28 @@ local function match()
 			+ Vector3.new(0, 3, 0)
 		c.model:PivotTo(CFrame.lookAt(position, Vector3.new(0, 3, 0)))
 		CombatService.reset(c, 3)
+		if c.player then
+			CombatService.setResurrections(c, Config.Resurrection.Charges)
+		end
 		participants[c.model] = true
 		LobbyService.setInMatch(c.model, true)
 	end
+
+	-- An omen for this match, now and then.
+	local omen = nil
+	local list = Config.Omens.List
+	-- Testing aid: workspace attribute ForceOmen = "BloodMoon" (etc.) picks it every match.
+	local forced = workspace:GetAttribute("ForceOmen")
+	for _, candidate in list do
+		if candidate.id == forced then
+			omen = candidate
+		end
+	end
+	if not omen and math.random() < Config.Omens.Chance then
+		omen = list[math.random(#list)]
+	end
+	workspace:SetAttribute("Omen", omen and omen.id)
+	state:SetAttribute("Omen", omen and omen.id)
 
 	local t = now()
 	local center = Vector3.new(
@@ -208,24 +244,39 @@ local function match()
 	state:SetAttribute("ZoneCenter", center)
 	state:SetAttribute("ZoneStartRadius", zone.StartRadius)
 	state:SetAttribute("ZoneEndRadius", zone.EndRadius)
-	state:SetAttribute("ZoneShrinkStart", t + zone.ShrinkDelay)
-	state:SetAttribute("ZoneShrinkEnd", t + zone.ShrinkDelay + zone.ShrinkTime)
+	local rush = if omen and omen.id == "RushingMist" then 0.5 else 1
+	state:SetAttribute("ZoneShrinkStart", t + zone.ShrinkDelay * rush)
+	state:SetAttribute("ZoneShrinkEnd", t + (zone.ShrinkDelay + zone.ShrinkTime) * rush)
 	state:SetAttribute("Alive", #fighters)
+	fighterCount = #fighters
+	ProgressService.matchStarted(queued)
 	setPhase("Match", Config.Round.MaxDuration)
-	roundEvent:FireAllClients("MatchStart", { fighters = #fighters })
+	roundEvent:FireAllClients("MatchStart", { fighters = #fighters, omen = omen and omen.id })
 
-	-- Ring damage ticks until one fighter is left or time runs out.
+	-- Ring damage ticks until one fighter is left or time runs out. Once every human is
+	-- out, nobody is watching the bots finish: end it so players get straight back in.
+	local humansStarted = #queued > 0
 	local tick = zone.TickInterval
 	while now() < Round.endsAt() do
 		local alive = aliveParticipants()
 		if #alive <= 1 then
 			break
 		end
+		local humansAlive = false
+		for _, c in alive do
+			if c.player then
+				humansAlive = true
+				break
+			end
+		end
+		if humansStarted and not humansAlive then
+			break
+		end
 		local ringCenter, radius = Round.zone(now())
 		for _, c in alive do
 			local offset = c.root.Position - ringCenter
 			if Vector3.new(offset.X, 0, offset.Z).Magnitude > radius then
-				c.humanoid:TakeDamage(zone.DamagePerSecond * tick)
+				CombatService.damage(c, zone.DamagePerSecond * tick)
 			end
 		end
 		task.wait(tick)
@@ -242,6 +293,8 @@ local function match()
 end
 
 local function results(winner: Combatant?)
+	workspace:SetAttribute("Omen", nil)
+	state:SetAttribute("Omen", nil)
 	setPhase("Results", Config.Round.Results)
 	if winner and winner.player then
 		StatsService.addWin(winner.player)
@@ -263,6 +316,17 @@ local function results(winner: Combatant?)
 		end
 	end
 	StatsService.recordMatch(placements, matchWeapons, if winner then winner.player else nil)
+	-- Survivors (only several on a timeout) place by vitality, so the winner is first.
+	local survivors = aliveParticipants()
+	table.sort(survivors, function(a, b)
+		return a.humanoid.Health > b.humanoid.Health
+	end)
+	for index, c in survivors do
+		if c.player then
+			places[c.player] = index
+		end
+	end
+	ProgressService.matchEnded(places, fighterCount, if winner then winner.player else nil)
 	roundEvent:FireAllClients("Victory", {
 		winner = if winner then winner.model else nil,
 		name = if winner then displayName(winner.model) else nil,
@@ -283,6 +347,15 @@ end
 function RoundService.start()
 	Players.CharacterAutoLoads = false
 	CombatService.onDied(onDied)
+	CombatService.onCutDown(function(victim: Combatant, killer: Combatant?, deathblow: boolean)
+		if Round.phase() == "Match" and participants[victim.model] then
+			roundEvent:FireAllClients("CutDown", {
+				victim = displayName(victim.model),
+				killer = if killer then displayName(killer.model) else nil,
+				deathblow = deathblow,
+			})
+		end
+	end)
 
 	Players.PlayerAdded:Connect(function(player)
 		-- Everyone arrives in the lobby, even mid-match.

@@ -17,3 +17,10 @@ roblox.yml
 # Art tooling
 art/**/__pycache__/
 *.blend1
+
+# Codex image-generation logs
+art/icons/raw/*.log
+art/store/*.log
+
+# Kannagi retarget viewer: embeds the source game model; regenerate with ~/re/kannagi-usagi/scripts/anim/viewblend.py
+art/anim/kannagi_retarget.blend

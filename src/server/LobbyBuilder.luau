@@ -6,6 +6,8 @@
 --   the castle): the glowing Royale pad, a great torii and two towering stone lanterns.
 --   Left wing: the dojo, with the deflect trainer under a pavilion.
 --   Right wing: the hall of champions, with the leaderboards.
+--   Duel grounds: two pairs of gold duel pads on the lower tier, each sending its pair to a
+--   fenced terrace floating just off the rim (east and west).
 --   Two ponds spill off the rim as waterfalls; rope bridges lead to two small islets; more
 --   islets drift at a distance over a sea of cloud.
 --
@@ -35,6 +37,11 @@ local terrain = workspace.Terrain
 
 ---------------------------------------------------------------------------------------
 -- Helpers
+
+local function flatUnit(v: Vector3): Vector3
+	local flat = Vector3.new(v.X, 0, v.Z)
+	return if flat.Magnitude > 1e-3 then flat.Unit else Vector3.zAxis
+end
 
 local function at(x: number, y: number, z: number): Vector3
 	return Vector3.new(O.X + x, y, O.Z + z)
@@ -569,6 +576,202 @@ local function queuePad(parent: Instance, center: Vector3)
 	billboard(pad, "ROYALE", 11)
 end
 
+-- Duel grounds: a pair of gold pads facing each other on the lower tier, and the fenced
+-- terrace it sends its duellists to, floating just off the rim so the lobby can watch from
+-- the edge. Each ground is a folder under Workspace.Lobby.DuelGrounds with its key points
+-- as attributes (PadA, PadB, Arena: walk-surface positions) and a Sign whose Status label
+-- DuelService keeps up to date.
+local DUEL = Config.Duel
+local DUEL_GROUNDS = {
+	-- Pad pair centre (lower tier) and terrace centre, as offsets from the lobby origin.
+	-- The terraces sit in gaps between the far islets (see farIslets' seed).
+	{ pads = Vector2.new(44, 28), arena = Vector2.new(106, -14) },
+	{ pads = Vector2.new(-38, 24), arena = Vector2.new(-108, -16) },
+}
+local DUEL_PAD_GAP = 12 -- studs between the two pads of a pair
+-- Terraces sit a little below the rim, in full view of it. Their fill top (walk - 2) stays
+-- on the 4-stud voxel grid, or the surface comes out higher than asked.
+local DUEL_WALK = LOWER - 4
+
+local function duelPad(parent: Instance, name: string, center: Vector3)
+	local radius = DUEL.PadRadius
+	disc(radius + 0.6, 0.6, center + Vector3.new(0, 0.2, 0), {
+		Name = name,
+		Material = Enum.Material.Slate,
+		Color = Palette.Ink,
+	}, parent)
+	disc(
+		radius,
+		0.14,
+		center + Vector3.new(0, 0.52, 0),
+		decor({ Name = name .. "Glow", Material = Enum.Material.Neon, Color = Palette.Ember }),
+		parent
+	)
+	disc(
+		radius - 0.6,
+		0.16,
+		center + Vector3.new(0, 0.54, 0),
+		decor({ Name = name .. "Inner", Material = Enum.Material.Sand, Color = Color3.fromRGB(186, 170, 144) }),
+		parent
+	)
+end
+
+local function duelTerrace(parent: Instance, center: Vector3, seed: number, size: number?, marks: number?)
+	local radius = size or DUEL.ArenaRadius
+	local startDistance = marks or DUEL.StartDistance
+	local top = center.Y - 2
+	plateau(center, radius + 4, top, 10)
+	underside(center, radius + 4, top - 10, 28, seed)
+	paint(center, radius + 1, top, Enum.Material.Cobblestone)
+	paint(center, 6, top, Enum.Material.Slate)
+
+	-- A sacred-rope fence: lacquered posts, a rope between them, and an invisible wall so
+	-- nobody is knocked off mid-duel.
+	local posts = math.max(16, math.floor(radius * 0.95))
+	for i = 1, posts do
+		local a0 = (i / posts) * math.pi * 2
+		local a1 = ((i + 1) / posts) * math.pi * 2
+		local p0 = center + Vector3.new(math.cos(a0) * radius, 0, math.sin(a0) * radius)
+		local p1 = center + Vector3.new(math.cos(a1) * radius, 0, math.sin(a1) * radius)
+		part({
+			Name = "FencePost",
+			Size = Vector3.new(0.8, 4.4, 0.8),
+			CFrame = CFrame.new(p0 + Vector3.new(0, 2.2, 0)),
+			Material = Enum.Material.SmoothPlastic,
+			Color = Palette.Vermilion,
+		}, parent)
+		local mid = (p0 + p1) / 2
+		local length = (p1 - p0).Magnitude
+		part(
+			decor({
+				Name = "FenceRope",
+				Size = Vector3.new(0.35, 0.35, length),
+				CFrame = CFrame.lookAt(mid + Vector3.new(0, 3.6, 0), p1 + Vector3.new(0, 3.6, 0)),
+				Material = Enum.Material.Fabric,
+				Color = Palette.Parchment,
+			}),
+			parent
+		)
+		part({
+			Name = "FenceWall",
+			Size = Vector3.new(0.5, 16, length + 0.5),
+			CFrame = CFrame.lookAt(mid + Vector3.new(0, 8, 0), p1 + Vector3.new(0, 8, 0)),
+			Transparency = 1,
+			CanQuery = false,
+			CastShadow = false,
+		}, parent)
+	end
+	-- Starting marks, and a lantern at each corner outside the rope.
+	for _, side in { -1, 1 } do
+		disc(
+			1.4,
+			0.1,
+			center + Vector3.new(side * startDistance / 2, 0.05, 0),
+			decor({ Name = "Mark", Material = Enum.Material.Slate, Color = Palette.Crimson }),
+			parent
+		)
+	end
+	for i = 0, 3 do
+		local angle = math.rad(45 + i * 90)
+		lantern(center + Vector3.new(math.cos(angle) * (radius + 2), 0, math.sin(angle) * (radius + 2)), parent)
+	end
+end
+
+local function duelGrounds(lobby: Instance)
+	local folder = Instance.new("Folder")
+	folder.Name = "DuelGrounds"
+	folder.Parent = lobby
+	for i, ground in DUEL_GROUNDS do
+		local holder = Instance.new("Folder")
+		holder.Name = `Ground{i}`
+		local mid = at(ground.pads.X, LOWER, ground.pads.Y)
+		local padA = mid - Vector3.new(DUEL_PAD_GAP / 2, 0, 0)
+		local padB = mid + Vector3.new(DUEL_PAD_GAP / 2, 0, 0)
+		duelPad(holder, "PadA", padA)
+		duelPad(holder, "PadB", padB)
+		-- The sign between the pads: a title, and a status line DuelService rewrites.
+		local sign =
+			part(decor({ Name = "Sign", Size = Vector3.one, Transparency = 1, CFrame = CFrame.new(mid) }), holder)
+		billboard(sign, "DUEL  ·  一騎討", 7)
+		local gui = sign:FindFirstChild("Label") :: BillboardGui
+		local status = Instance.new("TextLabel")
+		status.Name = "Status"
+		status.BackgroundTransparency = 1
+		status.Position = UDim2.fromScale(0, 0.6)
+		status.Size = UDim2.fromScale(1, 0.4)
+		status.Font = Enum.Font.SourceSansSemibold
+		status.TextScaled = true
+		status.TextColor3 = Palette.Ember
+		status.TextStrokeTransparency = 0.5
+		status.Text = `Step on a pad  ·  first to {DUEL.FirstTo}`
+		status.Parent = gui
+		local arena = at(ground.arena.X, DUEL_WALK, ground.arena.Y)
+		duelTerrace(holder, arena, 60 + i)
+		holder:SetAttribute("PadA", padA)
+		holder:SetAttribute("PadB", padB)
+		holder:SetAttribute("Arena", arena)
+		holder.Parent = folder
+	end
+end
+
+-- Boss trials: a shrine pad on the back islet opens the boss picker (BossService / BossHUD),
+-- and the fight is on a larger fenced terrace floating behind the island. Published on
+-- Workspace.Lobby.BossShrine as attributes Pad and Arena (walk-surface positions).
+local BOSS = Config.Bosses
+local BOSS_ARENA = Vector2.new(-60, 135) -- offset from the lobby origin, clear of the far islets
+local BOSS_PAD = Vector2.new(-6, 3) -- offset from the back islet's centre
+
+local function bossGrounds(lobby: Instance, islet: Vector3)
+	local holder = Instance.new("Folder")
+	holder.Name = "BossShrine"
+	local pad = islet + Vector3.new(BOSS_PAD.X, 0, BOSS_PAD.Y)
+	local radius = DUEL.PadRadius + 0.6
+	disc(radius + 0.6, 0.6, pad + Vector3.new(0, 0.2, 0), {
+		Name = "Pad",
+		Material = Enum.Material.Slate,
+		Color = Palette.Ink,
+	}, holder)
+	disc(
+		radius,
+		0.14,
+		pad + Vector3.new(0, 0.52, 0),
+		decor({ Name = "PadGlow", Material = Enum.Material.Neon, Color = Color3.fromRGB(150, 90, 230) }),
+		holder
+	)
+	disc(
+		radius - 0.6,
+		0.16,
+		pad + Vector3.new(0, 0.54, 0),
+		decor({ Name = "PadInner", Material = Enum.Material.Sand, Color = Color3.fromRGB(186, 170, 144) }),
+		holder
+	)
+	local arena = at(BOSS_ARENA.X, DUEL_WALK, BOSS_ARENA.Y)
+	-- A torii behind the pad frames the arena terrace beyond it.
+	local away = flatUnit(pad - arena)
+	prop("Torii", CFrame.lookAt(pad - away * 5, pad - away * 6), holder, 0.55)
+	lantern(pad + Vector3.new(-away.Z, 0, away.X) * 6, holder)
+	lantern(pad - Vector3.new(-away.Z, 0, away.X) * 6, holder)
+	local sign = part(decor({ Name = "Sign", Size = Vector3.one, Transparency = 1, CFrame = CFrame.new(pad) }), holder)
+	billboard(sign, "BOSS TRIALS  ·  試練", 8)
+	local gui = sign:FindFirstChild("Label") :: BillboardGui
+	local status = Instance.new("TextLabel")
+	status.Name = "Status"
+	status.BackgroundTransparency = 1
+	status.Position = UDim2.fromScale(0, 0.6)
+	status.Size = UDim2.fromScale(1, 0.4)
+	status.Font = Enum.Font.SourceSansSemibold
+	status.TextScaled = true
+	status.TextColor3 = Color3.fromRGB(196, 160, 255)
+	status.TextStrokeTransparency = 0.5
+	status.Text = "Step on the shrine to choose a boss"
+	status.Parent = gui
+	duelTerrace(holder, arena, 77, BOSS.ArenaRadius, BOSS.StartDistance)
+	holder:SetAttribute("Pad", pad)
+	holder:SetAttribute("PadRadius", radius)
+	holder:SetAttribute("Arena", arena)
+	holder.Parent = lobby
+end
+
 local function boards(parent: Instance, spots: { Vector3 }, faceToward: Vector3)
 	local titles = { "TOTAL WINS", "RANKED RATING" }
 	for i, base in spots do
@@ -787,13 +990,15 @@ function LobbyBuilder.build(): Folder
 	tree(leftIslet + Vector3.new(-4, 0, 4), lobby, 1.2)
 	lantern(leftIslet + Vector3.new(6, 0, -4), lobby)
 	local backIslet = Vector3.new(O.X + BRIDGE_BACK.islet.X, LOWER, O.Z + BRIDGE_BACK.islet.Y)
-	prop("CornerLantern", CFrame.new(backIslet), lobby, 1.3)
+	prop("CornerLantern", CFrame.new(backIslet + Vector3.new(7, 0, -6)), lobby, 1.3)
 	tree(backIslet + Vector3.new(6, 0, 6), lobby)
+	bossGrounds(lobby, backIslet)
 
 	-- Waterfalls leave the rim where the streams end (the rim is at MAIN_RADIUS).
 	waterfall(lobby, at(math.sqrt(MAIN_RADIUS ^ 2 - 36 ^ 2) - 1, LOWER - 1.5, -36), Vector3.new(1, 0, 0))
 	waterfall(lobby, at(-math.sqrt(MAIN_RADIUS ^ 2 - 42 ^ 2) + 1, LOWER - 1.5, -42), Vector3.new(-1, 0, 0))
 	farIslets(lobby)
+	duelGrounds(lobby)
 	cloudSea(lobby)
 
 	local spawn = Instance.new("SpawnLocation")

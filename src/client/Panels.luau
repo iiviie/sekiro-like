@@ -7,7 +7,9 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Assets = require(ReplicatedStorage.Shared.Assets)
 local Config = require(ReplicatedStorage.Shared.Config)
+local Progression = require(ReplicatedStorage.Shared.Progression)
 local Ranks = require(ReplicatedStorage.Shared.Ranks)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
 local UI = require(script.Parent.UI)
@@ -182,6 +184,17 @@ local function weaponsPanel()
 		local def = Weapons.get(id)
 		local card =
 			UI.panel({ Size = UDim2.new(1, -8, 0, 104), LayoutOrder = i, BackgroundColor3 = UI.PanelLight }, list)
+		UI.new("ImageLabel", {
+			Position = UDim2.fromOffset(4, 2),
+			Size = UDim2.fromOffset(100, 100),
+			BackgroundTransparency = 1,
+			Image = (Assets.Icons :: any)[id] or Assets.Icons.Weapons,
+		}, card)
+		local textInset = UI.new("Frame", {
+			Position = UDim2.fromOffset(100, 0),
+			Size = UDim2.new(1, -100, 1, 0),
+			BackgroundTransparency = 1,
+		}, card)
 		UI.text({
 			Position = UDim2.fromOffset(14, 8),
 			Size = UDim2.new(1, -170, 0, 30),
@@ -189,7 +202,7 @@ local function weaponsPanel()
 			Font = UI.Display,
 			TextSize = 28,
 			Text = def.name,
-		}, card)
+		}, textInset)
 		UI.text({
 			Position = UDim2.fromOffset(14, 38),
 			Size = UDim2.new(1, -170, 0, 18),
@@ -197,7 +210,7 @@ local function weaponsPanel()
 			TextColor3 = UI.Bronze,
 			TextSize = 15,
 			Text = def.archetype,
-		}, card)
+		}, textInset)
 		UI.text({
 			Position = UDim2.fromOffset(14, 58),
 			Size = UDim2.new(1, -170, 0, 40),
@@ -207,14 +220,14 @@ local function weaponsPanel()
 			TextSize = 15,
 			TextTransparency = 0.2,
 			Text = def.description,
-		}, card)
+		}, textInset)
 		local isOwned = have[id] == true
 		local isEquipped = equipped == id
 		local button = UI.button({
 			AnchorPoint = Vector2.new(1, 0.5),
 			Position = UDim2.new(1, -14, 0.5, 0),
 			Size = UDim2.fromOffset(136, 44),
-			Text = if isEquipped then "Equipped" elseif isOwned then "Equip" else `Unlock  ● {UI.number(def.price)}`,
+			Text = if isEquipped then "Equipped" elseif isOwned then "Equip" else `Unlock  {UI.number(def.price)} coins`,
 			BackgroundColor3 = if isEquipped
 				then UI.Panel
 				elseif isOwned then UI.Crimson
@@ -239,6 +252,196 @@ local function weaponsPanel()
 		TextTransparency = 0.35,
 		Text = "Every weapon is earned with coins from matches, never sold for Robux. Each is a sidegrade: better at one thing, worse at another.",
 	}, list)
+
+	-- Blade skins: pure cosmetics, unlocked by playing, then bought with coins.
+	UI.text({
+		Size = UDim2.new(1, -8, 0, 30),
+		LayoutOrder = 100,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Font = UI.Display,
+		TextSize = 26,
+		TextColor3 = UI.Gold,
+		Text = "Blades",
+	}, list)
+	local grid = UI.new("Frame", {
+		Size = UDim2.new(1, -8, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = 101,
+		BackgroundTransparency = 1,
+	}, list)
+	UI.new("UIGridLayout", {
+		CellSize = UDim2.new(1 / 3, -8, 0, 170),
+		CellPadding = UDim2.fromOffset(10, 10),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, grid)
+	local ownedSkins = {}
+	for id in string.gmatch(attr("OwnedSkins", "Steel"), "[^,]+") do
+		ownedSkins[id] = true
+	end
+	local equippedSkin = attr("Skin", "Steel")
+	for i, skin in Progression.Skins do
+		local isOwned = ownedSkins[skin.id] == true
+		local isEquipped = equippedSkin == skin.id
+		local rule = skin.unlock
+		local unlocked = rule == nil or (attr(rule.stat, 0) :: number) >= rule.amount
+		local card = UI.panel({
+			LayoutOrder = i,
+			BackgroundColor3 = if isEquipped then Color3.fromRGB(52, 40, 30) else UI.PanelLight,
+		}, grid)
+		if isEquipped then
+			UI.stroke(card, UI.Gold, 2, 0)
+		end
+		local t = skin.tint
+		UI.new("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0, 2),
+			Size = UDim2.fromOffset(84, 84),
+			BackgroundTransparency = 1,
+			Image = Assets.Icons.Katana,
+			ImageColor3 = Color3.new(math.min(t.X, 1), math.min(t.Y, 1), math.min(t.Z, 1)),
+		}, card)
+		if not unlocked then
+			UI.new("ImageLabel", {
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -4, 0, 4),
+				Size = UDim2.fromOffset(34, 34),
+				BackgroundTransparency = 1,
+				Image = Assets.Icons.Lock,
+			}, card)
+		end
+		UI.text({
+			Position = UDim2.fromOffset(4, 84),
+			Size = UDim2.new(1, -8, 0, 22),
+			Font = UI.Display,
+			TextSize = 19,
+			TextColor3 = skin.trail[2]:Lerp(Color3.new(1, 1, 1), 0.45),
+			Text = skin.name,
+		}, card)
+		UI.text({
+			Position = UDim2.fromOffset(4, 104),
+			Size = UDim2.new(1, -8, 0, 18),
+			TextSize = 13,
+			TextTransparency = 0.3,
+			TextWrapped = true,
+			Text = if unlocked or not rule then skin.blurb else `{rule.text}  ({attr(rule.stat, 0)}/{rule.amount})`,
+		}, card)
+		local canBuy = not isOwned and unlocked and coins >= skin.price
+		local button = UI.button({
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.new(0.5, 0, 1, -8),
+			Size = UDim2.new(1, -20, 0, 32),
+			TextSize = 15,
+			Text = if isEquipped
+				then "Equipped"
+				elseif isOwned then "Equip"
+				elseif not unlocked then "Locked"
+				else `{UI.number(skin.price)} coins`,
+			BackgroundColor3 = if isEquipped then UI.Panel elseif isOwned or canBuy then UI.Crimson else UI.Panel,
+			TextColor3 = if not isOwned and not canBuy then Color3.fromRGB(140, 130, 120) else UI.Parchment,
+		}, card)
+		button.Activated:Connect(function()
+			if isOwned and not isEquipped then
+				lobbyAction:FireServer("EquipSkin", skin.id)
+			elseif canBuy then
+				lobbyAction:FireServer("BuySkin", skin.id)
+			end
+		end)
+	end
+end
+
+-- Daily Trials: three goals a day that pay out the moment they're done.
+local function trialsPanel()
+	local progress = {}
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, attr("TrialProgress", "{}"))
+	if ok and typeof(decoded) == "table" then
+		progress = decoded
+	end
+	local day = today()
+	local fresh = attr("TrialDay", 0) == day
+	for i, id in Progression.dailyTrials(player.UserId, day) do
+		local trial = Progression.trial(id)
+		if trial then
+			local value = if fresh then math.min(progress[id] or 0, trial.goal) else 0
+			local done = value >= trial.goal
+			local card = UI.panel({
+				Position = UDim2.fromOffset(0, (i - 1) * 88),
+				Size = UDim2.new(1, -4, 0, 78),
+				BackgroundColor3 = if done then Color3.fromRGB(34, 44, 36) else UI.PanelLight,
+			}, body)
+			UI.new("ImageLabel", {
+				Position = UDim2.fromOffset(4, 2),
+				Size = UDim2.fromOffset(74, 74),
+				BackgroundTransparency = 1,
+				Image = Assets.Icons.Trials,
+				ImageTransparency = if done then 0 else 0.15,
+			}, card)
+			UI.text({
+				Position = UDim2.fromOffset(90, 8),
+				Size = UDim2.new(1, -250, 0, 26),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Font = UI.Display,
+				TextSize = 24,
+				Text = trial.text,
+			}, card)
+			local track = UI.new("Frame", {
+				Position = UDim2.fromOffset(90, 44),
+				Size = UDim2.new(1, -250, 0, 16),
+				BackgroundColor3 = Color3.fromRGB(12, 10, 12),
+				BorderSizePixel = 0,
+			}, card)
+			UI.corner(track, UDim.new(1, 0))
+			local fill = UI.new("Frame", {
+				Size = UDim2.fromScale(math.max(value / trial.goal, 0.02), 1),
+				BackgroundColor3 = if done then UI.Jade else UI.Crimson,
+				BorderSizePixel = 0,
+			}, track)
+			UI.corner(fill, UDim.new(1, 0))
+			UI.text({
+				Size = UDim2.fromScale(1, 1),
+				Font = UI.Bold,
+				TextSize = 13,
+				TextStrokeTransparency = 0.3,
+				Text = if done then "COMPLETE" else `{value} / {trial.goal}`,
+			}, track)
+			local reward = UI.new("Frame", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -12, 0.5, 0),
+				Size = UDim2.fromOffset(140, 60),
+				BackgroundTransparency = 1,
+			}, card)
+			UI.new("ImageLabel", {
+				Position = UDim2.fromOffset(0, 0),
+				Size = UDim2.fromOffset(34, 34),
+				BackgroundTransparency = 1,
+				Image = Assets.Icons.Coin,
+			}, reward)
+			UI.text({
+				Position = UDim2.fromOffset(38, 2),
+				Size = UDim2.new(1, -38, 0, 30),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Font = UI.Bold,
+				TextSize = 22,
+				TextColor3 = UI.Gold,
+				Text = UI.number(trial.coins),
+			}, reward)
+			UI.text({
+				Position = UDim2.fromOffset(38, 32),
+				Size = UDim2.new(1, -38, 0, 22),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextSize = 16,
+				TextTransparency = 0.2,
+				Text = `+{trial.xp} XP`,
+			}, reward)
+		end
+	end
+	local secondsLeft = 86400 - os.time() % 86400
+	UI.text({
+		Position = UDim2.fromOffset(0, 258),
+		Size = UDim2.new(1, 0, 0, 20),
+		TextSize = 15,
+		TextTransparency = 0.35,
+		Text = `New trials in {math.floor(secondsLeft / 3600)}h {math.floor(secondsLeft % 3600 / 60)}m  ·  rewards pay out the moment a trial is done`,
+	}, body)
 end
 
 local function storePanel()
@@ -254,12 +457,12 @@ local function storePanel()
 		Text = "Gems will buy cosmetic blade skins, trails and finishers. Packs go on sale once the game is published and its developer products are set up.",
 	}, body)
 	sectionTitle("Earn coins", 110)
-	local rewards = Config.Economy.Rewards
+	local rewards = Progression.Rewards
 	local lines = {
-		`Play a royale  ● {rewards.Played}`,
-		`Each kill  ● {rewards.Kill}   ·   deathblow bonus  ● {rewards.Deathblow}`,
-		`Win  ● {rewards.Win}`,
-		"Daily reward streak  —  see Rewards",
+		`Fight a royale  ·  {rewards.Played.Coins} coins`,
+		`Cut someone down  ·  {rewards.Kill.Coins}   ·   deathblow bonus  ·  {rewards.Deathblow.Coins}`,
+		`Win  ·  {rewards.Win.Coins}   ·   each Mastery level  ·  50+`,
+		"Daily Trials and the login streak pay the most",
 	}
 	for i, line in lines do
 		UI.text({
@@ -317,8 +520,8 @@ local function profilePanel()
 	local rating = attr("Rating", Config.Rating.Start)
 	local rank = Ranks.of(rating)
 	local season = UI.panel({
-		Position = UDim2.new(0.5, 4, 0, 196),
-		Size = UDim2.new(0.5, -4, 0, 96),
+		Position = UDim2.new(0.5, 4, 0, 190),
+		Size = UDim2.new(0.5, -4, 0, 88),
 		BackgroundColor3 = UI.PanelLight,
 	}, body)
 	UI.text({
@@ -328,6 +531,14 @@ local function profilePanel()
 		TextSize = 14,
 		TextTransparency = 0.3,
 		Text = `Season 1  ·  peak {attr("PeakRating", rating)}`,
+	}, season)
+	UI.new("ImageLabel", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, 6, 0, 18),
+		Size = UDim2.fromOffset(64, 64),
+		BackgroundTransparency = 1,
+		Image = Assets.RankCrests[rank.tier] or "",
+		ZIndex = 2,
 	}, season)
 	UI.text({
 		Position = UDim2.fromOffset(12, 24),
@@ -340,14 +551,14 @@ local function profilePanel()
 	}, season)
 	UI.text({
 		Position = UDim2.fromOffset(12, 24),
-		Size = UDim2.new(1, -24, 0, 30),
+		Size = UDim2.new(1, -84, 0, 30),
 		TextXAlignment = Enum.TextXAlignment.Right,
 		Font = UI.Bold,
 		TextSize = 20,
 		Text = `{rating}`,
 	}, season)
 	local bar = UI.new("Frame", {
-		Position = UDim2.fromOffset(12, 66),
+		Position = UDim2.fromOffset(12, 58),
 		Size = UDim2.new(1, -24, 0, 6),
 		BackgroundColor3 = UI.Ink,
 		BorderSizePixel = 0,
@@ -360,7 +571,7 @@ local function profilePanel()
 	}, bar)
 	UI.corner(fill, UDim.new(1, 0))
 	UI.text({
-		Position = UDim2.fromOffset(12, 74),
+		Position = UDim2.fromOffset(12, 66),
 		Size = UDim2.new(1, -24, 0, 16),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextSize = 13,
@@ -470,6 +681,7 @@ local builders: { [string]: () -> () } = {
 	Guide = guidePanel,
 	Weapons = weaponsPanel,
 	Store = storePanel,
+	Trials = trialsPanel,
 	Profile = profilePanel,
 	Rewards = rewardsPanel,
 	Settings = settingsPanel,
@@ -480,7 +692,11 @@ function Panels.redraw()
 		return
 	end
 	clear()
-	titleLabel.Text = if current == "Guide" then "How to fight" else current :: string
+	titleLabel.Text = if current == "Guide"
+		then "How to fight"
+		elseif current == "Weapons" then "Arsenal"
+		elseif current == "Trials" then "Daily Trials"
+		else current :: string
 	builders[current :: string]()
 end
 
@@ -517,10 +733,18 @@ function Panels.start(remote: RemoteEvent)
 	window = UI.panel({
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -200),
-		Size = UDim2.fromOffset(660, 400),
+		Size = UDim2.fromOffset(660, 372),
 		Visible = false,
 	}, screen)
-	UI.new("UISizeConstraint", { MaxSize = Vector2.new(660, 400) }, window)
+	UI.new("UISizeConstraint", { MaxSize = Vector2.new(660, 372) }, window)
+	-- Short screens: shrink so the window never covers the Mastery bar or currencies up top.
+	local fit = UI.new("UIScale", {}, window)
+	local function refit()
+		local height = workspace.CurrentCamera.ViewportSize.Y
+		fit.Scale = math.clamp((height - 290) / 372, 0.6, 1)
+	end
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	refit()
 	titleLabel = UI.text({
 		Position = UDim2.fromOffset(24, 14),
 		Size = UDim2.new(1, -90, 0, 36),

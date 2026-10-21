@@ -13,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Round = require(ReplicatedStorage.Shared.Round)
+local Progression = require(ReplicatedStorage.Shared.Progression)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
 local CombatService = require(script.Parent.CombatService)
 
@@ -23,7 +24,9 @@ export type Data = {
 	Losses: number,
 	Kills: number,
 	Deathblows: number,
-	Played: number,
+	Played: number, -- royales and duels: how much fighting a player has seen
+	DuelWins: number,
+	DuelLosses: number,
 	Coins: number,
 	Gems: number,
 	Rating: number,
@@ -33,6 +36,16 @@ export type Data = {
 	Weapon: string,
 	Owned: { [string]: boolean },
 	WeaponUses: { [string]: number },
+	-- Progression (see Shared/Progression and ProgressService).
+	XP: number, -- toward the next level
+	Level: number,
+	Deflects: number,
+	Perfects: number,
+	Skin: string,
+	OwnedSkins: { [string]: boolean },
+	TrialDay: number, -- UTC day the trial progress below belongs to
+	TrialProgress: { [string]: number },
+	BossClears: { [string]: number }, -- boss id -> times cleared (boss duels)
 }
 
 local STORE_NAME = "PlayerData_v2"
@@ -45,12 +58,19 @@ local NUMBERS = {
 	"Kills",
 	"Deathblows",
 	"Played",
+	"DuelWins",
+	"DuelLosses",
 	"Coins",
 	"Gems",
 	"Rating",
 	"PeakRating",
 	"Streak",
 	"LastDaily",
+	"XP",
+	"Level",
+	"Deflects",
+	"Perfects",
+	"TrialDay",
 }
 
 local StatsService = {}
@@ -93,6 +113,8 @@ local function fresh(): Data
 		Kills = 0,
 		Deathblows = 0,
 		Played = 0,
+		DuelWins = 0,
+		DuelLosses = 0,
 		Coins = Config.Economy.StartCoins,
 		Gems = Config.Economy.StartGems,
 		Rating = Config.Rating.Start,
@@ -102,6 +124,15 @@ local function fresh(): Data
 		Weapon = Weapons.Default,
 		Owned = owned,
 		WeaponUses = {},
+		XP = 0,
+		Level = 1,
+		Deflects = 0,
+		Perfects = 0,
+		Skin = Progression.Skins[1].id,
+		OwnedSkins = { [Progression.Skins[1].id] = true },
+		TrialDay = 0,
+		TrialProgress = {},
+		BossClears = {},
 	}
 end
 
@@ -135,6 +166,31 @@ local function sanitize(saved: unknown): Data
 	if typeof(t.Weapon) == "string" and d.Owned[t.Weapon] then
 		d.Weapon = t.Weapon
 	end
+	if typeof(t.OwnedSkins) == "table" then
+		for id, owned in t.OwnedSkins do
+			if owned == true and Progression.skin(id).id == id then
+				d.OwnedSkins[id] = true
+			end
+		end
+	end
+	if typeof(t.Skin) == "string" and d.OwnedSkins[t.Skin] then
+		d.Skin = t.Skin
+	end
+	if typeof(t.TrialProgress) == "table" then
+		for id, progress in t.TrialProgress do
+			if typeof(id) == "string" and tonumber(progress) then
+				d.TrialProgress[id] = tonumber(progress) :: number
+			end
+		end
+	end
+	if typeof(t.BossClears) == "table" then
+		for id, count in t.BossClears do
+			if typeof(id) == "string" and tonumber(count) then
+				d.BossClears[id] = tonumber(count) :: number
+			end
+		end
+	end
+	d.Level = math.max(1, math.floor(d.Level))
 	return d
 end
 
@@ -154,6 +210,16 @@ local function publish(player: Player)
 	table.sort(owned)
 	player:SetAttribute("OwnedWeapons", table.concat(owned, ","))
 	player:SetAttribute("WeaponUses", HttpService:JSONEncode(d.WeaponUses))
+	player:SetAttribute("Skin", d.Skin)
+	local skins = {}
+	for id in d.OwnedSkins do
+		table.insert(skins, id)
+	end
+	table.sort(skins)
+	player:SetAttribute("OwnedSkins", table.concat(skins, ","))
+	player:SetAttribute("XPToNext", Progression.xpToNext(d.Level))
+	player:SetAttribute("TrialProgress", HttpService:JSONEncode(d.TrialProgress))
+	player:SetAttribute("BossClears", HttpService:JSONEncode(d.BossClears))
 	player:SetAttribute("DataLoaded", true)
 
 	local stats = player:FindFirstChild("leaderstats")
@@ -223,6 +289,11 @@ function StatsService.get(player: Player): Data?
 	return data[player]
 end
 
+-- Republishes after a caller changed the table returned by `get` directly.
+function StatsService.commit(player: Player)
+	publish(player)
+end
+
 -- Adds to a numeric field (negative amounts allowed) and republishes.
 function StatsService.add(player: Player, field: string, amount: number)
 	local d = data[player]
@@ -263,7 +334,16 @@ end
 
 function StatsService.addWin(player: Player)
 	StatsService.add(player, "Wins", 1)
-	StatsService.add(player, "Coins", Config.Economy.Rewards.Win)
+end
+
+-- Elo's expected score for `a` against `b`.
+local function expected(a: Data, b: Data): number
+	return 1 / (1 + 10 ^ ((b.Rating - a.Rating) / 400))
+end
+
+local function applyRating(d: Data, delta: number)
+	d.Rating = math.max(0, math.floor(d.Rating + delta + 0.5))
+	d.PeakRating = math.max(d.PeakRating, d.Rating)
 end
 
 -- Records a finished match. `placements` lists every human participant, best first.
@@ -277,9 +357,8 @@ function StatsService.recordMatch(placements: { Player }, weapons: { [Player]: s
 		for j, b in placements do
 			local da, db = data[a], data[b]
 			if i ~= j and da and db then
-				local expected = 1 / (1 + 10 ^ ((db.Rating - da.Rating) / 400))
 				local score = if i < j then 1 else 0
-				deltas[a] += rules.K * (score - expected) / math.max(#placements - 1, 1)
+				deltas[a] += rules.K * (score - expected(da, db)) / math.max(#placements - 1, 1)
 			end
 		end
 	end
@@ -290,9 +369,7 @@ function StatsService.recordMatch(placements: { Player }, weapons: { [Player]: s
 			if player ~= winner then
 				d.Losses += 1
 			end
-			d.Coins += Config.Economy.Rewards.Played
-			d.Rating = math.max(0, math.floor(d.Rating + deltas[player] + 0.5))
-			d.PeakRating = math.max(d.PeakRating, d.Rating)
+			applyRating(d, deltas[player])
 			local weapon = weapons[player]
 			if weapon then
 				d.WeaponUses[weapon] = (d.WeaponUses[weapon] or 0) + 1
@@ -300,6 +377,41 @@ function StatsService.recordMatch(placements: { Player }, weapons: { [Player]: s
 			publish(player)
 		end
 	end
+end
+
+-- Records a finished duel between `winner` and `loser` (either may be nil for a bot). Both
+-- humans' Played and weapon use count; rating moves only when both sides are human, as one
+-- full-weight Elo result. Returns each human's rating change.
+function StatsService.recordDuel(winner: Player?, loser: Player?, weapons: { [Player]: string }): { [Player]: number }
+	local changes: { [Player]: number } = {}
+	local dw, dl = winner and data[winner], loser and data[loser]
+	if winner and loser and dw and dl then
+		local before = { dw.Rating, dl.Rating }
+		local delta = Config.Rating.K * (1 - expected(dw, dl))
+		applyRating(dw, delta)
+		applyRating(dl, -delta)
+		changes[winner] = dw.Rating - before[1]
+		changes[loser] = dl.Rating - before[2]
+	end
+	local function count(player: Player?, d: Data?, won: boolean)
+		if not player or not d then
+			return
+		end
+		d.Played += 1
+		if won then
+			d.DuelWins += 1
+		else
+			d.DuelLosses += 1
+		end
+		local weapon = weapons[player]
+		if weapon then
+			d.WeaponUses[weapon] = (d.WeaponUses[weapon] or 0) + 1
+		end
+		publish(player)
+	end
+	count(winner, dw, true)
+	count(loser, dl, false)
+	return changes
 end
 
 function StatsService.onChanged(listener: (Player) -> ())
@@ -316,17 +428,19 @@ function StatsService.start()
 	end)
 	legacyStore = if legacyOk then legacy else nil
 
-	-- Kill credit and coins count in matches only, so sparring in the lobby can't farm them.
-	CombatService.onDied(function(_victim: Combatant, killer: Combatant?, deathblow: boolean)
-		if killer and killer.player and Round.phase() == "Match" then
+	-- Kill credit and coins count in matches and duels only, so sparring in the lobby can't
+	-- farm them. Cutting down a fighter who will resurrect pays the same as a kill.
+	local function credit(_victim: Combatant, killer: Combatant?, deathblow: boolean)
+		local fighting = Round.phase() == "Match" or (killer and killer.model:GetAttribute("InDuel") == true)
+		if killer and killer.player and fighting then
 			StatsService.add(killer.player, "Kills", 1)
-			StatsService.add(killer.player, "Coins", Config.Economy.Rewards.Kill)
 			if deathblow then
 				StatsService.add(killer.player, "Deathblows", 1)
-				StatsService.add(killer.player, "Coins", Config.Economy.Rewards.Deathblow)
 			end
 		end
-	end)
+	end
+	CombatService.onDied(credit)
+	CombatService.onCutDown(credit)
 
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do

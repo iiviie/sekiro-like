@@ -44,7 +44,7 @@
         "TimeOfDay": "16:48:00",
         "GeographicLatitude": -40,
         "Brightness": 2.6,
-        "ExposureCompensation": 0.05,
+        "ExposureCompensation": 0.3,
         "EnvironmentDiffuseScale": 0.5,
         "EnvironmentSpecularScale": 0.35,
         "GlobalShadows": true,
@@ -55,9 +55,9 @@
           0.275
         ],
         "OutdoorAmbient": [
-          0.408,
-          0.345,
-          0.486
+          0.48,
+          0.41,
+          0.52
         ],
         "ColorShift_Top": [
           1.0,
@@ -96,7 +96,7 @@
             0.455
           ],
           "Glare": 0.45,
-          "Haze": 1.4
+          "Haze": 1.1
         }
       },
       "Bloom": {
@@ -111,8 +111,8 @@
         "$className": "ColorCorrectionEffect",
         "$properties": {
           "Brightness": 0.0,
-          "Contrast": 0.12,
-          "Saturation": -0.1,
+          "Contrast": 0.1,
+          "Saturation": 0.08,
           "TintColor": [
             1.0,
             0.97,

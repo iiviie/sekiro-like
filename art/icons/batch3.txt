@@ -1,0 +1,7 @@
+touch_slash|a single bold crescent-shaped katana slash arc made of white-hot steel light with a crimson edge, like a brush stroke swoosh, centred, iconic button glyph
+touch_block|a katana held horizontally in a guard position seen from the front, blade glinting, a small burst of white sparks at the centre of the blade, iconic button glyph
+touch_dodge|a dynamic swirl of wind with three speed lines and a few drifting sakura petals, iconic dash/evade button glyph
+touch_thrust|a katana thrusting straight forward toward the viewer at a slight angle with a red danger glow and the red kanji character 危 behind it, iconic button glyph
+touch_sweep|a low horizontal sweeping katana arc skimming over the ground with red danger glow and dust, iconic button glyph
+touch_heal|a small brown gourd sake bottle (hyotan) with a crimson cord and a soft green healing glow, iconic button glyph
+touch_lock|a crimson and gold targeting reticle shaped like a samurai crest circle with four inward brush-stroke ticks, iconic button glyph

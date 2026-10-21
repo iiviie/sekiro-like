@@ -185,6 +185,8 @@ local function title(player: Player)
 		created.MaxDistance = 70
 		created.LightInfluence = 0
 		created.ResetOnSpawn = false
+		-- Your own title would float in the middle of your own view.
+		created.PlayerToHideFrom = player
 		local wins = Instance.new("TextLabel")
 		wins.Name = "Wins"
 		wins.BackgroundTransparency = 1

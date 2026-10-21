@@ -290,5 +290,5 @@ if __name__ == "__main__":
     vignette()
     ink_band()
     gourd()
-    for text, name in [("危", "kanji_peril"), ("死", "kanji_death"), ("忍殺", "kanji_execution"), ("勝", "kanji_victory"), ("終", "kanji_end"), ("決闘", "kanji_duel")]:
+    for text, name in [("危", "kanji_peril"), ("死", "kanji_death"), ("忍殺", "kanji_execution"), ("勝", "kanji_victory"), ("終", "kanji_end"), ("決闘", "kanji_duel"), ("回生", "kanji_resurrect"), ("斬", "kanji_slay"), ("一騎討", "kanji_final"), ("紅月", "kanji_bloodmoon"), ("鉄心", "kanji_ironwill"), ("霧", "kanji_mist")]:
         kanji(text, name)

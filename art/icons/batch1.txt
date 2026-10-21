@@ -1,0 +1,10 @@
+menu_howto|a rolled-up parchment scroll tied with a crimson silk cord and a small gold tassel, partly unrolled showing faint brush marks (no readable characters)
+menu_weapons|a single katana drawn diagonally from bottom-left to top-right, black-wrapped hilt with diamond pattern, round gold tsuba, gleaming steel blade with a hamon line
+menu_store|a plump drawstring coin pouch made of crimson silk with gold embroidery, tied with gold cord, three gold mon coins with square holes spilling out in front
+menu_profile|a samurai kabuto helmet seen from the front three-quarter, black lacquer bowl, golden crescent crest (maedate), crimson cords, menpo face guard
+menu_rewards|a small lacquered crimson treasure chest with gold corner fittings, lid slightly open with warm gold light and coins glinting inside
+menu_settings|an ornate bronze katana tsuba (sword guard) with cut-out sakura petal pattern so it looks like a gear, gold rim
+menu_quests|a hanging wooden ema prayer plaque with a crimson cord and a big bold red brush-stroke check mark on it
+cur_coin|a single thick gold mon coin with a square hole in the centre, embossed rim, one crisp highlight, seen at a slight angle
+cur_gem|a single glossy jade green magatama (comma-shaped jewel) with a small hole, inner glow, one crisp white highlight
+icon_trophy|a crimson nobori war banner on a black pole planted next to a sheathed katana, banner flapping, gold finial

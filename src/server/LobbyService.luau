@@ -1,10 +1,11 @@
 --!strict
 -- Lobby rules and actions. Players spawn on the lobby island, queue for the royale with the
 -- PLAY button or by stepping on the glowing pad, equip and buy weapons, claim daily rewards,
--- and can opt into lobby sparring. A deflect trainer swings at whoever steps into its ring.
+-- and can opt into lobby sparring. Duel pads are DuelService's. A deflect trainer swings at whoever steps into its ring.
 --
 -- Client requests arrive on the LobbyAction remote as (action, argument):
 --   "Queue" boolean   | "PvP" boolean | "Equip" weaponId | "Buy" weaponId | "ClaimDaily"
+--   "BuySkin" skinId  | "EquipSkin" skinId
 -- Everything is validated here; the client only ever asks.
 
 local Players = game:GetService("Players")
@@ -14,7 +15,9 @@ local RunService = game:GetService("RunService")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Weapons = require(ReplicatedStorage.Shared.Weapons)
 local CombatService = require(script.Parent.CombatService)
+local ProgressService = require(script.Parent.ProgressService)
 local StatsService = require(script.Parent.StatsService)
+local SwordRig = require(script.Parent.SwordRig)
 
 type Combatant = CombatService.Combatant
 
@@ -25,7 +28,9 @@ local SECONDS_PER_DAY = 86400
 
 local LobbyService = {}
 
-local inMatch: { [Model]: boolean } = {} -- characters currently placed in the arena
+-- Characters placed in a fight, and which one: "Royale", or "Duel<n>" for a duel terrace.
+-- Hits only land between fighters in the same one.
+local inMatch: { [Model]: string } = {}
 local pvpPending: { [Player]: number } = {}
 
 local function remote(name: string): RemoteEvent
@@ -58,13 +63,35 @@ function LobbyService.isQueued(player: Player): boolean
 	return player:GetAttribute("Queued") == true
 end
 
-function LobbyService.setInMatch(model: Model, value: boolean)
-	inMatch[model] = if value then true else nil
-	model:SetAttribute("InMatch", value)
+local function setArena(model: Model, arena: string?)
+	inMatch[model] = arena
+	-- Replicated so every client can tell who shares its fight (Shared/Spacing).
+	model:SetAttribute("Arena", arena)
 	local player = Players:GetPlayerFromCharacter(model)
 	if player then
 		refreshSafe(player)
 	end
+end
+
+function LobbyService.setInMatch(model: Model, value: boolean)
+	model:SetAttribute("InMatch", value)
+	setArena(model, if value then "Royale" else nil)
+end
+
+-- Puts a fighter on duel terrace `ground` (nil takes them off). Duellists carry the InDuel
+-- attribute instead of InMatch, so the royale HUD and its ring leave them alone.
+function LobbyService.setInDuel(model: Model, ground: number?)
+	model:SetAttribute("InDuel", ground ~= nil)
+	setArena(model, if ground then `Duel{ground}` else nil)
+end
+
+-- Puts a fighter (the player or the boss) in boss arena `arena` (nil takes them off). They
+-- carry InDuel too, so everything that treats a duel as a real fight (the HUD, music, Coach,
+-- kill credit) treats a boss fight the same way; InBoss tells the two apart.
+function LobbyService.setInBoss(model: Model, arena: number?)
+	model:SetAttribute("InDuel", arena ~= nil)
+	model:SetAttribute("InBoss", arena ~= nil)
+	setArena(model, if arena then `Boss{arena}` else nil)
 end
 
 -- Layout points published by LobbyBuilder on Workspace.Lobby.
@@ -150,6 +177,16 @@ local handlers: { [string]: (Player, unknown) -> () } = {
 	end,
 	ClaimDaily = function(player)
 		claimDaily(player)
+	end,
+	BuySkin = function(player, id)
+		if typeof(id) == "string" and ProgressService.buySkin(player, id) and player.Character then
+			SwordRig.applySkin(player.Character)
+		end
+	end,
+	EquipSkin = function(player, id)
+		if typeof(id) == "string" and ProgressService.equipSkin(player, id) and player.Character then
+			SwordRig.applySkin(player.Character)
+		end
 	end,
 }
 
@@ -248,7 +285,7 @@ function LobbyService.start()
 	-- the trainer.
 	CombatService.setHitFilter(function(attacker: Combatant, target: Combatant)
 		if inMatch[attacker.model] or inMatch[target.model] then
-			return inMatch[attacker.model] == true and inMatch[target.model] == true
+			return inMatch[attacker.model] == inMatch[target.model]
 		end
 		if attacker.model:GetAttribute("Trainer") or target.model:GetAttribute("Trainer") then
 			return true

@@ -14,6 +14,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local CombatHUD = require(script.Parent.CombatHUD)
+local Config = require(ReplicatedStorage.Shared.Config)
 local Round = require(ReplicatedStorage.Shared.Round)
 local Types = require(ReplicatedStorage.Shared.Types)
 
@@ -174,6 +175,22 @@ end
 ---------------------------------------------------------------------------------------
 -- Ring
 
+-- Column transparency by distance to the camera: hidden, faint, normal.
+local MIST_NEAR = {
+	NumberSequence.new(1),
+	NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.85),
+		NumberSequenceKeypoint.new(0.3, 0.93),
+		NumberSequenceKeypoint.new(1, 1),
+	}),
+	NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.45),
+		NumberSequenceKeypoint.new(0.3, 0.75),
+		NumberSequenceKeypoint.new(1, 1),
+	}),
+}
+local mistLevels: { number } = {}
+
 local function buildRing()
 	ring = Instance.new("Part")
 	ring.Name = "MistRing"
@@ -196,11 +213,7 @@ local function buildRing()
 		beam.FaceCamera = true
 		beam.Segments = 1
 		beam.Color = ColorSequence.new(Color3.fromRGB(210, 36, 28), Color3.fromRGB(110, 12, 12))
-		beam.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.45),
-			NumberSequenceKeypoint.new(0.3, 0.75),
-			NumberSequenceKeypoint.new(1, 1),
-		})
+		beam.Transparency = MIST_NEAR[3]
 		beam.LightEmission = 0.5
 		beam.LightInfluence = 0.3
 		beam.Enabled = false
@@ -226,11 +239,21 @@ local function showRing(visible: boolean)
 end
 
 local function placeRing(center: Vector3, radius: number)
+	-- Camera-facing columns right beside the lens would fill the screen with flat red, so
+	-- columns fade out as the camera gets close; the screen tint says you're in the mist.
+	local camera = workspace.CurrentCamera
+	local eye = if camera then camera.CFrame.Position else Vector3.zero
 	for i = 1, MIST_COLUMNS do
 		local angle = (i / MIST_COLUMNS) * math.pi * 2
 		local base = Vector3.new(center.X + math.cos(angle) * radius, MIST_BASE_Y, center.Z + math.sin(angle) * radius)
 		mistBottoms[i].Position = base
 		mistTops[i].Position = base + Vector3.new(0, MIST_HEIGHT, 0)
+		local gap = Vector3.new(base.X - eye.X, 0, base.Z - eye.Z).Magnitude
+		local level = if gap < 9 then 1 elseif gap < 20 then 2 else 3
+		if mistLevels[i] ~= level then
+			mistLevels[i] = level
+			mistBeams[i].Transparency = MIST_NEAR[level]
+		end
 	end
 	-- Each column a little wider than the gap to its neighbour, so the wall has no holes.
 	local width = 2 * math.pi * radius / MIST_COLUMNS + 0.4
@@ -334,10 +357,14 @@ end
 
 -- "Intermission" -> "I N T E R M I S S I O N", the way Souls games set their titles.
 local function spaced(text: string): string
-	return (string.upper(text):gsub("(.)", "%1 ")):sub(1, -2)
+	return (string.upper(text):gsub(utf8.charpattern, "%0 ")):sub(1, -2)
 end
 
 local function refreshBanner()
+	-- While you duel, DuelHUD's score banner takes this spot.
+	local banner = phaseLabel.Parent :: Frame
+	local duelState = player:GetAttribute("DuelState")
+	banner.Visible = duelState ~= "Dueling" and duelState ~= "Boss" -- and BossHUD's banner in a boss fight
 	local phase = Round.phase()
 	local remaining = Round.endsAt() - now()
 	local character = player.Character
@@ -372,20 +399,73 @@ local function refreshBanner()
 	end
 end
 
+local function omenById(id: string?): { [string]: string }?
+	for _, omen in Config.Omens.List do
+		if omen.id == id then
+			return omen
+		end
+	end
+	return nil
+end
+
+-- Blood Moon stains the whole match red.
+local bloodMoonGrade: ColorCorrectionEffect? = nil
+local function refreshOmenGrade()
+	local on = state:GetAttribute("Omen") == "BloodMoon"
+	if on and not bloodMoonGrade then
+		local grade = Instance.new("ColorCorrectionEffect")
+		grade.Name = "BloodMoon"
+		grade.TintColor = Color3.new(1, 1, 1)
+		grade.Parent = workspace.CurrentCamera
+		bloodMoonGrade = grade
+		TweenService:Create(grade, TweenInfo.new(2), {
+			TintColor = Color3.fromRGB(255, 176, 168),
+			Contrast = 0.12,
+			Saturation = 0.1,
+		}):Play()
+	elseif not on and bloodMoonGrade then
+		bloodMoonGrade:Destroy()
+		bloodMoonGrade = nil
+	end
+end
+
+local killStreak = 0
+local finalShown = false
+
 local function onRoundEvent(kind: string, data: { [string]: any })
+	if (kind == "Eliminated" or kind == "CutDown") and data.killer == player.DisplayName and not data.deathblow then
+		-- Your own kill: a 斬 splash that counts the streak (deathblows get 忍殺 instead).
+		killStreak += 1
+		local words = { "Cut down", "Two cut down", "Three cut down", "Four cut down", "Five cut down" }
+		CombatHUD.splash(Assets.UI.KanjiSlay, words[math.min(killStreak, #words)], CRIMSON, 0.9)
+	end
 	if kind == "MatchStart" then
 		local character = player.Character
+		killStreak = 0
+		finalShown = false
 		wasInMatch = character ~= nil and character:GetAttribute("InMatch") == true
 		if not wasInMatch then
 			return
 		end
 		CombatHUD.splash(Assets.UI.KanjiDuel, `{data.fighters} fighters enter. One leaves.`, CRIMSON, 1.6)
+		CombatHUD.showControls()
+		local omen = omenById(data.omen)
+		if omen then
+			task.delay(3, function()
+				CombatHUD.splash(Assets.UI.Omens[omen.id], `Omen: {omen.name}  ·  {omen.text}`, GOLD, 2)
+			end)
+		end
 	elseif kind == "Eliminated" then
 		local text = if data.killer and data.deathblow
 			then `{data.killer} executed {data.victim}`
 			elseif data.killer then `{data.killer} slew {data.victim}`
 			else `{data.victim} was swallowed by the mist`
 		pushFeed(text, if data.deathblow then CRIMSON else PARCHMENT)
+	elseif kind == "CutDown" then
+		local text = if data.killer
+			then `{data.killer} cut down {data.victim}  ·  回生`
+			else `{data.victim} fell to the mist  ·  回生`
+		pushFeed(text, PARCHMENT)
 	elseif kind == "Victory" then
 		local fought = wasInMatch
 		wasInMatch = false
@@ -411,6 +491,27 @@ function RoundHUD.start()
 	buildRing()
 
 	ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("RoundEvent").OnClientEvent:Connect(onRoundEvent)
+
+	state:GetAttributeChangedSignal("Omen"):Connect(refreshOmenGrade)
+
+	-- Two left: the royale becomes a duel, and says so.
+	state:GetAttributeChangedSignal("Alive"):Connect(function()
+		if Round.phase() ~= "Match" or state:GetAttribute("Alive") ~= 2 or finalShown then
+			return
+		end
+		finalShown = true
+		local character = player.Character
+		local fighting = character ~= nil
+			and character:GetAttribute("InMatch") == true
+			and character:GetAttribute("CombatState") ~= "Dead"
+		if fighting then
+			task.delay(1, function()
+				CombatHUD.splash(Assets.UI.KanjiFinal, "Final duel", CRIMSON, 1.4)
+			end)
+		else
+			pushFeed("Two remain: the final duel", CRIMSON)
+		end
+	end)
 
 	-- Text only needs to change a few times a second.
 	task.spawn(function()

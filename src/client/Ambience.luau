@@ -48,7 +48,11 @@ function Ambience.start()
 	local playing = false
 	local function refresh()
 		local character = player.Character
-		local fighting = Round.phase() == "Match" and character ~= nil and character:GetAttribute("InMatch") == true
+		local fighting = character ~= nil
+			and (
+				(Round.phase() == "Match" and character:GetAttribute("InMatch") == true)
+				or character:GetAttribute("InDuel") == true
+			)
 		if fighting == playing then
 			return
 		end
@@ -63,6 +67,7 @@ function Ambience.start()
 	Round.state():GetAttributeChangedSignal("Phase"):Connect(refresh)
 	local function watch(character: Model)
 		character:GetAttributeChangedSignal("InMatch"):Connect(refresh)
+		character:GetAttributeChangedSignal("InDuel"):Connect(refresh)
 		refresh()
 	end
 	player.CharacterAdded:Connect(watch)
