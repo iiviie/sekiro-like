@@ -18,8 +18,9 @@ roblox.yml
 art/**/__pycache__/
 *.blend1
 
-# Codex image-generation logs
-art/icons/raw/*.log
+# Codex image-generation originals and logs: full-res PNGs (2-3 MB each) stay on disk only;
+# the game uses the 512 px cut-outs in art/icons/png/.
+art/icons/raw/
 art/store/*.log
 
 # Kannagi retarget viewer: embeds the source game model; regenerate with ~/re/kannagi-usagi/scripts/anim/viewblend.py
