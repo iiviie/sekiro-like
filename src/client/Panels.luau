@@ -631,9 +631,10 @@ local function settingsPanel()
 		ScrollBarImageColor3 = UI.Theme.Gold,
 		CanvasSize = UDim2.fromOffset(0, rowY(#options + 5) + 4),
 	}, body)
-	-- A profile that didn't load can't save them.
+	-- The window is already titled Settings: say where they live (a profile that didn't load
+	-- can't save them).
 	sectionTitle(
-		if player:GetAttribute("DataFailed") == true then "Settings  ·  not saved this time" else "Settings",
+		if player:GetAttribute("DataFailed") == true then "Not saved this time" else "Saved with your progress",
 		0,
 		list
 	)

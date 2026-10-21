@@ -995,6 +995,7 @@ function StatsService.debugReload(player: Player, raw: { [string]: any }?): Data
 	data[player] = nil
 	loaded[player] = nil
 	failed[player] = nil
+	privateSent[player] = nil -- like a rejoin: the owner gets every private field again
 	local stats = player:FindFirstChild("leaderstats")
 	if stats then
 		stats:Destroy()
