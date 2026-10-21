@@ -9,6 +9,9 @@
 -- strings, nested tables, `--` comments. Formulas below it must match the sim's copies.
 -- Tuning history and the targets they meet: research_notes/progression/04_pacing_sim.md.
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
 local EconomyConfig = {}
 
 -- BEGIN NUMBERS
@@ -198,9 +201,18 @@ EconomyConfig.PaidCapsule = "studio" :: "off" | "studio" | "on"
 local SECONDS_PER_DAY = 86400
 
 -- UTC day number on the server clock. The client never computes days: the server publishes
--- `ServerDay` and `DayEndsAt` on ReplicatedStorage (see Economy).
+-- `ServerDay` and `DayEndsAt` on ReplicatedStorage (see Economy). In Studio, the attribute
+-- ReplicatedStorage.DayOffset (whole days) moves "today" for day-2 / day-7 tests of missions,
+-- the streak, the shop and the daily caps (countdowns then read long by that many days).
 function EconomyConfig.day(time: number?): number
-	return math.floor((time or os.time()) / SECONDS_PER_DAY)
+	local t = time or os.time()
+	if time == nil and RunService:IsStudio() then
+		local offset = ReplicatedStorage:GetAttribute("DayOffset")
+		if typeof(offset) == "number" then
+			t += math.floor(offset) * SECONDS_PER_DAY
+		end
+	end
+	return math.floor(t / SECONDS_PER_DAY)
 end
 
 -- XP needed to go from `level` to `level + 1`.
