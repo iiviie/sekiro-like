@@ -21,6 +21,11 @@ local UI = {
 	Gold = Color3.fromRGB(232, 190, 92),
 	Jade = Color3.fromRGB(96, 176, 132),
 	Corner = UDim.new(0, 6),
+	Dim = Color3.fromRGB(140, 130, 120), -- disabled / not-yet text
+	Selected = Color3.fromRGB(64, 46, 36), -- a picked card
+	Muted = Color3.fromRGB(28, 24, 27), -- a card for something not owned
+	Danger = Color3.fromRGB(240, 150, 120), -- warnings (save failed)
+	Touch = 60, -- touch target height at scale 1 (large panels scale to >= 0.8 on a phone)
 }
 
 function UI.new(className: string, props: { [string]: any }, parent: Instance?): any
@@ -127,6 +132,264 @@ function UI.number(n: number): string
 	local s = tostring(math.floor(n))
 	local formatted = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
 	return (formatted:gsub("^,", ""))
+end
+
+---------------------------------------------------------------------------------------
+-- Shared widgets for the large panels (Store, Locker): action buttons, notes and headings
+-- for scrolling lists, balance pills, tab rows, dots, and modal sheets.
+
+-- A button styled by whether it can be pressed now (crimson when live, quiet when not).
+function UI.actionButton(parent: Instance, props: { [string]: any }, live: boolean): TextButton
+	props.BackgroundColor3 = props.BackgroundColor3 or (if live then UI.Crimson else UI.Panel)
+	props.TextColor3 = props.TextColor3 or (if live then UI.Parchment else UI.Dim)
+	props.TextSize = props.TextSize or 18
+	local button = UI.button(props, parent)
+	if not live then
+		UI.stroke(button, UI.Bronze, 1, 0.5)
+	end
+	return button
+end
+
+-- A quiet wrapped line in a list layout.
+function UI.note(parent: Instance, text: string, order: number, height: number?): TextLabel
+	return UI.text({
+		Name = "Note",
+		LayoutOrder = order,
+		Size = UDim2.new(1, 0, 0, height or 22),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		TextSize = 15,
+		TextTransparency = 0.25,
+		Text = text,
+	}, parent)
+end
+
+-- A gold section heading in a list layout.
+function UI.heading(parent: Instance, text: string, order: number): TextLabel
+	return UI.text({
+		LayoutOrder = order,
+		Size = UDim2.new(1, 0, 0, 28),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Font = UI.Display,
+		TextSize = 24,
+		TextColor3 = UI.Gold,
+		Text = text,
+	}, parent)
+end
+
+-- A small crimson "something new" dot in a corner of `parent`.
+function UI.dot(parent: Instance, size: number?, color: Color3?): Frame
+	local s = size or 14
+	local dot = UI.new("Frame", {
+		Name = "Dot",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(1, -s / 2 - 1, 0, s / 2 + 1),
+		Size = UDim2.fromOffset(s, s),
+		BackgroundColor3 = color or UI.Crimson,
+		BorderSizePixel = 0,
+		ZIndex = 3,
+	}, parent)
+	UI.corner(dot, UDim.new(1, 0))
+	UI.stroke(dot, UI.Parchment, 1.5, 0)
+	return dot
+end
+
+---------------------------------------------------------------------------------------
+-- A modal sheet over a panel window (parented to the window, so a panel redraw that clears
+-- its body leaves it alone): title, close button, content; UI.confirm builds on it.
+
+local openSheet: Frame? = nil
+
+function UI.closeSheet()
+	if openSheet then
+		openSheet:Destroy()
+		openSheet = nil
+	end
+end
+
+-- Opens a sheet over `window`; `build(content)` fills it. Returns the content frame.
+function UI.sheet(window: GuiObject, title: string, build: (Frame) -> (), size: Vector2?): Frame
+	UI.closeSheet()
+	local dims = size or Vector2.new(560, 320)
+	local shade = UI.new("TextButton", {
+		Name = "Sheet",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.4,
+		Text = "",
+		AutoButtonColor = false,
+		ZIndex = 20,
+	}, window)
+	UI.corner(shade)
+	local card = UI.panel({
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(dims.X, dims.Y),
+		ZIndex = 21,
+	}, shade)
+	UI.text({
+		Position = UDim2.fromOffset(20, 10),
+		Size = UDim2.new(1, -90, 0, 34),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Font = UI.Display,
+		TextSize = 28,
+		Text = title,
+		ZIndex = 22,
+	}, card)
+	local close = UI.button({
+		Name = "Close",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -10, 0, 8),
+		Size = UDim2.fromOffset(UI.Touch, 44),
+		Text = "X",
+		TextSize = 20,
+		BackgroundColor3 = UI.PanelLight,
+		ZIndex = 22,
+	}, card)
+	close.Activated:Connect(UI.closeSheet)
+	local content = UI.new("Frame", {
+		Name = "Content",
+		Position = UDim2.fromOffset(20, 58),
+		Size = UDim2.new(1, -40, 1, -70),
+		BackgroundTransparency = 1,
+		ZIndex = 22,
+	}, card)
+	openSheet = shade :: any
+	build(content)
+	-- Everything inside sits above the shade.
+	for _, child in content:GetDescendants() do
+		if child:IsA("GuiObject") then
+			child.ZIndex = math.max(child.ZIndex, 22)
+		end
+	end
+	return content
+end
+
+-- "Spend 400 gems on Ink Brush?" with a confirm and a cancel.
+function UI.confirm(window: GuiObject, title: string, text: string, yes: string, onYes: () -> ())
+	UI.sheet(window, title, function(content)
+		UI.text({
+			Size = UDim2.new(1, 0, 1, -UI.Touch - 12),
+			TextWrapped = true,
+			TextSize = 20,
+			Text = text,
+		}, content)
+		local ok = UI.button({
+			Name = "Confirm",
+			AnchorPoint = Vector2.new(1, 1),
+			Position = UDim2.fromScale(1, 1),
+			Size = UDim2.new(0.5, -6, 0, UI.Touch),
+			Text = yes,
+			BackgroundColor3 = UI.Crimson,
+		}, content)
+		local cancel = UI.button({
+			Name = "Cancel",
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.new(0.5, -6, 0, UI.Touch),
+			Text = "Not now",
+		}, content)
+		UI.stroke(cancel)
+		ok.Activated:Connect(function()
+			UI.closeSheet()
+			onYes()
+		end)
+		cancel.Activated:Connect(UI.closeSheet)
+	end, Vector2.new(480, 240))
+end
+
+-- A small balance chip ("[gem] 1,240") for a panel header.
+function UI.pill(parent: Instance, image: string, value: number, color: Color3, order: number)
+	local chip = UI.new("Frame", {
+		Size = UDim2.fromOffset(0, 34),
+		AutomaticSize = Enum.AutomaticSize.X,
+		LayoutOrder = order,
+		BackgroundColor3 = UI.Ink,
+		BackgroundTransparency = 0.2,
+		BorderSizePixel = 0,
+	}, parent)
+	UI.corner(chip, UDim.new(1, 0))
+	UI.new("UIPadding", { PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12) }, chip)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 4),
+	}, chip)
+	UI.new("ImageLabel", {
+		Size = UDim2.fromOffset(32, 32),
+		BackgroundTransparency = 1,
+		Image = image,
+	}, chip)
+	UI.text({
+		Size = UDim2.fromOffset(0, 30),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Font = UI.Bold,
+		TextSize = 18,
+		TextColor3 = color,
+		Text = UI.number(value),
+	}, chip)
+end
+
+-- A scrolling list filling `parent` (vertical list layout).
+function UI.scroll(parent: Instance, padding: number?): ScrollingFrame
+	local list = UI.new("ScrollingFrame", {
+		Name = "List",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 6,
+		ScrollBarImageColor3 = UI.Bronze,
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		CanvasSize = UDim2.new(),
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+	}, parent)
+	UI.new("UIListLayout", { Padding = UDim.new(0, padding or 10), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+	UI.new("UIPadding", { PaddingRight = UDim.new(0, 10), PaddingBottom = UDim.new(0, 8) }, list)
+	return list
+end
+
+-- A row of tab buttons; `selected` is highlighted; `onPick(id)` on press. Each tab may
+-- carry a dot (something new inside).
+function UI.tabs(
+	parent: Instance,
+	tabs: { { id: string, label: string, dot: boolean? } },
+	selected: string,
+	onPick: (string) -> (),
+	height: number?
+): Frame
+	local row = UI.new("Frame", {
+		Name = "Tabs",
+		Size = UDim2.new(1, 0, 0, height or 48),
+		BackgroundTransparency = 1,
+	}, parent)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, row)
+	for i, tab in tabs do
+		local on = tab.id == selected
+		local button = UI.button({
+			Name = tab.id,
+			LayoutOrder = i,
+			Size = UDim2.new(1 / #tabs, -8 * (#tabs - 1) / #tabs, 1, 0),
+			Text = tab.label,
+			TextSize = 18,
+			Font = if on then UI.Bold else UI.Body,
+			BackgroundColor3 = if on then UI.Crimson else UI.PanelLight,
+			TextColor3 = if on then UI.Parchment else Color3.fromRGB(200, 190, 172),
+		}, row)
+		if not on then
+			UI.stroke(button, UI.Bronze, 1, 0.5)
+		end
+		if tab.dot then
+			UI.dot(button, nil, if on then UI.Gold else UI.Crimson)
+		end
+		button.Activated:Connect(function()
+			onPick(tab.id)
+		end)
+	end
+	return row
 end
 
 return UI

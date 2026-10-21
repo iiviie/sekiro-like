@@ -1,16 +1,17 @@
 --!strict
--- The lobby's menus, one centred panel at a time: Weapons (equip and unlock with coins),
--- Store, Profile (stats, most used weapons, ranked season), Rewards (daily streak) and
--- Settings. Every panel redraws from player attributes, so it is always current. Prices,
--- names and rule texts come from Shared/Catalog; what the player owns, what's unlocked and
--- what day it is come from the server (attributes), never from client-side rules or clocks.
+-- The lobby's menus, one centred panel at a time: How to fight, Trials, Profile (stats, most
+-- used weapons, ranked season), Rewards (daily streak) and Settings live here; the Store,
+-- the Locker and the Pass are registered from their own modules (Panels.register) and open
+-- in a large window that takes most of the screen (the lobby HUD steps aside under it).
+-- Every panel redraws from player attributes, so it is always current. What the player
+-- owns, what's unlocked and what day it is come from the server (attributes), never from
+-- client-side rules or clocks.
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
-local Catalog = require(ReplicatedStorage.Shared.Catalog)
 local Config = require(ReplicatedStorage.Shared.Config)
 local EconomyConfig = require(ReplicatedStorage.Shared.EconomyConfig)
 local Progression = require(ReplicatedStorage.Shared.Progression)
@@ -43,35 +44,6 @@ end
 local function secondsLeftToday(): number
 	local endsAt = ReplicatedStorage:GetAttribute("DayEndsAt") or 0
 	return math.max(0, endsAt - workspace:GetServerTimeNow())
-end
-
--- Owned catalogue ids (server-published).
-local function owned(): { [string]: boolean }
-	local set = {}
-	for id in string.gmatch(attr("Inventory", ""), "[^,]+") do
-		set[id] = true
-	end
-	return set
-end
-
-local function loadout(): { [string]: string }
-	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, attr("Loadout", "{}"))
-	return if ok and typeof(decoded) == "table" then decoded else {}
-end
-
--- { have, need } toward each ruled item the player doesn't own yet, from the server.
-local function unlockProgress(): { [string]: { number } }
-	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, attr("UnlockProgress", "{}"))
-	return if ok and typeof(decoded) == "table" then decoded else {}
-end
-
--- Whether `item`'s rule is met (or it has none), and the "rule (x/y)" text when it isn't.
-local function lockText(item: Catalog.Item, progress: { [string]: { number } }): (boolean, string?)
-	local entry = progress[item.id]
-	if not item.rule or not entry or entry[1] >= entry[2] then
-		return true, nil
-	end
-	return false, `{item.rule.text}  ({entry[1]}/{entry[2]})`
 end
 
 local function clear()
@@ -199,217 +171,6 @@ local function guidePanel()
 	}, list)
 end
 
-local function weaponsPanel()
-	local have = owned()
-	local worn = loadout()
-	local progress = unlockProgress()
-	local coins = attr("Coins", 0)
-	local list = UI.new("ScrollingFrame", {
-		Size = UDim2.fromScale(1, 1),
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ScrollBarThickness = 4,
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		CanvasSize = UDim2.new(),
-	}, body)
-	UI.new("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, list)
-	for i, ref in Weapons.Order do
-		local def = Weapons.get(ref)
-		local item = Catalog.get(Catalog.idOf("weapon", ref))
-		if not item then
-			continue
-		end
-		local id = item.id
-		local price = if item.price then item.price.coins or 0 else 0
-		local unlocked, rule = lockText(item, progress)
-		local card =
-			UI.panel({ Size = UDim2.new(1, -8, 0, 104), LayoutOrder = i, BackgroundColor3 = UI.PanelLight }, list)
-		UI.new("ImageLabel", {
-			Position = UDim2.fromOffset(4, 2),
-			Size = UDim2.fromOffset(100, 100),
-			BackgroundTransparency = 1,
-			Image = (Assets.Icons :: any)[ref] or Assets.Icons.Weapons,
-		}, card)
-		local textInset = UI.new("Frame", {
-			Position = UDim2.fromOffset(100, 0),
-			Size = UDim2.new(1, -100, 1, 0),
-			BackgroundTransparency = 1,
-		}, card)
-		UI.text({
-			Position = UDim2.fromOffset(14, 8),
-			Size = UDim2.new(1, -170, 0, 30),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Font = UI.Display,
-			TextSize = 28,
-			Text = def.name,
-		}, textInset)
-		UI.text({
-			Position = UDim2.fromOffset(14, 38),
-			Size = UDim2.new(1, -170, 0, 18),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = UI.Bronze,
-			TextSize = 15,
-			Text = def.archetype,
-		}, textInset)
-		UI.text({
-			Position = UDim2.fromOffset(14, 58),
-			Size = UDim2.new(1, -170, 0, 40),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextYAlignment = Enum.TextYAlignment.Top,
-			TextWrapped = true,
-			TextSize = 15,
-			TextTransparency = 0.2,
-			Text = def.description,
-		}, textInset)
-		local isOwned = have[id] == true
-		local isEquipped = worn.weapon == id
-		local canBuy = not isOwned and unlocked and coins >= price
-		local button = UI.button({
-			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -14, 0.5, 0),
-			Size = UDim2.fromOffset(136, 44),
-			Text = if isEquipped
-				then "Equipped"
-				elseif isOwned then "Equip"
-				elseif not unlocked then "Locked"
-				else `Unlock  {UI.number(price)} coins`,
-			BackgroundColor3 = if isEquipped then UI.Panel elseif isOwned or canBuy then UI.Crimson else UI.Panel,
-			TextColor3 = if not isOwned and not canBuy then Color3.fromRGB(140, 130, 120) else UI.Parchment,
-		}, card)
-		UI.stroke(button)
-		if rule then
-			UI.text({
-				AnchorPoint = Vector2.new(1, 0),
-				Position = UDim2.new(1, -14, 0.5, 24),
-				Size = UDim2.fromOffset(200, 18),
-				TextXAlignment = Enum.TextXAlignment.Right,
-				TextSize = 13,
-				TextTransparency = 0.3,
-				Text = rule,
-			}, card)
-		end
-		button.Activated:Connect(function()
-			if isOwned and not isEquipped then
-				lobbyAction:FireServer("EquipItem", id)
-			elseif canBuy then
-				lobbyAction:FireServer("BuyItem", id)
-			elseif not isOwned and rule then
-				Toasts.notice(`Locked  ·  {rule}`, UI.Parchment)
-			elseif not isOwned then
-				Toasts.notice(`{UI.number(price - coins)} more coins to unlock the {def.name}`, UI.Gold)
-			end
-		end)
-	end
-	UI.text({
-		Size = UDim2.new(1, -8, 0, 36),
-		LayoutOrder = 99,
-		TextWrapped = true,
-		TextSize = 14,
-		TextTransparency = 0.35,
-		Text = "Every weapon is earned with coins from matches, never sold for Robux. Each is a sidegrade: better at one thing, worse at another.",
-	}, list)
-
-	-- Blade skins: pure cosmetics, unlocked by playing, then bought with coins.
-	UI.text({
-		Size = UDim2.new(1, -8, 0, 30),
-		LayoutOrder = 100,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Font = UI.Display,
-		TextSize = 26,
-		TextColor3 = UI.Gold,
-		Text = "Blades",
-	}, list)
-	local grid = UI.new("Frame", {
-		Size = UDim2.new(1, -8, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		LayoutOrder = 101,
-		BackgroundTransparency = 1,
-	}, list)
-	UI.new("UIGridLayout", {
-		CellSize = UDim2.new(1 / 3, -8, 0, 170),
-		CellPadding = UDim2.fromOffset(10, 10),
-		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, grid)
-	for i, item in Catalog.list("bladeSkin") do
-		local skin = Progression.skin(item.ref)
-		local isOwned = have[item.id] == true
-		-- Bundle and pass exclusives show once owned; everything else always.
-		if not isOwned and not item.price and not item.rule then
-			continue
-		end
-		local isEquipped = worn.bladeSkin == item.id
-		local unlocked, rule = lockText(item, progress)
-		local price = if item.price then item.price.coins else nil
-		local card = UI.panel({
-			LayoutOrder = i,
-			BackgroundColor3 = if isEquipped then Color3.fromRGB(52, 40, 30) else UI.PanelLight,
-		}, grid)
-		if isEquipped then
-			UI.stroke(card, UI.Gold, 2, 0)
-		end
-		local t = skin.tint
-		UI.new("ImageLabel", {
-			AnchorPoint = Vector2.new(0.5, 0),
-			Position = UDim2.new(0.5, 0, 0, 2),
-			Size = UDim2.fromOffset(84, 84),
-			BackgroundTransparency = 1,
-			Image = Assets.Icons.Katana,
-			ImageColor3 = Color3.new(math.min(t.X, 1), math.min(t.Y, 1), math.min(t.Z, 1)),
-		}, card)
-		if not unlocked then
-			UI.new("ImageLabel", {
-				AnchorPoint = Vector2.new(1, 0),
-				Position = UDim2.new(1, -4, 0, 4),
-				Size = UDim2.fromOffset(34, 34),
-				BackgroundTransparency = 1,
-				Image = Assets.Icons.Lock,
-			}, card)
-		end
-		UI.text({
-			Position = UDim2.fromOffset(4, 84),
-			Size = UDim2.new(1, -8, 0, 22),
-			Font = UI.Display,
-			TextSize = 19,
-			TextColor3 = skin.trail[2]:Lerp(Color3.new(1, 1, 1), 0.45),
-			Text = skin.name,
-		}, card)
-		UI.text({
-			Position = UDim2.fromOffset(4, 104),
-			Size = UDim2.new(1, -8, 0, 18),
-			TextSize = 13,
-			TextTransparency = 0.3,
-			TextWrapped = true,
-			Text = if rule then rule elseif not isOwned and not price then "Earned, never sold" else skin.blurb,
-		}, card)
-		local canBuy = not isOwned and unlocked and price ~= nil and coins >= price
-		local button = UI.button({
-			AnchorPoint = Vector2.new(0.5, 1),
-			Position = UDim2.new(0.5, 0, 1, -8),
-			Size = UDim2.new(1, -20, 0, 32),
-			TextSize = 15,
-			Text = if isEquipped
-				then "Equipped"
-				elseif isOwned then "Equip"
-				elseif not unlocked then "Locked"
-				elseif price then `{UI.number(price)} coins`
-				else "Earned",
-			BackgroundColor3 = if isEquipped then UI.Panel elseif isOwned or canBuy then UI.Crimson else UI.Panel,
-			TextColor3 = if not isOwned and not canBuy then Color3.fromRGB(140, 130, 120) else UI.Parchment,
-		}, card)
-		button.Activated:Connect(function()
-			if isOwned and not isEquipped then
-				lobbyAction:FireServer("EquipItem", item.id)
-			elseif canBuy then
-				lobbyAction:FireServer("BuyItem", item.id)
-			elseif not isOwned and rule then
-				Toasts.notice(`Locked  ·  {rule}`, UI.Parchment)
-			elseif not isOwned and price then
-				Toasts.notice(`{UI.number(price - coins)} more coins for {skin.name}`, UI.Gold)
-			end
-		end)
-	end
-end
-
 -- Daily Trials: three goals a day that pay out the moment they're done.
 local function trialsPanel()
 	local progress = {}
@@ -504,37 +265,6 @@ local function trialsPanel()
 		TextTransparency = 0.35,
 		Text = `New trials in {math.floor(secondsLeft / 3600)}h {math.floor(secondsLeft % 3600 / 60)}m  ·  rewards pay out the moment a trial is done`,
 	}, body)
-end
-
-local function storePanel()
-	sectionTitle("Gem packs", 0)
-	UI.text({
-		Position = UDim2.fromOffset(0, 34),
-		Size = UDim2.new(1, 0, 0, 60),
-		TextWrapped = true,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextYAlignment = Enum.TextYAlignment.Top,
-		TextSize = 16,
-		TextTransparency = 0.2,
-		Text = "Gems will buy cosmetic blade skins, trails and finishers. Packs go on sale once the game is published and its developer products are set up.",
-	}, body)
-	sectionTitle("Earn coins", 110)
-	local rewards = Progression.Rewards
-	local lines = {
-		`Fight a royale  ·  {rewards.Played.Coins} coins`,
-		`Cut someone down  ·  {rewards.Kill.Coins}   ·   deathblow bonus  ·  {rewards.Deathblow.Coins}`,
-		`Win  ·  {rewards.Win.Coins}   ·   each Mastery level  ·  {EconomyConfig.levelCoins(2)}+`,
-		"Daily Trials and the login streak pay the most",
-	}
-	for i, line in lines do
-		UI.text({
-			Position = UDim2.fromOffset(0, 120 + i * 28),
-			Size = UDim2.new(1, 0, 0, 24),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextSize = 17,
-			Text = line,
-		}, body)
-	end
 end
 
 local function profilePanel()
@@ -748,38 +478,61 @@ local function settingsPanel()
 	end
 end
 
-local builders: { [string]: () -> () } = {
-	Guide = guidePanel,
-	Weapons = weaponsPanel,
-	Store = storePanel,
-	Trials = trialsPanel,
-	Profile = profilePanel,
-	Rewards = rewardsPanel,
-	Settings = settingsPanel,
+type Def = { title: string, build: (body: Frame) -> (), large: boolean? }
+
+local panels: { [string]: Def } = {
+	Guide = { title = "How to fight", build = guidePanel },
+	Trials = { title = "Daily Trials", build = trialsPanel },
+	Profile = { title = "Profile", build = profilePanel },
+	Rewards = { title = "Rewards", build = rewardsPanel },
+	Settings = { title = "Settings", build = settingsPanel },
 }
 
+-- Adds (or replaces) a panel: `build(body)` fills the body frame on every redraw. A `large`
+-- panel (Store, Locker, Pass) opens in the big window over the HUD.
+function Panels.register(id: string, def: Def)
+	panels[id] = def
+end
+
+function Panels.has(id: string): boolean
+	return panels[id] ~= nil
+end
+
 local drawn: string? = nil -- the panel body currently holds
+local refit: () -> () = function() end
+
+-- Forget the body's scroll position, so the next redraw starts at the top (a new tab).
+function Panels.resetScroll()
+	drawn = nil
+end
 
 function Panels.redraw()
 	if not current then
 		return
 	end
+	local def = panels[current :: string]
+	if not def then
+		return
+	end
 	-- Panels redraw on every attribute change (coins, XP, queue...): keep a scrolled list
-	-- (Arsenal's blades) where it was instead of jumping back to the top.
+	-- where it was instead of jumping back to the top.
 	local scroll = Vector2.zero
-	local old = body:FindFirstChildOfClass("ScrollingFrame")
+	local old = body:FindFirstChildWhichIsA("ScrollingFrame", true)
 	if old and drawn == current then
 		scroll = old.CanvasPosition
 	end
 	clear()
+	local extra = window:FindFirstChild("HeaderExtra")
+	if extra then
+		extra:Destroy()
+	end
 	drawn = current
-	titleLabel.Text = if current == "Guide"
-		then "How to fight"
-		elseif current == "Weapons" then "Arsenal"
-		elseif current == "Trials" then "Daily Trials"
-		else current :: string
-	builders[current :: string]()
-	local list = body:FindFirstChildOfClass("ScrollingFrame")
+	titleLabel.Text = def.title
+	local ok, err = pcall(def.build, body)
+	if not ok then
+		warn(`[Panels] {current} failed to draw: {err}`)
+	end
+	local list = body:FindFirstChildWhichIsA("ScrollingFrame", true)
 	if list and scroll ~= Vector2.zero then
 		task.defer(function()
 			if list.Parent then
@@ -790,6 +543,7 @@ function Panels.redraw()
 end
 
 local openedCallbacks: { () -> () } = {}
+local changeCallbacks: { (string?) -> () } = {}
 
 -- Runs `callback` whenever a panel opens (the boss picker closes itself so the two never
 -- stack).
@@ -797,23 +551,85 @@ function Panels.onOpen(callback: () -> ())
 	table.insert(openedCallbacks, callback)
 end
 
+-- Runs `callback(id or nil)` whenever the open panel changes or all close.
+function Panels.onChange(callback: (string?) -> ())
+	table.insert(changeCallbacks, callback)
+end
+
+local function changed()
+	for _, callback in changeCallbacks do
+		task.spawn(callback, current)
+	end
+end
+
 function Panels.isOpen(): boolean
 	return current ~= nil
 end
 
+function Panels.current(): string?
+	return current
+end
+
+-- Whether the open panel is a large one (the lobby HUD hides under it).
+function Panels.isLarge(): boolean
+	local def = current and panels[current :: string]
+	return def ~= nil and def.large == true
+end
+
+function Panels.window(): Frame
+	return window
+end
+
+-- A strip in the title bar, right of the title and left of the close button, cleared on
+-- every redraw (the Store and the Locker show balances there). Right-aligned list layout.
+function Panels.header(): Frame
+	local strip = UI.new("Frame", {
+		Name = "HeaderExtra",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -72, 0, 12),
+		Size = UDim2.new(1, -300, 0, 40),
+		BackgroundTransparency = 1,
+	}, window)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, strip)
+	return strip
+end
+
 function Panels.open(id: string)
+	if not panels[id] then
+		return
+	end
+	local was = current
 	current = id
+	if was ~= id then
+		drawn = nil
+	end
 	window.Visible = true
+	refit()
 	Panels.redraw()
 	for _, callback in openedCallbacks do
 		task.spawn(callback)
 	end
+	changed()
 end
 
 function Panels.closeAll()
+	local was = current
 	current = nil
 	if window then
 		window.Visible = false
+		local sheet = window:FindFirstChild("Sheet")
+		if sheet then
+			sheet:Destroy()
+		end
+	end
+	if was then
+		changed()
 	end
 end
 
@@ -825,6 +641,12 @@ function Panels.toggle(id: string)
 	end
 end
 
+-- Normal panels: 660 x 372, sitting over the PLAY button and nav bar and shrinking on short
+-- screens. Large panels: 820 x 420 in the middle of the screen, as big as fits (on a phone
+-- in landscape that's about 0.8, so 60 px buttons stay over 45 px).
+local NORMAL = Vector2.new(660, 372)
+local LARGE = Vector2.new(820, 420)
+
 function Panels.start(remote: RemoteEvent)
 	lobbyAction = remote
 	screen = UI.new("ScreenGui", {
@@ -833,16 +655,37 @@ function Panels.start(remote: RemoteEvent)
 		DisplayOrder = 6,
 		ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets,
 	})
-	-- Sits above the PLAY button and nav bar, never over them, and shrinks on short screens
-	-- (a phone in landscape) so its top stays on screen.
 	window = UI.panel({
 		Name = "Window",
-		Size = UDim2.fromOffset(660, 372),
+		Size = UDim2.fromOffset(NORMAL.X, NORMAL.Y),
 		Visible = false,
 	}, screen)
-	UI.new("UISizeConstraint", { MaxSize = Vector2.new(660, 372) }, window)
-	UI.fitAboveNav(window, 372)
+	local scale = UI.new("UIScale", { Name = "Fit" }, window)
+	local camera = workspace.CurrentCamera
+	refit = function()
+		local large = Panels.isLarge()
+		local dims = if large then LARGE else NORMAL
+		window.Size = UDim2.fromOffset(dims.X, dims.Y)
+		if large then
+			local area = screen.AbsoluteSize
+			if area.X < 1 then
+				area = camera.ViewportSize
+			end
+			window.AnchorPoint = Vector2.new(0.5, 0.5)
+			window.Position = UDim2.fromScale(0.5, 0.5)
+			scale.Scale = math.clamp(math.min((area.X - 16) / dims.X, (area.Y - 12) / dims.Y), 0.4, 1)
+		else
+			local size = camera.ViewportSize
+			local reserve = math.floor(200 * UI.lobbyScale(size))
+			window.AnchorPoint = Vector2.new(0.5, 1)
+			window.Position = UDim2.new(0.5, 0, 1, -reserve)
+			scale.Scale = math.clamp((size.Y - reserve - 44) / dims.Y, 0.45, 1)
+		end
+	end
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	screen:GetPropertyChangedSignal("AbsoluteSize"):Connect(refit)
 	titleLabel = UI.text({
+		Name = "Title",
 		Position = UDim2.fromOffset(24, 14),
 		Size = UDim2.new(1, -90, 0, 36),
 		TextXAlignment = Enum.TextXAlignment.Left,
@@ -851,9 +694,10 @@ function Panels.start(remote: RemoteEvent)
 		Text = "",
 	}, window)
 	local close = UI.button({
+		Name = "Close",
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -16, 0, 14),
-		Size = UDim2.fromOffset(38, 38),
+		Position = UDim2.new(1, -10, 0, 6),
+		Size = UDim2.fromOffset(58, 54),
 		Text = "X",
 		TextSize = 20,
 		BackgroundColor3 = UI.Crimson,
@@ -867,12 +711,14 @@ function Panels.start(remote: RemoteEvent)
 		BorderSizePixel = 0,
 	}, window)
 	body = UI.new("Frame", {
-		Position = UDim2.fromOffset(24, 72),
-		Size = UDim2.new(1, -48, 1, -92),
+		Name = "Body",
+		Position = UDim2.fromOffset(24, 68),
+		Size = UDim2.new(1, -48, 1, -82),
 		BackgroundTransparency = 1,
 		ClipsDescendants = true,
 	}, window)
 	screen.Parent = player:WaitForChild("PlayerGui")
+	refit()
 
 	player.AttributeChanged:Connect(function()
 		if current then
