@@ -96,14 +96,54 @@ local Assets = {
 		-- Economy (batch4.txt)
 		Whetstone = "rbxassetid://102705465501821", -- earned upgrade currency: toishi on a stand
 		Shard = "rbxassetid://74611235619227", -- duplicate currency: spirit-glass shard, jade core
-		-- Gem packs, smallest to largest (Config gem pack tiers 1..6). Tiers 5 and 6 are not
-		-- generated yet (see research_notes/progression/part_A.md); fall back to GemPack4.
+		-- Gem packs, smallest to largest (Config gem pack tiers 1..6).
 		GemPacks = {
 			"rbxassetid://113268941765880", -- 3 magatama
 			"rbxassetid://70434890876514", -- a small heap
 			"rbxassetid://74743360936548", -- a spilling silk pouch
 			"rbxassetid://124864277479259", -- an overflowing masu box
+			"rbxassetid://89295657140604", -- an open crimson lacquer chest
+			"rbxassetid://103032909771957", -- a lavish gold-kamon chest with light rays
 		} :: { string },
+		PassXP = "rbxassetid://100639332554472", -- crimson token, gold rim, up-chevron
+
+		-- Store, draws and pass offers (batch4.txt)
+		ShrineDraw = "rbxassetid://111176373963851", -- omamori charm
+		ShrineCapsule = "rbxassetid://110576640924485", -- black/crimson lacquer capsule leaking jade light
+		InitiateBundle = "rbxassetid://98698102049795", -- katana, jade pile, sealed scroll
+		SeasonPass = "rbxassetid://79772936816732", -- Path of the Blade crest, season 1
+		TierSkip = "rbxassetid://93630146966677", -- gold double chevron
+		VIP = "rbxassetid://97497092234867", -- kasa over crossed katana on a gold hex crest
+		LoadoutPresets = "rbxassetid://101099394841263", -- three fuda tags
+		VictoryCry = "rbxassetid://123840976974376", -- horagai conch horn
+
+		-- Deathblow finishers, keyed by Catalog finisher ref. The blade-line finales
+		-- (Yozakura/Raijin/Karasu) have no icon of their own.
+		Finishers = {
+			Default = "rbxassetid://102058521467001", -- katana through an enso, crimson splash
+			InkBrush = "rbxassetid://140080934861324",
+			SakuraScatter = "rbxassetid://115851893873984",
+			CrowFeathers = "rbxassetid://111023273299574",
+			LightningSheath = "rbxassetid://76791681606281",
+			MoonCrescent = "rbxassetid://77980167870750",
+		} :: { [string]: string },
+		-- Blade lines, keyed by Catalog bladeLine ref (SakuraStorm and Crow are the names
+		-- part_A.md planned; kept as aliases).
+		BladeLines = {
+			Yozakura = "rbxassetid://136777104135857", -- sakura katana
+			Raijin = "rbxassetid://122044457022099", -- lightning katana, taiko tsuba
+			Karasu = "rbxassetid://112784990323220", -- black blade, crow-wing tsuba
+			SakuraStorm = "rbxassetid://136777104135857",
+			Crow = "rbxassetid://112784990323220",
+		} :: { [string]: string },
+		-- Locker / Store tab icons.
+		Tabs = {
+			Outfits = "rbxassetid://85085136038540", -- folded gi, obi, kasa
+			Finishers = "rbxassetid://88625871551799", -- katana through an ink burst
+			Titles = "rbxassetid://76225121385769", -- kakejiku scroll
+			Banners = "rbxassetid://109430683068315", -- sashimono flag
+			Season = "rbxassetid://130273536542140", -- sun/moon medallion
+		} :: { [string]: string },
 
 		-- Rarity frames (art/icons/frames.py): 512x512, transparent centre, drawn over an
 		-- item card. Ornaments stay in the outer 96 px: SliceCenter Rect(96, 96, 416, 416).
