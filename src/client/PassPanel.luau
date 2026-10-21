@@ -184,6 +184,44 @@ local function fullText(rewards: { Season.Reward }): string
 	return table.concat(parts, "  +  ")
 end
 
+-- The detail line's resting text. Without premium, from tier 3 on, it says plainly what the
+-- premium track would already have paid (no badge, no timer): premium is retroactive.
+local function restingHint(): string
+	local tier = attr("PassTier", 0)
+	if attr("PassPremium", false) == true or tier < 3 then
+		return DETAIL_HINT
+	end
+	local def = Season.get(attr("PassSeason", "")) or Season.get(ReplicatedStorage:GetAttribute("SeasonId"))
+	if not def then
+		return DETAIL_HINT
+	end
+	local totals: { [string]: number } = {}
+	local items = {}
+	for t = 1, math.min(tier, #def.tiers) do
+		for _, reward in def.tiers[t].premium do
+			if reward.kind == "item" then
+				local item = Catalog.get(reward.id)
+				if item then
+					table.insert(items, item.name)
+				end
+			else
+				totals[reward.kind] = (totals[reward.kind] or 0) + (reward.amount or 0)
+			end
+		end
+	end
+	local parts = items
+	for _, kind in { "gems", "whetstones", "draws", "coins" } do
+		local n = totals[kind]
+		if n and n > 0 then
+			table.insert(parts, Season.rewardText({ kind = kind :: any, amount = n }))
+		end
+	end
+	if #parts == 0 then
+		return DETAIL_HINT
+	end
+	return `With premium, tiers 1-{tier} would add: {table.concat(parts, ", ")}  ·  yours at once if you upgrade`
+end
+
 -- A soft breathing glow on a stroke (claimable cells, Claim all).
 local function pulse(stroke: UIStroke)
 	if UI.reducedMotion() then
@@ -240,7 +278,8 @@ local function header(body: Frame, width: number)
 		TextYAlignment = Enum.TextYAlignment.Top,
 		TextWrapped = true,
 		LineHeight = 0.95,
-		Text = if def then def.subtitle else "Path of the Blade",
+		-- "Season 1" over "The Ascent": the season's name never breaks in the middle.
+		Text = if def then (string.gsub(def.subtitle, "%s*·%s*", "\n", 1)) else "Path of the Blade",
 	}, body)
 	UI.text({
 		Name = "Tier",
@@ -338,6 +377,9 @@ end
 
 --------------------------------------------------------------------------------------------
 -- Tabs, Claim all and tier skips (one 60 px row), and the detail line along the bottom.
+
+local SKIP_FROM_TIER = 5
+local SKIP_LATE_SECONDS = 14 * 86400
 
 local function tabs(body: Frame, size: Vector2, redraw: () -> ()): TextLabel?
 	local width = size.X
@@ -442,7 +484,12 @@ local function tabs(body: Frame, size: Vector2, redraw: () -> ()): TextLabel?
 	local running = ReplicatedStorage:GetAttribute("SeasonState") == "live"
 	local tier = attr("PassTier", 0)
 	local left = if running then Season.Tiers - tier - attr("PassTierSkips", 0) else 0
-	for i, key in { Season.Products.TierSkip, Season.Products.Tiers10 } do
+	-- Tier skips only once they make sense: from tier SKIP_FROM_TIER, or in the season's last
+	-- two weeks. A player still on the first tiers isn't sold a way past them.
+	local endsAt = ReplicatedStorage:GetAttribute("SeasonEndsAt") or 0
+	local lateSeason = running and endsAt - Season.now() <= SKIP_LATE_SECONDS
+	local skipsShown = running and (tier >= SKIP_FROM_TIER or lateSeason)
+	for i, key in if skipsShown then { Season.Products.TierSkip, Season.Products.Tiers10 } else {} do
 		local n = if i == 1 then 1 else 10
 		local enabled = left >= n
 		local skip = UI.button({
@@ -473,7 +520,7 @@ local function tabs(body: Frame, size: Vector2, redraw: () -> ()): TextLabel?
 		FontFace = UI.Fonts.Label,
 		TextSize = 15,
 		TextColor3 = T.Dim,
-		Text = detail or DETAIL_HINT,
+		Text = detail or restingHint(),
 	}, body)
 end
 
@@ -790,7 +837,7 @@ local function trackView(body: Frame, size: Vector2, info: TextLabel?)
 			end)
 			card.MouseLeave:Connect(function()
 				if info and info.Parent then
-					info.Text = detail or DETAIL_HINT
+					info.Text = detail or restingHint()
 				end
 			end)
 			card.Activated:Connect(function()
@@ -847,7 +894,7 @@ local function missionRow(parent: Instance, entry: any, height: number, order: n
 	if done then
 		UI.stroke(row, T.Jade, 1.5, 0.2)
 	end
-	local rewardW = 98
+	local rewardW = 116
 	local rerollW = if canReroll and not done then 82 else 0
 	local textX = if done then 34 else 10
 	UI.text({
@@ -899,7 +946,7 @@ local function missionRow(parent: Instance, entry: any, height: number, order: n
 		FontFace = UI.Fonts.Number,
 		TextSize = 15,
 		TextColor3 = T.GoldHi,
-		Text = `+{math.floor(m.pass * math.max(multiplier, 1))} XP`,
+		Text = `+{math.floor(m.pass * math.max(multiplier, 1))} Pass XP`,
 	}, reward)
 	UI.new("ImageLabel", {
 		Position = UDim2.fromOffset(2, 24),
