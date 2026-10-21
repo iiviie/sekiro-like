@@ -1,5 +1,5 @@
 --!strict
-local Ambience = require(script.Ambience)
+local Audio = require(script.Audio)
 local BossHUD = require(script.BossHUD)
 local ChatTags = require(script.ChatTags)
 local Coach = require(script.Coach)
@@ -17,7 +17,7 @@ local TitleScreen = require(script.TitleScreen)
 local Toasts = require(script.Toasts)
 local TrainerReadout = require(script.TrainerReadout)
 
-Ambience.start()
+Audio.start()
 Motion.start()
 Movement.start()
 Occlusion.start()
@@ -34,5 +34,6 @@ Coach.start()
 TrainerReadout.start()
 TitleScreen.show() -- yields until the player enters, so the click doesn't swing a sword
 LobbyHUD.setEntered()
+Audio.setEntered()
 CombatHUD.showControls()
 CombatInput.start()

@@ -4,15 +4,14 @@
 -- Nothing here affects outcomes.
 
 local CollectionService = game:GetService("CollectionService")
-local ContentProvider = game:GetService("ContentProvider")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
 local Animator = require(script.Parent.Animator)
+local Audio = require(script.Parent.Audio)
 local CombatHUD = require(script.Parent.CombatHUD)
 local LocalCombat = require(script.Parent.LocalCombat)
 local LockOn = require(script.Parent.LockOn)
@@ -30,7 +29,6 @@ local Weapons = require(ReplicatedStorage.Shared.Weapons)
 local combatEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CombatEvent") :: RemoteEvent
 local player = Players.LocalPlayer
 
-local SOUNDS = Assets.Sounds
 local GOLD = Color3.fromRGB(255, 214, 110)
 local SPARK = Color3.fromRGB(255, 185, 90)
 -- Hits throw sumi ink, not blood: the ink-and-brush look, and no gore on screen.
@@ -81,16 +79,18 @@ local function isLocal(model: Model?): boolean
 	return model ~= nil and model == player.Character
 end
 
-local function playSound(id: string, parent: Instance?, volume: number?, pitch: number?)
-	local sound = Instance.new("Sound")
-	sound.SoundId = id
-	sound.Volume = volume or 0.6
-	sound.PlaybackSpeed = (pitch or 1) * (0.94 + math.random() * 0.12)
-	sound.RollOffMaxDistance = 140
-	sound.RollOffMinDistance = 12
-	sound.Parent = parent or SoundService
-	sound:Play()
-	Debris:AddItem(sound, 4)
+-- Cue `key` (client/Audio: variations, 3D voices, music ducking) at a fighter; `focus` when
+-- the moment is yours (it may duck the music).
+local function playSound(key: string, at: BasePart?, focus: boolean?, pitch: number?)
+	if at then
+		Audio.play(key, { at = at, focus = focus, pitch = pitch })
+	end
+end
+
+-- Near enough to your own body that a moment there is yours.
+local function close(part: BasePart?): boolean
+	local mine = rootOf(player.Character)
+	return part ~= nil and mine ~= nil and (part.Position - mine.Position).Magnitude < 25
 end
 
 -- A brush-kanji mark floating over a fighter's head (the perilous warning).
@@ -1371,7 +1371,7 @@ function CombatVisuals.dash(model: Model, direction: Vector3?)
 			end
 		end)
 	end
-	playSound(SOUNDS.Dodge, rootOf(model), 0.45)
+	playSound("Dodge", rootOf(model), isLocal(model))
 	for i = 0, 2 do
 		task.delay(i * 0.045, function()
 			if model.Parent then
@@ -1398,7 +1398,7 @@ local function telegraphPerilous(model: Model, duration: number)
 	Debris:AddItem(highlight, duration + 0.1)
 
 	kanjiMark(model, Assets.UI.KanjiPeril, Config.Visual.PerilousColor, duration)
-	playSound(SOUNDS.PerfectDeflect, rootOf(model), 0.75, 1.7)
+	playSound("PerilousWarn", rootOf(model), not isLocal(model) and close(rootOf(model)))
 
 	-- If it's coming for you, the screen edges flash red too.
 	local mine, theirs = rootOf(player.Character), rootOf(model)
@@ -1524,7 +1524,8 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 		then carry + away * 0.8 + Vector3.yAxis * 0.5
 		elseif away then away + Vector3.yAxis * 0.6
 		else nil
-	playSound(if math.random() < 0.5 then SOUNDS.Deflect else SOUNDS.DeflectAlt, soundAt, 0.85, pitch)
+	local mine = isLocal(attacker) or isLocal(defender)
+	playSound("Deflect", soundAt, mine, pitch)
 	if perfect then
 		-- A perfect deflect has to feel unmistakable: white-gold bloom, a ringing
 		-- second layer of steel, and a heavier freeze and camera kick.
@@ -1533,7 +1534,7 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 			burst(point, Color3.fromRGB(255, 150, 60), 30, 30, 3)
 			flare(point, Color3.fromRGB(255, 244, 214), 22, true)
 		end
-		playSound(SOUNDS.PerfectDeflect, soundAt, 0.9, 1.1 * pitch)
+		playSound("PerfectDeflect", soundAt, mine, pitch)
 		if isLocal(defender) then
 			CombatHUD.flashPerfect()
 		end
@@ -1573,7 +1574,7 @@ local function guardEffects(attacker: Model, defender: Model, kind: string?)
 	if point then
 		burst(point, STEEL, 12, 14, 1.4, flatBetween(defender, attacker))
 	end
-	playSound(SOUNDS.Guard, rootOf(defender), 0.5, 0.82 + math.random() * 0.06)
+	playSound("Guard", rootOf(defender))
 end
 
 -- Your own deflects are shown the instant the blow lands, predicted from your last block
@@ -1704,7 +1705,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			if not model.Parent then
 				return
 			end
-			playSound(if heavy then SOUNDS.HeavySwing else SOUNDS.Swing, rootOf(model), if heavy then 0.7 else 0.55)
+			playSound(Audio.swingKey(model, kind, heavy), rootOf(model), isLocal(model))
 			if isLocal(model) then
 				local spec = Weapons.spec(Weapons.of(model), kind)
 				lunge(spec.lunge, spec.lungeTime)
@@ -1797,7 +1798,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 				if ender then 28 else 22
 			)
 		end
-		playSound(if math.random() < 0.5 then SOUNDS.Hit else SOUNDS.HitAlt, root, 0.7, if ender then 0.86 else 1)
+		playSound(if ender then "HitHeavy" else "Hit", root, isLocal(attacker) or isLocal(defender))
 		if isLocal(defender) or isLocal(attacker) then
 			local strength = if isLocal(defender) then 0.5 else 0.25
 			shake(if ender then strength * 1.6 else strength, 0.2, attacker, defender)
@@ -1811,7 +1812,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if root then
 			burst(root.Position + Vector3.new(0, 1.5, 0), GOLD, 40, 24, 5)
 		end
-		playSound(SOUNDS.PostureBreak, root, 0.8)
+		playSound("PostureBreak", root, isLocal(model) or close(root))
 	end,
 
 	Deathblow = function(data)
@@ -1853,8 +1854,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 				end
 			end)
 		end
-		playSound(SOUNDS.PostureBreak, root, 0.9, 0.8)
-		playSound(SOUNDS.HitAlt, root, 0.9, 0.85)
+		playSound("Deathblow", root, isLocal(attacker) or isLocal(defender))
 		if isLocal(attacker) or isLocal(defender) then
 			shake(0.9, 0.35, attacker, defender)
 			if grade then
@@ -1887,7 +1887,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if root then
 			flare(root.Position, CRIMSON, 8)
 		end
-		playSound(SOUNDS.PostureBreak, root, 0.7, 0.6)
+		playSound("CutDown", root, isLocal(model) or close(root))
 	end,
 
 	Resurrected = function(data)
@@ -1898,7 +1898,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 			burst(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(255, 70, 60), 50, 30, 6)
 			flare(root.Position + Vector3.new(0, 1, 0), Color3.fromRGB(255, 90, 70), 14)
 		end
-		playSound(SOUNDS.PerfectDeflect, root, 0.9, 0.55)
+		playSound("Resurrect", root, isLocal(model))
 		if isLocal(model) then
 			shake(0.5, 0.3, model, model)
 		end
@@ -1935,8 +1935,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if root then
 			burst(root.Position + Vector3.new(0, 2.6, 0), GOLD, 30, 20, 4.5)
 		end
-		playSound(SOUNDS.Guard, root, 0.85, 0.75)
-		playSound(SOUNDS.PostureBreak, root, 0.6, 1.3)
+		playSound("Stomp", root, isLocal(attacker) or isLocal(defender))
 		playClip(attacker, "HitLarge")
 		playClip(defender, "Mikiri")
 		hitstop(Config.Visual.Hitstop, attacker, defender)
@@ -1986,8 +1985,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if point then
 			flare(point, Color3.fromRGB(255, 236, 200), 18)
 		end
-		playSound(SOUNDS.PerfectDeflect, root, 0.8, 0.9)
-		playSound(SOUNDS.PostureBreak, root, 0.6, 1.2)
+		playSound("Mikiri", root, isLocal(attacker) or isLocal(defender))
 		if isLocal(attacker) or isLocal(defender) then
 			shake(0.6, 0.2, attacker, defender)
 		end
@@ -1996,6 +1994,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 	Drink = function(data)
 		local model: Model = data.model
 		playClip(model, "Drink")
+		playSound("GourdSip", rootOf(model), isLocal(model))
 		-- A small gourd in the off hand for the length of the sip.
 		local hand = model:FindFirstChild("LeftHand")
 		if hand and hand:IsA("BasePart") then
@@ -2200,21 +2199,6 @@ function CombatVisuals.start()
 	for _, instance in CollectionService:GetTagged(Types.Tag) do
 		watch(instance)
 	end
-
-	task.spawn(function()
-		local preload = {}
-		for _, id in SOUNDS do
-			local sound = Instance.new("Sound")
-			sound.SoundId = id
-			table.insert(preload, sound)
-		end
-		for _, id in Assets.Cosmetics.Sounds do
-			local sound = Instance.new("Sound")
-			sound.SoundId = id
-			table.insert(preload, sound)
-		end
-		ContentProvider:PreloadAsync(preload)
-	end)
 end
 
 ---------------------------------------------------------------------------------------

@@ -6,12 +6,12 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local SoundService = game:GetService("SoundService")
 
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local Progression = require(ReplicatedStorage.Shared.Progression)
 local Round = require(ReplicatedStorage.Shared.Round)
 local Text = require(ReplicatedStorage.Shared.Text)
+local Audio = require(script.Parent.Audio)
 local UI = require(script.Parent.UI)
 
 local player = Players.LocalPlayer
@@ -89,15 +89,9 @@ local function stage(duration: number, show: () -> (), fallback: () -> ())
 	end
 end
 
-local function sound(id: string, volume: number, pitch: number)
-	local s = Instance.new("Sound")
-	s.SoundId = id
-	s.Volume = volume
-	s.PlaybackSpeed = pitch
-	SoundService:PlayLocalSound(s)
-	s.Ended:Once(function()
-		s:Destroy()
-	end)
+-- Banner sounds are client/Audio cues (UI group): UILevelUpRing, UIBanner, UIUnlock, UIPassTier.
+local function sound(cue: string)
+	Audio.play(cue)
 end
 
 local T = UI.Theme
@@ -830,7 +824,7 @@ function Toasts.start()
 			stage(2.75, function()
 				levelUp(level, coins, data.gems)
 				UI.sound("LevelUp")
-				sound(Assets.Sounds.PerfectDeflect, 0.45, 1.2)
+				sound("UILevelUpRing")
 			end, function()
 				Toasts.notice(`Mastery {level}  ·  +{UI.number(coins)} coins`, UI.Gold)
 				UI.sound("LevelUp")
@@ -839,7 +833,7 @@ function Toasts.start()
 			local text = `{data.text}  ·  +{data.coins} coins`
 			stage(3, function()
 				banner(ICONS.Trials, "Trial complete", text, UI.Jade)
-				sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
+				sound("UIBanner")
 			end, function()
 				Toasts.notice(`Trial complete  ·  {text}`, UI.Jade)
 			end)
@@ -860,7 +854,7 @@ function Toasts.start()
 			local name = data.name or ""
 			stage(3, function()
 				banner(ICONS.Trophy, "Unlocked", name, UI.Gold)
-				sound(Assets.Sounds.PerfectDeflect, 0.5, 1.1)
+				sound("UIUnlock")
 			end, function()
 				Toasts.notice(`Unlocked  ·  {name}`, UI.Gold)
 			end)
@@ -873,7 +867,7 @@ function Toasts.start()
 			local text = `{data.text}  ·  {pass}+{data.coins} coins`
 			stage(3, function()
 				banner(ICONS.Trials, title, text, UI.Jade)
-				sound(Assets.Sounds.PerfectDeflect, 0.5, 1.2)
+				sound("UIBanner")
 			end, function()
 				Toasts.notice(`{title}  ·  {text}`, UI.Jade)
 			end)
@@ -883,7 +877,7 @@ function Toasts.start()
 			local tier = data.tier
 			stage(3, function()
 				banner(crest, `Tier {tier}`, `Path of the Blade{ready}`, UI.Gold)
-				sound(Assets.Sounds.PerfectDeflect, 0.6, 0.85)
+				sound("UIPassTier")
 			end, function()
 				Toasts.notice(`Path of the Blade  ·  Tier {tier}{ready}`, UI.Gold)
 			end)

@@ -14,9 +14,9 @@
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
+local Audio = require(script.Parent.Audio)
 local Assets = require(ReplicatedStorage.Shared.Assets)
 local BladeLook = require(ReplicatedStorage.Shared.Cosmetics.BladeLook)
 local Blades = require(ReplicatedStorage.Shared.Cosmetics.Blades)
@@ -105,27 +105,28 @@ local function seq(...: number): NumberSequence
 	return NumberSequence.new(points)
 end
 
--- Plays a sound at a part, stopping it (with a short fade) after `length` seconds.
+-- Plays library sound `key` at a part (client/Audio, SFX group), fading it out after
+-- `length` seconds.
+local function play(key: string, parent: Instance?, volume: number, pitch: number?, length: number?)
+	Audio.playId(C.Sounds[key], {
+		at = if parent and parent:IsA("BasePart") then parent else nil,
+		follow = true,
+		volume = volume,
+		pitch = pitch,
+		length = length or 3,
+		near = 14,
+		far = 180,
+	})
+end
+
+-- A finisher's library layers, silent while its generated signature (Audio cue
+-- "Finisher<ref>") plays in their place.
+local signatureUntil = 0
 local function sound(key: string, parent: Instance?, volume: number, pitch: number?, length: number?)
-	local id = C.Sounds[key]
-	if not id then
+	if os.clock() < signatureUntil then
 		return
 	end
-	local s = Instance.new("Sound")
-	s.SoundId = id
-	s.Volume = volume
-	s.PlaybackSpeed = (pitch or 1) * (0.96 + math.random() * 0.08)
-	s.RollOffMinDistance = 14
-	s.RollOffMaxDistance = 180
-	s.Parent = parent or SoundService
-	s:Play()
-	local cut = length or 3
-	task.delay(cut, function()
-		if s.Parent then
-			TweenService:Create(s, TweenInfo.new(0.35), { Volume = 0 }):Play()
-		end
-	end)
-	Debris:AddItem(s, cut + 0.5)
+	play(key, parent, volume, pitch, length)
 end
 
 -- The on-screen angle (GUI rotation, degrees clockwise) of a world direction.
@@ -768,11 +769,15 @@ local FINISHERS: { [string]: (Ctx) -> Grade } = {
 -- Plays finisher `ref`'s cut. Returns its grade, or nil for the default (CombatVisuals then
 -- plays the default cut, ink and grade itself).
 function CosmeticFX.deathblow(ref: string, ctx: Ctx): Grade?
-	local play = FINISHERS[ref]
-	if not play then
+	local draw = FINISHERS[ref]
+	if not draw then
 		return nil
 	end
-	return play(ctx)
+	local mine = ctx.attacker == player.Character or ctx.defender == player.Character
+	if Audio.play("Finisher" .. ref, { at = ctx.root, follow = true, focus = mine }) then
+		signatureUntil = os.clock() + 3.5
+	end
+	return draw(ctx)
 end
 
 function CosmeticFX.applyGrade(spec: Grade)
@@ -919,7 +924,7 @@ function CosmeticFX.deflect(style: Blades.DeflectStyle, point: Vector3, directio
 		end, direction)
 	end
 	kit.flare(point, style.spark:Lerp(WHITE, 0.3), if perfect then 14 else 9, true)
-	sound(
+	play(
 		style.sound,
 		anchorAt(point, 1.8),
 		style.volume * (if perfect then 1 else 0.8),
