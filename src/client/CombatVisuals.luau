@@ -1530,6 +1530,78 @@ local function groundDust(model: Model, direction: Vector3?, amount: number, spe
 	puff:Emit(scaled(if detail == 2 then amount else math.ceil(amount / 2)))
 end
 
+-- The blade gathers light through a swing's windup, brightest just as it strikes: a visual
+-- countdown to the cut that sits alongside the glint. A beam laid along the sword's trail
+-- attachments (the edge strips belong to blade skins, so they're left alone), in the edge's
+-- own colour, red for a perilous attack. A feint or interruption puts it out at once.
+local windupGlows: { [Model]: Beam } = setmetatable({}, { __mode = "k" }) :: any
+local function endWindupGlow(model: Model, fade: number?)
+	local beam = windupGlows[model]
+	windupGlows[model] = nil
+	if not beam then
+		return
+	end
+	if fade and fade > 0 then
+		TweenService:Create(beam, TweenInfo.new(fade), { Brightness = 0, Width0 = 0, Width1 = 0 }):Play()
+		Debris:AddItem(beam, fade + 0.05)
+	else
+		beam:Destroy()
+	end
+end
+
+local function windupGlow(model: Model, duration: number, perilous: boolean)
+	endWindupGlow(model)
+	local root = rootOf(model)
+	local sword = model:FindFirstChild("Sword")
+	local from = sword and sword:FindFirstChild("TrailStart")
+	local to = sword and sword:FindFirstChild("TrailEnd")
+	if
+		not root
+		or duration < 0.15
+		or detailAt(root.Position) < 2
+		or not from
+		or not to
+		or not from:IsA("Attachment")
+		or not to:IsA("Attachment")
+	then
+		return
+	end
+	local edge = (sword :: Instance):FindFirstChild("Edge")
+	local color = if perilous
+		then Config.Visual.PerilousColor
+		elseif edge and edge:IsA("BasePart") then edge.Color:Lerp(WHITE, 0.5)
+		else WHITE
+	local beam = Instance.new("Beam")
+	beam.Name = "WindupGlow"
+	beam.Attachment0 = from :: Attachment
+	beam.Attachment1 = to :: Attachment
+	beam.Texture = Assets.UI.Glow
+	beam.TextureMode = Enum.TextureMode.Stretch
+	beam.Color = ColorSequence.new(color)
+	beam.LightEmission = 1
+	beam.LightInfluence = 0
+	beam.FaceCamera = true
+	beam.Segments = 1
+	-- Brighter toward the tip, where the eye tracks the blade.
+	beam.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(1, 0.15) })
+	beam.Brightness = 0
+	beam.Width0, beam.Width1 = 0.2, 0.3
+	beam.Parent = sword
+	windupGlows[model] = beam
+	local slow = vfxSlow()
+	-- Gathers slowly, then surges in the last third (quadratic ease-in).
+	TweenService:Create(beam, TweenInfo.new(duration / slow, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		Brightness = if perilous then 5 else 3.5,
+		Width0 = 0.45,
+		Width1 = if perilous then 1.1 else 0.85,
+	}):Play()
+	task.delay(duration / slow, function()
+		if windupGlows[model] == beam then
+			endWindupGlow(model, 0.12) -- the strike's smear takes over
+		end
+	end)
+end
+
 -- A quick lens punch-in that eases back to the camera's resting field of view.
 local function fovPunch(degrees: number, inTime: number, hold: number, outTime: number)
 	local camera = workspace.CurrentCamera
@@ -1972,6 +2044,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		if perilous then
 			telegraphPerilous(model, remaining)
 		end
+		windupGlow(model, remaining, perilous)
 		if not isLocal(model) then
 			predictIncoming(model, kind, data.hitAt)
 			glint(model, data.hitAt)
@@ -2328,6 +2401,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Feint = function(data)
 		Animator.stop(data.model)
+		endWindupGlow(data.model, 0.08)
 		if isLocal(data.model) then
 			LocalCombat.attackingUntil = 0
 		end
@@ -2335,6 +2409,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 
 	Interrupted = function(data)
 		Animator.stop(data.model)
+		endWindupGlow(data.model)
 		if isLocal(data.model) then
 			LocalCombat.attackingUntil = 0
 		end
