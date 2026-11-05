@@ -809,9 +809,22 @@ local Config = {
 		CameraShoulder = 2,
 		FieldOfView = 60,
 		FreeFieldOfView = 70,
-		PositionLag = 7, -- Kannagi CameraLagSpeed
+		-- As in UE's spring arm, the lag is on the arm's origin (the point it follows), never on
+		-- the lens itself: the lens always sits on the arm, so it swings round you instead of
+		-- cutting a chord through your body when you dash round or through someone.
+		PositionLag = 7, -- Kannagi CameraLagSpeed: the arm's origin trails your root at this rate
 		MaxLag = 4.3, -- studs (CameraLagMaxDistance 120 cm)
-		RotationLag = 5, -- Kannagi's RInterpTo toward the target
+		ArmTurnRate = 8, -- how fast the arm's yaw swings behind you toward the target
+		MaxArmTurn = 420, -- degrees/s cap, so passing someone swings the view round, never whips it
+		LookLag = 12, -- how fast the view turns onto the pair (keeps the target on screen in a dash)
+		HoldRange = 2.5, -- studs: closer than this (dashing through them) the arm holds its yaw
+		EntryBlend = 0.3, -- seconds to ease from the free camera into the locked one
+		ReleaseBlend = 0.35, -- ...and from the locked lens back to the free camera's distance
+		-- The free camera (Roblox's own, unlocked) follows a lagged point too, so a dash moves you
+		-- across the screen and the view catches up, rather than the whole world jolting.
+		FreeLag = 12,
+		FreeLagVertical = 16,
+		FreeMaxLag = 2.5,
 		-- Framing the pair: our bodies stand at Kannagi's capsule contact, where a camera straight
 		-- behind you hides the target's torso and blade behind your back. Inside CloseRange the
 		-- eye swings further out to the shoulder, rises and pulls back, and the focus slides toward

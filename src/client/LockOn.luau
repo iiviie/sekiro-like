@@ -33,10 +33,9 @@ local FRAMING = {
 	PullBack = 0,
 	FocusDrop = 0.4, -- the look point drops toward the target's waist, so the view tilts down onto them
 }
--- The camera keeps to one shoulder; it only crosses to the other when the fight has turned it
--- well over there (an opponent dashing past), and then swings across smoothly.
-local SIDE_SWITCH = 1.5 -- studs past the pair line
-local SIDE_RATE = 3
+-- The camera keeps to your right shoulder, like Sekiro's. (It used to cross to the other one
+-- when the lens ended up there, which a dash round someone always did, so it flipped mid-dash.)
+local sideBlend = 1
 -- Thin set dressing (fence posts and rails, ropes, lantern poles) never pulls the camera in: the
 -- probe passes through it, and Occlusion fades it while it's in the shot (as it does canopies and
 -- other non-colliding props the lens enters). Tag anything else that should behave so with
@@ -68,17 +67,40 @@ local FOCUS_SELF = 0.4
 local probeParams = RaycastParams.new()
 probeParams.FilterType = Enum.RaycastFilterType.Exclude
 probeParams.RespectCanCollide = true
-local eye: Vector3? = nil -- the lagged camera position and look direction (Kannagi's spring arm)
+-- Kannagi's spring arm, as UE builds it: the arm's origin trails your root (pivotBase), the arm
+-- turns behind you toward the target by yaw (armYaw), and the lens sits on the arm. Lagging the
+-- lens itself instead made it cut straight across (through you) whenever the arm swung fast.
+local pivotBase: Vector3? = nil
+local armYaw: number? = nil
 local lookDir: Vector3? = nil
+-- Lock-on start and release ease from the camera that was showing (see EntryBlend/ReleaseBlend).
+local entryFrom: CFrame? = nil
+local entryAt = -math.huge
+local releaseFrom: CFrame? = nil
+local releaseAt = -math.huge
+local freeBase: Vector3? = nil -- the free camera's lagged follow point
 -- How far along the arm the lens may sit: a wall, rock or post pulls it in at once, and it eases
 -- back out at ARM_OUT_RATE (a post edging in and out of the probe doesn't pop the view each frame).
 local armLength: number? = nil
 local ARM_OUT_RATE = 4
-local side = 1 -- which shoulder the camera sits over (1 right, -1 left)
-local sideBlend = 1
 local edgeYaw = 0 -- radians the arm is swung round you along an arena's rope
 local reticle: BillboardGui? = nil
 local listeners: { (Model?) -> () } = {}
+
+-- Yaw of a flat direction, and back (the same convention as CFrame.Angles(0, yaw, 0)).
+local function yawOf(v: Vector3): number
+	return math.atan2(-v.X, -v.Z)
+end
+local function dirOf(yaw: number): Vector3
+	return Vector3.new(-math.sin(yaw), 0, -math.cos(yaw))
+end
+local function wrapAngle(a: number): number
+	return (a + math.pi) % (2 * math.pi) - math.pi
+end
+local function smoothstep(u: number): number
+	u = math.clamp(u, 0, 1)
+	return u * u * (3 - 2 * u)
+end
 
 local function rootOf(model: Model?): BasePart?
 	local root = model and model:FindFirstChild("HumanoidRootPart")
@@ -198,10 +220,16 @@ function LockOn.set(model: Model?)
 		reticle = makeReticle(model)
 		camera.CameraType = Enum.CameraType.Scriptable
 		if not was then
-			eye, lookDir = camera.CFrame.Position, camera.CFrame.LookVector -- swing over from here
-			side, sideBlend = 1, 1
+			-- Start the arm where the free camera is looking from, then swing it behind you.
+			local look = camera.CFrame.LookVector
+			armYaw = if Vector2.new(look.X, look.Z).Magnitude > 1e-3 then yawOf(look) else nil
+			pivotBase, lookDir = nil, look
+			entryFrom, entryAt = camera.CFrame, os.clock()
 		end
 	else
+		if was then
+			releaseFrom, releaseAt = camera.CFrame, os.clock()
+		end
 		camera.CameraType = Enum.CameraType.Custom
 	end
 	if (was == nil) ~= (model == nil) then
@@ -384,12 +412,70 @@ local function fitArena(arena: Arena, pivot: Vector3, lens: Vector3, head: Vecto
 	return crane(pivot, arm.Unit, arm.Magnitude, arm.Magnitude * fraction, head)
 end
 
-local function updateCamera(dt: number)
-	if not target then
-		eye, lookDir, armLength = nil, nil, nil
-		edgeYaw = 0
+-- `current` trailing `goal` at `rate` (`rateY` vertically), never more than `maxLag` behind.
+local function trail(current: Vector3, goal: Vector3, dt: number, rate: number, rateY: number, maxLag: number): Vector3
+	local k, kY = 1 - math.exp(-dt * rate), 1 - math.exp(-dt * rateY)
+	local d = goal - current
+	local moved = current + Vector3.new(d.X * k, d.Y * kY, d.Z * k)
+	local lag = moved - goal
+	if lag.Magnitude > maxLag then
+		moved = goal + lag.Unit * maxLag
+	end
+	return moved
+end
+
+-- The free (unlocked) camera is Roblox's own: this runs right after it each frame and moves its
+-- lens by how far a lagged follow point trails your root, so a dash or a lunge carries you
+-- across the screen and the view catches up instead of the whole world jolting. Only the
+-- position moves (never the rotation, which Roblox's camera reads back next frame), and Focus
+-- moves with it so Roblox's zoom distance is untouched. After a lock-on lets go, the lens eases
+-- from where the locked camera was to the free camera's distance instead of popping.
+local function updateFree(dt: number)
+	local camera = workspace.CurrentCamera
+	local character = player.Character
+	local root = rootOf(character)
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not camera or camera.CameraType ~= Enum.CameraType.Custom or not root or not humanoid or humanoid.Health <= 0 then
+		freeBase = nil
 		return
 	end
+	local position = root.Position
+	if not freeBase or (freeBase - position).Magnitude > 20 then
+		freeBase = position -- spawned or teleported: start on the body
+	end
+	local base = trail(freeBase :: Vector3, position, dt, settings.FreeLag, settings.FreeLagVertical, settings.FreeMaxLag)
+	freeBase = base
+	local cf = camera.CFrame
+	local shift = base - position
+	local u = (os.clock() - releaseAt) / settings.ReleaseBlend
+	if releaseFrom and u < 1 then
+		-- Ease the lens position only; the rotation already matches (Roblox's camera keeps the
+		-- look it was handed).
+		shift += (releaseFrom.Position - (cf.Position + shift)) * (1 - smoothstep(u))
+	elseif releaseFrom then
+		releaseFrom = nil
+	end
+	if shift.Magnitude < 1e-3 then
+		return
+	end
+	-- Never pull the lens into a wall behind it (Roblox's own pop-in has already run).
+	probeParams.FilterDescendantsInstances = Tagged.list(Types.Tag)
+	local hit = workspace:Spherecast(cf.Position, PROBE_RADIUS, shift, probeParams)
+	if hit and not (hit.Instance:IsA("BasePart") and (hit.Instance.Transparency >= 0.9 or isThin(hit.Instance))) then
+		shift = shift.Unit * math.max(hit.Distance - 0.1, 0)
+	end
+	camera.CFrame = cf + shift
+	camera.Focus = camera.Focus + shift
+end
+
+local function updateCamera(dt: number)
+	if not target then
+		pivotBase, armYaw, lookDir, armLength = nil, nil, nil, nil
+		edgeYaw = 0
+		updateFree(dt)
+		return
+	end
+	freeBase = nil
 	if not isValid(target, settings.BreakRange) then
 		LockOn.set(nil)
 		return
@@ -405,7 +491,17 @@ local function updateCamera(dt: number)
 	local offset = theirs.Position - mine.Position
 	local flat = Vector3.new(offset.X, 0, offset.Z)
 	local distance = flat.Magnitude
-	local forward = if distance > 0.1 then flat.Unit else mine.CFrame.LookVector
+	-- The arm turns behind you toward the target at a capped rate. Passing through or right by
+	-- them (a dodge passes through bodies), the direction to them spins through 180 degrees in a
+	-- frame or two: the arm holds its yaw there, then swings round smoothly once you're past.
+	local yaw = armYaw or yawOf(if distance > 0.1 then flat else mine.CFrame.LookVector)
+	if distance > settings.HoldRange then
+		local delta = wrapAngle(yawOf(flat) - yaw)
+		local cap = math.rad(settings.MaxArmTurn) * dt
+		yaw = wrapAngle(yaw + math.clamp(delta * (1 - math.exp(-dt * settings.ArmTurnRate)), -cap, cap))
+	end
+	armYaw = yaw
+	local forward = dirOf(yaw)
 	local right = forward:Cross(Vector3.yAxis)
 	local scale = target:GetAttribute("BodyScale")
 	scale = if typeof(scale) == "number" and scale > 0 then scale else 1
@@ -414,17 +510,18 @@ local function updateCamera(dt: number)
 	local close = math.clamp((settings.CloseRange - distance) / (settings.CloseRange - 3), 0, 1)
 	close = close * close * (3 - 2 * close) -- smoothstep, so the framing eases in
 
-	-- Keep to the shoulder the camera is already over unless the fight turned it well across
-	-- (not while the arm is swung along a rope: that swing moves the eye across on purpose).
-	if eye and math.abs(edgeYaw) < 0.1 then
-		local across = (eye - mine.Position):Dot(right)
-		if across * side < -SIDE_SWITCH then
-			side = -side
-		end
-	end
-	sideBlend += (side - sideBlend) * (1 - math.exp(-dt * SIDE_RATE))
+	-- Kannagi's lag: the arm's origin trails your root at speed 7, never more than MaxLag behind.
+	local base = trail(
+		pivotBase or mine.Position,
+		mine.Position,
+		dt,
+		settings.PositionLag,
+		settings.PositionLag,
+		settings.MaxLag
+	)
+	pivotBase = base
 
-	local pivot = mine.Position + Vector3.yAxis * (settings.PivotHeight + framing("PivotRaise") * close)
+	local pivot = base + Vector3.yAxis * (settings.PivotHeight + framing("PivotRaise") * close)
 	local shoulder = settings.CameraShoulder + (settings.CloseShoulder + framing("Shoulder")) * close
 	-- The arm behind you (back, out to the shoulder)...
 	local back = -(settings.CameraDistance + (settings.ClosePullBack + framing("PullBack")) * close)
@@ -502,15 +599,8 @@ local function updateCamera(dt: number)
 		desiredEye = fitArena(arena, pivot, desiredEye, head)
 	end
 
-	-- Kannagi's lag: the eye trails its arm at speed 7 (never more than MaxLag behind), and
-	-- the view turns toward the target at speed 5.
-	local current = eye or desiredEye
-	current = current:Lerp(desiredEye, 1 - math.exp(-dt * settings.PositionLag))
-	local lag = current - desiredEye
-	if lag.Magnitude > settings.MaxLag then
-		current = desiredEye + lag.Unit * settings.MaxLag
-	end
-	eye = current -- (the spring arm's end; the probe below only shortens what's shown)
+	-- The lens sits on the arm (its lag is all in pivotBase and armYaw above).
+	local current = desiredEye
 	-- Kannagi's arm probes the world (ProbeChannel): a wall, rock or post between you and the
 	-- eye pulls the camera in front of it at once (fighters never do), and it eases back out.
 	local reach = current - pivot
@@ -543,7 +633,7 @@ local function updateCamera(dt: number)
 		-- Pulled in by a wall or rock: crane up over your head rather than into it.
 		current = crane(pivot, reach.Unit, reach.Magnitude, length, head)
 	end
-	-- The lagged lens trails a moving arm: keep it inside the ring and off your head too.
+	-- A craned lens still keeps inside the ring and off your head.
 	if arena then
 		current = fitArena(arena, pivot, current, head)
 	end
@@ -559,14 +649,23 @@ local function updateCamera(dt: number)
 	end
 	local wantLook = (focus - current).Unit
 	local look = lookDir or wantLook
-	look = look:Lerp(wantLook, 1 - math.exp(-dt * settings.RotationLag))
+	look = look:Lerp(wantLook, 1 - math.exp(-dt * settings.LookLag))
 	look = if look.Magnitude > 1e-3 then look.Unit else wantLook
 	lookDir = look
 
 	-- Camera shake (CombatVisuals) writes Humanoid.CameraOffset in the root's space, which only
 	-- the default camera reads; apply it here too (it stays zero when shake is off in Settings).
 	local shake = mine.CFrame:VectorToWorldSpace(humanoid.CameraOffset)
-	workspace.CurrentCamera.CFrame = CFrame.lookAt(current + shake, current + shake + look)
+	local shot = CFrame.lookAt(current + shake, current + shake + look)
+	-- Locking on eases over from the free camera (position and rotation together, so it swings
+	-- rather than cuts).
+	local u = (os.clock() - entryAt) / settings.EntryBlend
+	if entryFrom and u < 1 then
+		shot = entryFrom:Lerp(shot, smoothstep(u))
+	elseif entryFrom then
+		entryFrom = nil
+	end
+	workspace.CurrentCamera.CFrame = shot
 end
 
 -- The free follow camera keeps its world angle through a teleport or a respawn, so a royale could
