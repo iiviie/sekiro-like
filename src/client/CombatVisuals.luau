@@ -1729,13 +1729,18 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 		else nil
 	local mine = isLocal(attacker) or isLocal(defender)
 	playSound("Deflect", soundAt, mine, pitch)
+	-- A rally grows as it goes: each chained deflect throws more sparks and a wider bloom (up to
+	-- the 5th), so a long exchange visibly builds instead of repeating the same puff.
+	local rally = 1 + math.min(chain, 4) * 0.18
 	if perfect then
 		-- A perfect deflect has to feel unmistakable: white-gold bloom, a ringing
 		-- second layer of steel, and a heavier freeze and camera kick.
 		if point then
-			burst(point, GOLD, 90, 52, 7, sprayDir)
+			burst(point, GOLD, math.floor(90 * rally), 52, 7 * rally, sprayDir)
 			burst(point, Color3.fromRGB(255, 150, 60), 30, 30, 3)
-			flare(point, Color3.fromRGB(255, 244, 214), 22, true)
+			flare(point, Color3.fromRGB(255, 244, 214), 22 * rally, true)
+			-- The clash rings out between the blades.
+			shockRing(point, Color3.fromRGB(255, 226, 150), 4.5 * rally, 0.35, 0.22)
 		end
 		playSound("PerfectDeflect", soundAt, mine, pitch)
 		bodyFlash(defender, GOLD, 0.55, 0.25)
@@ -1743,8 +1748,11 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 			CombatHUD.flashPerfect()
 		end
 	elseif point then
-		burst(point, SPARK, 40, 36, 3.5, sprayDir)
-		flare(point, Color3.fromRGB(255, 226, 170), 9, true)
+		burst(point, SPARK, math.floor(40 * rally), 36, 3.5 * rally, sprayDir)
+		flare(point, Color3.fromRGB(255, 226, 170), 9 * rally, true)
+		if chain >= 2 then
+			shockRing(point, SPARK, 2.5 * rally, 0.25, 0.15)
+		end
 	end
 	-- A blade line at L3 brings the defender's own deflect spark and sound.
 	local style = Cosmetics.blade(defender).deflect
