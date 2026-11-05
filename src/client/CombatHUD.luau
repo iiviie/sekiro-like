@@ -727,7 +727,7 @@ local function buildScreen()
 	controlsHint.Name = "ControlsHint"
 	controlsHint.AnchorPoint = Vector2.new(1, 1)
 	controlsHint.Position = UDim2.new(1, -20, 1, -20)
-	controlsHint.Size = UDim2.fromOffset(420, 4 * 32)
+	controlsHint.Size = UDim2.fromOffset(420, 5 * 32)
 	controlsHint.BackgroundTransparency = 1
 	controlsHint.GroupTransparency = 1
 	controlsHint.Visible = false
@@ -743,6 +743,7 @@ local function buildScreen()
 		{ { "Q", "Dodge · into a thrust: Mikiri" } },
 		{ { "E", "Perilous thrust" }, { "C", "Sweep" } },
 		{ { "G", "Gourd" }, { "R", "Lock on" } },
+		{ { "Ctrl", "Mouse look on / off" } },
 	}
 	for i, row in rows do
 		local line = Kit.new("Frame", {

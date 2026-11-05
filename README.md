@@ -120,6 +120,7 @@ in the lobby, and purchases and spends are off for that session. Studio uses an 
 | Healing gourd (3 sips per life) | G | D-pad up | Heal (arc) |
 | Jump | Space | A | Jump |
 | Lock on / off (automatic at the start of a boss fight and each duel round) | R or middle mouse | R3 | Automatic (nearest enemy); Lock toggles it off for free look |
+| Mouse look on / off (the mouse always turns the camera; menus free the cursor by themselves) | Ctrl | n/a | n/a |
 
 Pressing block during your own windup **feints** it. Slashing right after a deflect that recoils the attacker is a
 **Riposte**. Press jump again in the air over a sweeper to **stomp** them.

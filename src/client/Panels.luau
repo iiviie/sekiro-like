@@ -111,6 +111,8 @@ local function guideEntries(): { { string } }
 	local lockKey = if scheme == "Gamepad" then "R3" else "R (or the middle mouse button)"
 	local lock = if touch
 		then "On touch the camera locks on to the nearest enemy by itself; Lock lets go for a free look."
+		elseif scheme == "Keyboard"
+		then `{lockKey} locks the camera on the nearest enemy, so they never slip out of view behind you. Press it again to let go. Ctrl turns mouse look on: the mouse always turns the camera, no right-click. Ctrl again frees the cursor (menus free it by themselves).`
 		else `{lockKey} locks the camera on the nearest enemy, so they never slip out of view behind you. Press it again to let go.`
 	return {
 		{
