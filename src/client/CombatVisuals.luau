@@ -1409,6 +1409,87 @@ local function bodyFlash(model: Model, color: Color3, strength: number, duration
 	Debris:AddItem(highlight, duration / slow + 0.05)
 end
 
+-- The floor under a fighter's feet (for ground effects).
+local function feetOf(model: Model): Vector3?
+	local root = rootOf(model)
+	if not root then
+		return nil
+	end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local drop = if humanoid then humanoid.HipHeight + root.Size.Y / 2 else 3
+	return root.Position - Vector3.new(0, drop - 0.1, 0)
+end
+
+-- A flat ring of light that races out across the ground and fades (a posture break, a perfect
+-- deflect's clash).
+-- Built from thin neon segments around a circle (a solid disc reads as a pancake of light, not
+-- a ring), each stretched to close the gaps as the circle grows. Fewer segments at a distance.
+local RING_SEGMENTS = 28
+local function shockRing(position: Vector3, color: Color3, radius: number, duration: number, width: number?)
+	local detail = detailAt(position)
+	if detail == 0 then
+		return
+	end
+	local count = if detail == 2 and not reducedEffects() then RING_SEGMENTS else RING_SEGMENTS // 2
+	local band = width or 0.35
+	local holder = Instance.new("Model")
+	holder.Name = "ShockRing"
+	local segments: { BasePart } = {}
+	for _ = 1, count do
+		local segment = Instance.new("Part")
+		segment.Anchored = true
+		segment.CanCollide = false
+		segment.CanQuery = false
+		segment.CanTouch = false
+		segment.CastShadow = false
+		segment.Material = Enum.Material.Neon
+		segment.Color = color
+		segment.Transparency = 0.1
+		segment.Size = Vector3.new(0.1, 0.06, band)
+		segment.Parent = holder
+		table.insert(segments, segment)
+	end
+	holder.Parent = workspace
+	local slow = vfxSlow()
+	local span = duration / slow
+	local startedAt = os.clock()
+	local connection: RBXScriptConnection
+	connection = RunService.RenderStepped:Connect(function()
+		local u = math.clamp((os.clock() - startedAt) / span, 0, 1)
+		local eased = 1 - (1 - u) ^ 4 -- quartic ease-out: bursts out, then drifts
+		local r = 0.6 + (radius - 0.6) * eased
+		local arc = 2 * math.pi * r / count
+		local fade = 0.1 + 0.9 * u * u
+		for i, segment in segments do
+			local angle = (i / count) * 2 * math.pi
+			segment.CFrame = CFrame.new(position) * CFrame.Angles(0, angle, 0) * CFrame.new(0, 0, -r)
+			segment.Size = Vector3.new(arc * 1.05, 0.06, band * (1 - 0.6 * u))
+			segment.Transparency = fade
+		end
+		if u >= 1 then
+			connection:Disconnect()
+			holder:Destroy()
+		end
+	end)
+end
+
+-- A quick lens punch-in that eases back to the camera's resting field of view.
+local function fovPunch(degrees: number, inTime: number, hold: number, outTime: number)
+	local camera = workspace.CurrentCamera
+	if not camera or player:GetAttribute("SettingCameraShake") == false then
+		return
+	end
+	local base = LockOn.baseFov()
+	TweenService:Create(camera, TweenInfo.new(inTime, Enum.EasingStyle.Quad), { FieldOfView = base - degrees }):Play()
+	task.delay(inTime + hold, function()
+		TweenService:Create(
+			camera,
+			TweenInfo.new(outTime, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+			{ FieldOfView = LockOn.baseFov() } -- the lock may have changed meanwhile
+		):Play()
+	end)
+end
+
 -- Starts your own swing animation immediately, before the server confirms it.
 function CombatVisuals.predictAttack(model: Model, kind: Config.AttackKind, windup: number?)
 	local spec = Weapons.spec(Weapons.of(model), kind)
@@ -1933,8 +2014,18 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		local root = rootOf(model)
 		if root then
 			burst(root.Position + Vector3.new(0, 1.5, 0), GOLD, 40, 24, 5)
+			bodyFlash(model, GOLD, 0.75, 0.35)
+		end
+		local feet = feetOf(model)
+		if feet then
+			shockRing(feet, GOLD, 9, 0.55)
+			task.delay(0.08, shockRing, feet, Color3.fromRGB(255, 240, 200), 6, 0.45)
 		end
 		playSound("PostureBreak", root, isLocal(model) or close(root))
+		-- Your break, or your target's: the lens punches in on the moment the fight turns.
+		if isLocal(model) or LockOn.target() == model then
+			fovPunch(6, 0.08, 0.15, 0.5)
+		end
 	end,
 
 	Deathblow = function(data)
