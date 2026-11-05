@@ -1377,6 +1377,38 @@ local function hitstop(duration: number, ...: Model?)
 	end
 end
 
+-- The struck body itself flashes for a few frames (white on a hit, gold on a perfect deflect,
+-- crimson on a deathblow), so the impact reads on the fighter and not only in the air beside
+-- them. One short-lived Highlight per body (a new flash replaces the last), only near the
+-- camera: Roblox renders ~31 Highlights at once, shared with outlines and perilous telegraphs.
+local bodyFlashes: { [Model]: Highlight } = setmetatable({}, { __mode = "k" }) :: any
+local function bodyFlash(model: Model, color: Color3, strength: number, duration: number)
+	local root = rootOf(model)
+	if not root or detailAt(root.Position) < 2 or reducedEffects() then
+		return
+	end
+	local old = bodyFlashes[model]
+	if old then
+		old:Destroy()
+	end
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "BodyFlash"
+	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+	highlight.FillColor = color
+	highlight.FillTransparency = 1 - strength
+	highlight.OutlineColor = color
+	highlight.OutlineTransparency = 1 - strength * 0.6
+	highlight.Adornee = model
+	highlight.Parent = model
+	bodyFlashes[model] = highlight
+	local slow = vfxSlow()
+	TweenService:Create(highlight, TweenInfo.new(duration / slow, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		FillTransparency = 1,
+		OutlineTransparency = 1,
+	}):Play()
+	Debris:AddItem(highlight, duration / slow + 0.05)
+end
+
 -- Starts your own swing animation immediately, before the server confirms it.
 function CombatVisuals.predictAttack(model: Model, kind: Config.AttackKind, windup: number?)
 	local spec = Weapons.spec(Weapons.of(model), kind)
@@ -1625,6 +1657,7 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 			flare(point, Color3.fromRGB(255, 244, 214), 22, true)
 		end
 		playSound("PerfectDeflect", soundAt, mine, pitch)
+		bodyFlash(defender, GOLD, 0.55, 0.25)
 		if isLocal(defender) then
 			CombatHUD.flashPerfect()
 		end
@@ -1877,6 +1910,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		local ender = reaction ~= "Small"
 		hitstop(Config.Visual.HitHitstop[kind] or Config.Visual.Hitstop, attacker, defender)
 		impactEffects(attacker, defender, ender, false)
+		bodyFlash(defender, WHITE, if ender then 0.85 else 0.7, if ender then 0.2 else 0.14)
 		local root = rootOf(defender)
 		if root then
 			inkSpray(
@@ -1914,6 +1948,7 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		-- A deathblow on an unwounded fighter knocks them down instead of killing.
 		playClip(defender, if data.lethal == false then "HitReact" else "Executed")
 		hitstop(Config.Visual.DeathblowHitstop, attacker, defender)
+		bodyFlash(defender, Color3.fromRGB(255, 60, 45), 0.8, 0.4)
 		local root = rootOf(defender)
 		-- The attacker's finisher draws the cut (client/CosmeticFX); everything else here, the
 		-- clips, hitstop, shake and camera punch, is the same for every finisher.
