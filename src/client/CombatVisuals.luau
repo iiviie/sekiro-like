@@ -1602,6 +1602,44 @@ local function windupGlow(model: Model, duration: number, perilous: boolean)
 	end)
 end
 
+-- An impact frame: for a frame or two the whole picture spikes to high contrast (tinted by
+-- the moment), then settles back. Only for your own heavy moments, so it marks a big blow
+-- instead of flickering through every exchange. Off with Reduced effects or Reduce motion,
+-- since it is a screen flash.
+local impactGrade: ColorCorrectionEffect? = nil
+local function impactFrame(tint: Color3, strength: number)
+	if reducedEffects() or player:GetAttribute("SettingReduceMotion") == true then
+		return
+	end
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	if impactGrade then
+		impactGrade:Destroy()
+	end
+	local grade = Instance.new("ColorCorrectionEffect")
+	grade.Name = "ImpactFrame"
+	grade.Contrast = 0.55 * strength
+	grade.Brightness = 0.08 * strength
+	grade.Saturation = -0.35 * strength
+	grade.TintColor = WHITE:Lerp(tint, 0.35 * strength)
+	grade.Parent = camera
+	impactGrade = grade
+	-- Held for ~2 frames, then eased out.
+	task.delay(0.035, function()
+		if grade.Parent then
+			TweenService:Create(grade, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Contrast = 0,
+				Brightness = 0,
+				Saturation = 0,
+				TintColor = WHITE,
+			}):Play()
+		end
+	end)
+	Debris:AddItem(grade, 0.25)
+end
+
 -- A quick lens punch-in that eases back to the camera's resting field of view.
 local function fovPunch(degrees: number, inTime: number, hold: number, outTime: number)
 	local camera = workspace.CurrentCamera
@@ -1890,6 +1928,9 @@ local function deflectEffects(attacker: Model, defender: Model, perfect: boolean
 		playSound("PerfectDeflect", soundAt, mine, pitch)
 		bodyFlash(defender, GOLD, 0.55, 0.25)
 		if isLocal(defender) then
+			impactFrame(GOLD, 0.7)
+		end
+		if isLocal(defender) then
 			CombatHUD.flashPerfect()
 		end
 	elseif point then
@@ -2155,6 +2196,11 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		bodyFlash(defender, WHITE, if ender then 0.85 else 0.7, if ender then 0.2 else 0.14)
 		if ender then
 			groundDust(defender, flatBetween(attacker, defender), 10, 9) -- driven back across the floor
+			if isLocal(attacker) then
+				impactFrame(WHITE, 0.8)
+			elseif isLocal(defender) then
+				impactFrame(CRIMSON, 0.6)
+			end
 		end
 		local root = rootOf(defender)
 		if root then
