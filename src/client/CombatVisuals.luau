@@ -1473,6 +1473,63 @@ local function shockRing(position: Vector3, color: Color3, radius: number, durat
 	end)
 end
 
+-- A puff of dust kicked up from the floor under `model` (a dash, a heavy lunge, a knockback
+-- slide), thrown along `direction`, tinted like the ground it comes off (sand, cobbles, grass).
+-- Nothing in the air: no floor within reach of the feet, no dust.
+local dustParams = RaycastParams.new()
+dustParams.FilterType = Enum.RaycastFilterType.Exclude
+local function groundDust(model: Model, direction: Vector3?, amount: number, speed: number?)
+	local root = rootOf(model)
+	if not root then
+		return
+	end
+	local detail = detailAt(root.Position)
+	if detail == 0 then
+		return
+	end
+	dustParams.FilterDescendantsInstances = { model }
+	local hit = workspace:Raycast(root.Position, Vector3.new(0, -6, 0), dustParams)
+	if not hit then
+		return
+	end
+	local ground = if hit.Instance:IsA("Terrain")
+		then workspace.Terrain:GetMaterialColor(hit.Material)
+		else (hit.Instance :: BasePart).Color
+	local tint = ground:Lerp(Color3.fromRGB(225, 215, 195), 0.45) -- dust is paler than what it's off
+	local anchor = anchorAt(hit.Position + Vector3.new(0, 0.25, 0))
+	local flat = if direction then Vector3.new(direction.X, 0, direction.Z) else Vector3.zero
+	if flat.Magnitude > 0.01 then
+		-- Thrown along the ground and a little up.
+		anchor.CFrame = CFrame.lookAt(anchor.Position, anchor.Position + flat.Unit + Vector3.new(0, 0.35, 0))
+	else
+		anchor.CFrame = CFrame.lookAt(anchor.Position, anchor.Position + Vector3.yAxis)
+	end
+	local puff = Instance.new("ParticleEmitter")
+	puff.Texture = Assets.UI.Glow
+	puff.Color = ColorSequence.new(tint)
+	puff.LightEmission = 0
+	puff.LightInfluence = 1
+	puff.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.55),
+		NumberSequenceKeypoint.new(0.4, 0.7),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	puff.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(1, 2.6) })
+	local s = speed or 10
+	puff.Speed = NumberRange.new(s * 0.4, s)
+	puff.SpreadAngle = if flat.Magnitude > 0.01 then Vector2.new(35, 15) else Vector2.new(80, 80)
+	puff.EmissionDirection = Enum.NormalId.Front
+	puff.Lifetime = NumberRange.new(0.45, 0.85)
+	puff.Drag = 4
+	puff.Acceleration = Vector3.new(0, 1.5, 0)
+	puff.Rotation = NumberRange.new(0, 360)
+	puff.RotSpeed = NumberRange.new(-60, 60)
+	puff.Rate = 0
+	puff.TimeScale = vfxSlow()
+	puff.Parent = anchor
+	puff:Emit(scaled(if detail == 2 then amount else math.ceil(amount / 2)))
+end
+
 -- A quick lens punch-in that eases back to the camera's resting field of view.
 local function fovPunch(degrees: number, inTime: number, hold: number, outTime: number)
 	local camera = workspace.CurrentCamera
@@ -1568,6 +1625,16 @@ function CombatVisuals.dash(model: Model, direction: Vector3?)
 		end)
 	end
 	playSound("Dodge", rootOf(model), isLocal(model))
+	-- Dust kicked back off the push-off foot, and a trail as the dash settles.
+	local kick = if direction then -direction else nil
+	groundDust(model, kick, 12, 12)
+	task.delay(0.15, function()
+		if model.Parent then
+			local root = rootOf(model)
+			local v = root and root.AssemblyLinearVelocity
+			groundDust(model, if v then -v else kick, 6, 6)
+		end
+	end)
 	-- One ghost (it clones the whole body), only for a dash near the camera and not under
 	-- reduced effects.
 	local root = rootOf(model)
@@ -1786,6 +1853,8 @@ local function guardEffects(attacker: Model, defender: Model, kind: string?)
 	if point then
 		burst(point, STEEL, 12, 14, 1.4, flatBetween(defender, attacker))
 	end
+	-- The guard's feet are shoved back over the floor.
+	groundDust(defender, flatBetween(attacker, defender), if spec and spec.guardReaction ~= "Small" then 8 else 4, 6)
 	playSound("Guard", rootOf(defender))
 end
 
@@ -1916,6 +1985,11 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 				return
 			end
 			playSound(Audio.swingKey(model, kind, heavy), rootOf(model), isLocal(model))
+			if heavy then
+				-- The planted foot of a heavy cut scuffs the ground.
+				local root = rootOf(model)
+				groundDust(model, if root then -root.CFrame.LookVector else nil, 7, 7)
+			end
 			if isLocal(model) then
 				local spec = Weapons.spec(Weapons.of(model), kind)
 				lunge(spec.lunge, spec.lungeTime)
@@ -2000,6 +2074,9 @@ local handlers: { [string]: (data: { [string]: any }) -> () } = {
 		hitstop(Config.Visual.HitHitstop[kind] or Config.Visual.Hitstop, attacker, defender)
 		impactEffects(attacker, defender, ender, false)
 		bodyFlash(defender, WHITE, if ender then 0.85 else 0.7, if ender then 0.2 else 0.14)
+		if ender then
+			groundDust(defender, flatBetween(attacker, defender), 10, 9) -- driven back across the floor
+		end
 		local root = rootOf(defender)
 		if root then
 			inkSpray(
