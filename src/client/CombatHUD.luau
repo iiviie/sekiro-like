@@ -15,6 +15,7 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -211,6 +212,29 @@ end
 
 local characterConnections: { RBXScriptConnection } = {}
 
+-- Your posture bar trembles as it nears full (harder the closer it gets), and bursts outward
+-- when it breaks. The tremble is the HUD's only per-frame work, and only while posture runs hot.
+-- Reduce motion keeps the bar still.
+local postureScale: UIScale
+local postureHome = UDim2.new(0.5, 0, 1, -POSTURE_BOTTOM)
+local trembleConnection: RBXScriptConnection? = nil
+local trembleAmount = 0
+local wasBroken = false
+local function setTremble(amount: number)
+	trembleAmount = amount
+	if amount > 0 and not trembleConnection then
+		trembleConnection = RunService.RenderStepped:Connect(function()
+			local t = os.clock()
+			postureGroup.Position = postureHome
+				+ UDim2.fromOffset(math.sin(t * 61) * trembleAmount, math.cos(t * 47) * trembleAmount * 0.6)
+		end)
+	elseif amount <= 0 and trembleConnection then
+		trembleConnection:Disconnect()
+		trembleConnection = nil
+		postureGroup.Position = postureHome
+	end
+end
+
 local function refreshPosture(model: Model)
 	local ratio = ratioOf(model, "Posture", "PostureMax")
 	if not ratio then
@@ -228,6 +252,16 @@ local function refreshPosture(model: Model)
 	if visible or postureGroup.Visible then
 		fadeGroup(postureGroup, 0.3, if visible then 0 else 1)
 	end
+	local still = player:GetAttribute("SettingReduceMotion") == true
+	local hot = if broken or still then 0 else math.clamp((ratio - 0.8) / 0.2, 0, 1)
+	setTremble(hot * 3)
+	if broken and not wasBroken and not still then
+		postureScale.Scale = 1.3
+		TweenService:Create(postureScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Scale = 1,
+		}):Play()
+	end
+	wasBroken = broken
 end
 
 local function refreshStamina(model: Model)
@@ -695,11 +729,13 @@ local function buildScreen()
 	postureGroup = Instance.new("CanvasGroup")
 	postureGroup.BackgroundTransparency = 1
 	postureGroup.AnchorPoint = Vector2.new(0.5, 1)
-	postureGroup.Position = UDim2.new(0.5, 0, 1, -POSTURE_BOTTOM)
+	postureGroup.Position = postureHome
 	postureGroup.Size = UDim2.fromOffset(520, 72)
 	postureGroup.GroupTransparency = 1
 	postureGroup.Visible = false
 	postureGroup.Parent = screen
+	postureScale = Instance.new("UIScale")
+	postureScale.Parent = postureGroup
 	postureGlow = image(postureGroup, UI.BarGlow, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
