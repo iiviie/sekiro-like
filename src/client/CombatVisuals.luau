@@ -1631,7 +1631,9 @@ end
 
 -- A fading ghost copy of the body, left behind during a dash.
 local AFTERIMAGE_RANGE = 60
-local function afterimage(model: Model)
+local function afterimage(model: Model, startTransparency: number?, life: number?)
+	local opacity = startTransparency or 0.35
+	local fade = life or 0.35
 	local ghost = Instance.new("Model")
 	ghost.Name = "Afterimage"
 	for _, part in model:GetDescendants() do
@@ -1652,16 +1654,16 @@ local function afterimage(model: Model)
 			copy.CastShadow = false
 			copy.Material = Enum.Material.Neon
 			copy.Color = Color3.fromRGB(150, 175, 255)
-			copy.Transparency = 0.35
+			copy.Transparency = opacity
 			if copy:IsA("MeshPart") then
 				copy.TextureID = ""
 			end
 			copy.Parent = ghost
-			TweenService:Create(copy, TweenInfo.new(0.35, Enum.EasingStyle.Quad), { Transparency = 1 }):Play()
+			TweenService:Create(copy, TweenInfo.new(fade, Enum.EasingStyle.Quad), { Transparency = 1 }):Play()
 		end
 	end
 	ghost.Parent = workspace
-	Debris:AddItem(ghost, 0.35)
+	Debris:AddItem(ghost, fade)
 end
 
 -- The dodge clip for a dash direction relative to the body (Kannagi's 4-way dodges).
@@ -1707,21 +1709,25 @@ function CombatVisuals.dash(model: Model, direction: Vector3?)
 			groundDust(model, if v then -v else kick, 6, 6)
 		end
 	end)
-	-- One ghost (it clones the whole body), only for a dash near the camera and not under
-	-- reduced effects.
+	-- A short trail of ghosts (each clones the whole body), only for a dash near the camera and
+	-- not under reduced effects: three along the burst, each fainter and shorter-lived, so the
+	-- dash reads as speed. Past half the range, just the first.
 	local root = rootOf(model)
 	local camera = workspace.CurrentCamera
-	if
-		root
-		and camera
-		and not reducedEffects()
-		and (camera.CFrame.Position - root.Position).Magnitude <= AFTERIMAGE_RANGE
-	then
-		task.delay(0.045, function()
-			if model.Parent then
-				afterimage(model)
+	if root and camera and not reducedEffects() then
+		local distance = (camera.CFrame.Position - root.Position).Magnitude
+		if distance <= AFTERIMAGE_RANGE then
+			local trail = if distance <= AFTERIMAGE_RANGE / 2
+				then { { 0.045, 0.35, 0.35 }, { 0.11, 0.5, 0.3 }, { 0.18, 0.65, 0.25 } }
+				else { { 0.045, 0.35, 0.35 } }
+			for _, ghost in trail do
+				task.delay(ghost[1], function()
+					if model.Parent then
+						afterimage(model, ghost[2], ghost[3])
+					end
+				end)
 			end
-		end)
+		end
 	end
 end
 
